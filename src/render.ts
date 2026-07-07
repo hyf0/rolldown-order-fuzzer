@@ -1,10 +1,5 @@
-import type {
-  EntryModel,
-  ModuleFormat,
-  ModuleModel,
-  ProgramModel,
-  ScheduleOperation,
-} from "./model.ts";
+import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel } from "./model.ts";
+import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
 export interface RenderedFile {
@@ -12,17 +7,9 @@ export interface RenderedFile {
   readonly contents: string;
 }
 
-export interface RenderedScheduleEntry {
-  readonly name: string;
-  readonly path: string;
-  readonly format: ModuleFormat;
-}
+export type RenderedScheduleEntry = ExecutionManifestEntry;
 
-export interface RenderedScheduleManifest {
-  readonly version: 1;
-  readonly entries: readonly RenderedScheduleEntry[];
-  readonly operations: readonly ScheduleOperation[];
-}
+export type RenderedScheduleManifest = ExecutionManifest;
 
 export interface RenderedProgram {
   readonly files: readonly RenderedFile[];
