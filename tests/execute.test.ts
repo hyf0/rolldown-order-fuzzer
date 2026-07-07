@@ -274,6 +274,17 @@ describe("executeManifest", () => {
         },
         manifestPath: "schedule.json",
       },
+      {
+        files: {
+          "entry.mjs": "",
+          "schedule.json": `${JSON.stringify({
+            version: 1,
+            entries: [{ name: "main", path: "entry.mjs", format: "esm" }],
+            operations: [{ kind: "require-entry", entry: "main" }],
+          })}\n`,
+        },
+        manifestPath: "schedule.json",
+      },
     ];
 
     for (const { files, manifestPath } of cases) {
