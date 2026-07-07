@@ -53,6 +53,8 @@ const INVALID_MODULE_BINDING_IDENTIFIERS = new Set([
   "yield",
 ]);
 
+const RENDERER_RESERVED_BINDING_IDENTIFIERS = new Set(["globalThis"]);
+
 export function validateProgramModel(program: ProgramModel): readonly string[] {
   const errors: string[] = [];
   const modulesById = collectModules(program.modules, errors);
@@ -215,6 +217,10 @@ function validateImportBinding(
   ) {
     errors.push(
       `${path}.localName: invalid JavaScript binding identifier ${quote(dependency.localName)}`,
+    );
+  } else if (RENDERER_RESERVED_BINDING_IDENTIFIERS.has(dependency.localName)) {
+    errors.push(
+      `${path}.localName: reserved renderer binding identifier ${quote(dependency.localName)}`,
     );
   } else if (localBindings.has(dependency.localName)) {
     errors.push(`${path}.localName: duplicate ESM local binding ${quote(dependency.localName)}`);
