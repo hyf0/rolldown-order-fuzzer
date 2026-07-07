@@ -13,5 +13,7 @@ export const projectStatus: ProjectStatus = {
     ".agents/docs/legacy-fuzzer-behavior.md",
     ".agents/docs/redesign-principles.md",
     ".agents/docs/vite-plus-adoption.md",
+    ".agents/docs/execution-order-fuzzer-mvp.md",
+    ".agents/docs/execution-order-fuzzer-mvp-plan.md",
   ],
 };
