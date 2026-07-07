@@ -23,8 +23,32 @@ import type { RenderedProgram } from "./render.ts";
 
 const BUNDLE_PACKAGE_JSON = '{\n  "type": "module"\n}\n';
 
+export const ROLLDOWN_BUILD_OPTIONS = {
+  preserveEntrySignatures: "allow-extension",
+  format: "esm",
+  strictExecutionOrder: true,
+  entryFileNames: "entries/[name].js",
+  chunkFileNames: "chunks/[name].js",
+  assetFileNames: "assets/[name][extname]",
+  cleanDir: false,
+  minify: false,
+} as const;
+
 export interface RolldownAdapterOptions {
   readonly packageSpecifier?: string;
+  readonly onFailureArtifacts?: (
+    failure: FailedRolldownAdapterResult,
+    artifacts: RolldownFailureArtifacts,
+  ) => void | Promise<void>;
+}
+
+export interface RolldownFailureArtifacts {
+  readonly temporaryDirectory: string;
+  readonly sourceDirectory: string;
+  readonly bundleDirectory: string;
+  readonly sourceManifestPath: string;
+  readonly bundleManifestPath: string;
+  readonly manifest?: ExecutionManifest;
 }
 
 export interface RolldownBuildArtifacts {
@@ -63,8 +87,25 @@ export async function withRolldownBuild<T>(
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "rolldown-order-fuzzer-"));
   const sourceDirectory = join(temporaryDirectory, "source");
   const bundleDirectory = join(temporaryDirectory, "bundle");
+  const sourceManifestPath = join(sourceDirectory, rendered.schedulePath);
+  const bundleManifestPath = join(bundleDirectory, rendered.schedulePath);
   const entryInputNames = createEntryInputNames(program);
   let canonicalSourceDirectory: string;
+  let manifest: ExecutionManifest | undefined;
+
+  const reportFailure = async (
+    failureResult: FailedRolldownAdapterResult,
+  ): Promise<FailedRolldownAdapterResult> => {
+    await options.onFailureArtifacts?.(failureResult, {
+      temporaryDirectory,
+      sourceDirectory,
+      bundleDirectory,
+      sourceManifestPath,
+      bundleManifestPath,
+      ...(manifest === undefined ? {} : { manifest }),
+    });
+    return failureResult;
+  };
 
   try {
     try {
@@ -73,12 +114,14 @@ export async function withRolldownBuild<T>(
       await writeFile(join(bundleDirectory, "package.json"), BUNDLE_PACKAGE_JSON);
       canonicalSourceDirectory = await realpath(sourceDirectory);
     } catch (error) {
-      return failure("harness-error", "materialize-source", packageSpecifier, error);
+      return await reportFailure(
+        failure("harness-error", "materialize-source", packageSpecifier, error),
+      );
     }
 
     const loaded = await loadRolldown(packageSpecifier);
     if (loaded.status !== "ok") {
-      return loaded;
+      return await reportFailure(loaded);
     }
 
     const built = await buildWithRolldown(
@@ -91,10 +134,9 @@ export async function withRolldownBuild<T>(
       packageSpecifier,
     );
     if (built.status !== "ok") {
-      return built;
+      return await reportFailure(built);
     }
 
-    let manifest: ExecutionManifest;
     try {
       manifest = createBundleManifest(
         program,
@@ -104,14 +146,15 @@ export async function withRolldownBuild<T>(
         built.output,
       );
     } catch (error) {
-      return failure("build-error", "build", packageSpecifier, error);
+      return await reportFailure(failure("build-error", "build", packageSpecifier, error));
     }
-    const bundleManifestPath = join(bundleDirectory, rendered.schedulePath);
     try {
       await mkdir(dirname(bundleManifestPath), { recursive: true });
       await writeFile(bundleManifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     } catch (error) {
-      return failure("harness-error", "write-manifest", packageSpecifier, error);
+      return await reportFailure(
+        failure("harness-error", "write-manifest", packageSpecifier, error),
+      );
     }
 
     return {
@@ -120,7 +163,7 @@ export async function withRolldownBuild<T>(
         temporaryDirectory,
         sourceDirectory,
         bundleDirectory,
-        sourceManifestPath: join(sourceDirectory, rendered.schedulePath),
+        sourceManifestPath,
         bundleManifestPath,
         manifest,
         outputFiles: built.output.output.map((output) => output.fileName).sort(),
@@ -201,7 +244,7 @@ async function buildWithRolldown(
           resolve(sourceDirectory, requiredPath(rendered.entryPaths, entry.name, "entry")),
         ]),
       ),
-      preserveEntrySignatures: "allow-extension",
+      preserveEntrySignatures: ROLLDOWN_BUILD_OPTIONS.preserveEntrySignatures,
     });
     output = await bundle.write(
       createOutputOptions(program, rendered, sourceDirectory, bundleDirectory),
@@ -254,14 +297,14 @@ function createOutputOptions(
 
   return {
     dir: bundleDirectory,
-    format: "esm",
-    strictExecutionOrder: true,
-    entryFileNames: "entries/[name].js",
-    chunkFileNames: "chunks/[name].js",
-    assetFileNames: "assets/[name][extname]",
+    format: ROLLDOWN_BUILD_OPTIONS.format,
+    strictExecutionOrder: ROLLDOWN_BUILD_OPTIONS.strictExecutionOrder,
+    entryFileNames: ROLLDOWN_BUILD_OPTIONS.entryFileNames,
+    chunkFileNames: ROLLDOWN_BUILD_OPTIONS.chunkFileNames,
+    assetFileNames: ROLLDOWN_BUILD_OPTIONS.assetFileNames,
     codeSplitting: groups.length === 0 ? true : { groups },
-    cleanDir: false,
-    minify: false,
+    cleanDir: ROLLDOWN_BUILD_OPTIONS.cleanDir,
+    minify: ROLLDOWN_BUILD_OPTIONS.minify,
   };
 }
 

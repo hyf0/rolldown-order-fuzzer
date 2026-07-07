@@ -1,13 +1,13 @@
 export interface ProjectStatus {
   readonly name: string;
-  readonly phase: "redesign";
+  readonly phase: "mvp";
   readonly runtime: "node-native-typescript";
   readonly contextRecords: readonly string[];
 }
 
 export const projectStatus: ProjectStatus = {
   name: "rolldown-order-fuzzer",
-  phase: "redesign",
+  phase: "mvp",
   runtime: "node-native-typescript",
   contextRecords: [
     ".agents/docs/legacy-fuzzer-behavior.md",

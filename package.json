@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "vp exec node src/main.ts",
+    "test": "vp test --run",
     "check": "vp check",
     "prepare": "vp config"
   },
