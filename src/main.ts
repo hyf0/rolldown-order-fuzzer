@@ -8,6 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { executeManifest } from "./execute.ts";
 import { generateCase, type GeneratedCase } from "./generate.ts";
+import type { StrictExecutionOrderPlanReady } from "./order-trace.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -25,6 +26,7 @@ const UINT32_RANGE = 0x1_0000_0000;
 const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
   /(?:file:\/\/\/|(?:[A-Za-z]:)?[\\/])(?:[^\s"'`]*[\\/])?rolldown-order-fuzzer-[A-Za-z0-9]{6}/g;
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
+let campaignEnvironmentLock = Promise.resolve();
 
 export const DEFAULT_CASE_SIZE = 4;
 export const FAILURE_ARTIFACT_SCHEMA_VERSION = 1 as const;
@@ -35,6 +37,7 @@ export interface CampaignOptions {
   readonly rolldownPackage: string;
   readonly outDir: string;
   readonly continueOnFail: boolean;
+  readonly collectOrderTrace: boolean;
 }
 
 export interface SourceInvalidBundleOutcome {
@@ -69,6 +72,7 @@ export interface BundleExecutionArtifacts {
   readonly bundleOutcome: ExecutionOutcome;
   readonly bundleManifest: ExecutionManifest;
   readonly bundleFiles: readonly CapturedFile[];
+  readonly orderTrace: StrictExecutionOrderPlanReady | null;
 }
 
 export type BundleBuildResult =
@@ -78,6 +82,7 @@ export type BundleBuildResult =
       readonly failure: FailedRolldownAdapterResult;
       readonly bundleManifest: ExecutionManifest | null;
       readonly bundleFiles: readonly CapturedFile[];
+      readonly orderTrace: StrictExecutionOrderPlanReady | null;
     };
 
 export interface CampaignCaseResult {
@@ -88,6 +93,7 @@ export interface CampaignCaseResult {
   readonly bundleOutcome: CampaignBundleOutcome;
   readonly bundleManifest: ExecutionManifest | null;
   readonly bundleFiles: readonly CapturedFile[];
+  readonly orderTrace: StrictExecutionOrderPlanReady | null;
   readonly verdict: CampaignVerdict;
 }
 
@@ -127,10 +133,11 @@ const DEFAULT_OPTIONS: CampaignOptions = {
   rolldownPackage: process.env.ROLLDOWN_PACKAGE ?? "rolldown",
   outDir: "failures",
   continueOnFail: false,
+  collectOrderTrace: true,
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail] [--no-order-trace]";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
@@ -138,6 +145,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
   let outDir = DEFAULT_OPTIONS.outDir;
   let continueOnFail = DEFAULT_OPTIONS.continueOnFail;
+  let collectOrderTrace = DEFAULT_OPTIONS.collectOrderTrace;
   let sawContinue = false;
   let sawStop = false;
 
@@ -164,6 +172,9 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
         sawStop = true;
         continueOnFail = false;
         break;
+      case "--no-order-trace":
+        collectOrderTrace = false;
+        break;
       default:
         throw new Error(`Unknown argument: ${String(argument)}`);
     }
@@ -174,7 +185,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   }
   validateSeedRange(seed, cases);
 
-  return { seed, cases, rolldownPackage, outDir, continueOnFail };
+  return { seed, cases, rolldownPackage, outDir, continueOnFail, collectOrderTrace };
 }
 
 export async function runCampaign(
@@ -182,6 +193,43 @@ export async function runCampaign(
   overrides: Partial<CampaignDependencies> = {},
 ): Promise<CampaignSummary> {
   validateSeedRange(options.seed, options.cases);
+  return await withCampaignEnvironmentLock(async () => {
+    const previousTraceValue = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
+    if (options.collectOrderTrace) {
+      process.env.ROLLDOWN_STRICT_ORDER_TRACE = "1";
+    }
+    try {
+      return await runCampaignCases(options, overrides);
+    } finally {
+      if (options.collectOrderTrace) {
+        if (previousTraceValue === undefined) {
+          delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
+        } else {
+          process.env.ROLLDOWN_STRICT_ORDER_TRACE = previousTraceValue;
+        }
+      }
+    }
+  });
+}
+
+async function withCampaignEnvironmentLock<T>(callback: () => Promise<T>): Promise<T> {
+  const previous = campaignEnvironmentLock;
+  let release!: () => void;
+  campaignEnvironmentLock = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await callback();
+  } finally {
+    release();
+  }
+}
+
+async function runCampaignCases(
+  options: CampaignOptions,
+  overrides: Partial<CampaignDependencies>,
+): Promise<CampaignSummary> {
   const dependencies: CampaignDependencies = {
     generate: generateCase,
     executeCase: executeGeneratedCase,
@@ -252,6 +300,7 @@ export async function executeGeneratedCase(
       bundleOutcome,
       bundleManifest: null,
       bundleFiles: [],
+      orderTrace: null,
       verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
     };
   }
@@ -272,6 +321,7 @@ export async function executeGeneratedCase(
       bundleOutcome,
       bundleManifest: built.bundleManifest,
       bundleFiles: built.bundleFiles,
+      orderTrace: built.orderTrace,
       verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
     };
   }
@@ -284,6 +334,7 @@ export async function executeGeneratedCase(
     bundleOutcome: built.value.bundleOutcome,
     bundleManifest: built.value.bundleManifest,
     bundleFiles: built.value.bundleFiles,
+    orderTrace: built.value.orderTrace,
     verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome),
   };
 }
@@ -440,6 +491,7 @@ async function writeArtifactDirectory(
     writeJson(join(artifactDirectory, "bundle-manifest.json"), result.bundleManifest),
     writeJson(join(artifactDirectory, "source-outcome.json"), result.sourceOutcome),
     writeJson(join(artifactDirectory, "bundle-outcome.json"), result.bundleOutcome),
+    writeJson(join(artifactDirectory, "order-trace.json"), result.orderTrace),
     writeJson(join(artifactDirectory, "verdict.json"), result.verdict),
     writeFile(join(artifactDirectory, "signature.txt"), `${result.verdict.signature}\n`),
     ...result.rendered.files.map(async (file) => {
@@ -504,10 +556,12 @@ async function buildAndExecuteBundle(
   rendered: RenderedProgram,
   options: CampaignOptions,
 ): Promise<BundleBuildResult> {
-  let failureArtifacts: Pick<CampaignCaseResult, "bundleManifest" | "bundleFiles"> = {
-    bundleManifest: null,
-    bundleFiles: [],
-  };
+  let failureArtifacts: Pick<CampaignCaseResult, "bundleManifest" | "bundleFiles" | "orderTrace"> =
+    {
+      bundleManifest: null,
+      bundleFiles: [],
+      orderTrace: null,
+    };
   const built = await withRolldownBuild(
     generated.program,
     rendered,
@@ -520,9 +574,11 @@ async function buildAndExecuteBundle(
           contents: await readFile(join(artifacts.bundleDirectory, fileName)),
         })),
       ),
+      orderTrace: artifacts.orderTrace,
     }),
     {
       packageSpecifier: options.rolldownPackage,
+      collectOrderTrace: options.collectOrderTrace,
       onFailureArtifacts: async (_failure, artifacts) => {
         failureArtifacts = {
           bundleManifest: artifacts.manifest ?? null,
@@ -530,6 +586,7 @@ async function buildAndExecuteBundle(
             artifacts.bundleDirectory,
             new Set(["package.json", rendered.schedulePath]),
           ),
+          orderTrace: artifacts.orderTrace,
         };
       },
     },
@@ -622,6 +679,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
     rolldownPackage: result.options.rolldownPackage,
     outDir: result.options.outDir,
     continueOnFail: false,
+    collectOrderTrace: result.options.collectOrderTrace,
   };
   return {
     command: [
@@ -637,6 +695,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
       options.rolldownPackage,
       "--out-dir",
       options.outDir,
+      ...(options.collectOrderTrace ? [] : ["--no-order-trace"]),
       "--stop-on-fail",
     ],
     options,
@@ -657,6 +716,9 @@ function formatCaseResult(
     `tags=${result.generated.coverageTags.join(",")}`,
     `signature=${result.verdict.signature}`,
   ];
+  if (result.orderTrace !== null) {
+    fields.push(`wraps=${result.orderTrace.plan_modules.length}`);
+  }
   if (artifactDirectory !== undefined) {
     fields.push(`artifact=${artifactDirectory}`);
   }

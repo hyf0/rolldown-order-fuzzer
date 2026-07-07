@@ -101,15 +101,23 @@ Random generation starts after fixed scenarios pass through the complete pipelin
 
 ## Rolldown debug contract
 
-The fuzzer should optionally collect a versioned Rolldown JSON action containing:
+Trace collection is enabled by default and can be disabled with `--no-order-trace`. Campaigns acquire one module-level asynchronous lock around the process-wide environment state, so traced and opt-out campaigns cannot overlap while `ROLLDOWN_STRICT_ORDER_TRACE` is temporarily set. A traced campaign sets the variable once rather than changing it around each build.
 
-- root obligations
+Each traced build allocates `devtools.sessionId` from a deterministic process-unique sequence containing the PID and a monotonic counter. Before snapshotting or passing the ID to Rolldown, the adapter checks that its target directory is absent and advances past collisions. Allocation stops after 64 occupied candidates with a `collect-order-trace` harness error.
+
+The adapter then snapshots `node_modules/.rolldown/` before the build and waits for `bundle.close()`. A session directory is owned only when it was absent from the snapshot, exists after close, and has `SessionMeta.inputs` under the build's canonical source directory. This rule applies equally to the requested path and legacy random IDs, and only an owned directory may be parsed or removed.
+
+Rolldown 1.1.4 ignores the supplied session ID and creates an automatic `sid_*` directory. A uniquely owned directory is cleaned even when no strict-order action exists. A pre-existing requested path is never owned or deleted; a separate newly created source-matching legacy directory may still be owned. Package-load failures, zero matches, and multiple matches produce `orderTrace: null` without deleting any unowned candidate. Malformed logs in a uniquely owned session, unsupported action versions, and duplicate matching actions are harness errors.
+
+The collector accepts version 1 of `StrictExecutionOrderPlanReady` and strictly validates the required shapes for:
+
+- root obligations and predicted order
 - selected order-wrap modules and reasons
-- original and final wrap kind
-- module-to-chunk and entry-facade mapping
-- static, dynamic, init, and await edges
+- included modules with original/final wrap kind and chunk mappings
+- rendered static and dynamic chunk edges, with every chunk ID and reference constrained to unsigned 32-bit values
+- direct and transitive init obligations, including await and TLA facts
 
-This data explains failures and reports over-wrapping. It is not the semantic oracle.
+The parser constructs a new versioned schema object and discards timestamps, session/build IDs, and unknown transport or nested metadata. The adapter maps canonical rendered source paths back to `ProgramModel` module IDs, rewrites other temporary source-root paths as `<source>/relative`, and preserves stable virtual/runtime IDs. Failure artifacts therefore contain deterministic `order-trace.json` data or `null`, and result lines report the selected plan-module count when an action is present. This data explains failures and reports over-wrapping; it does not affect the semantic verdict.
 
 ## Regression policy
 

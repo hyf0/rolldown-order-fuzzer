@@ -34,9 +34,11 @@
 
 ## Deliverable 6: Rolldown debug integration
 
-- Add a versioned machine-readable strict-order plan/event action in Rolldown.
-- Add a fuzzer collector that stores the action beside source/bundle outcomes.
-- Keep semantic verdict independent from debug data.
+- Part A: add the version-1 machine-readable `StrictExecutionOrderPlanReady` action in Rolldown.
+- Part B: allocate a collision-free session ID from a bounded deterministic process sequence, collect the action through one unique devtools session per build, require new-directory plus source-metadata ownership for requested and legacy IDs, canonicalize schema data and module IDs, store the deterministic action or `null` beside source/bundle outcomes, and clean only the uniquely owned session directory.
+- Treat malformed, unsupported-version, and duplicate matching actions as harness errors while allowing older packages with no action.
+- Serialize campaigns around the process-wide Rolldown trace environment, enable it once per traced campaign, and provide `--no-order-trace` as an opt-out.
+- Keep semantic verdict independent from debug data and report the selected wrap count only as diagnostic output.
 
 ## Validation
 
