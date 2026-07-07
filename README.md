@@ -7,12 +7,12 @@ The old implementation was intentionally removed. Its useful behavior is preserv
 ## Commands
 
 ```sh
-npm install
-npm run check
-npm run start
+vp install
+vp check
+vp exec node src/main.ts
 ```
 
-`npm run start` runs TypeScript directly through Node's native type stripping. `npm run check` is the separate type-checking gate.
+`vp exec node src/main.ts` runs TypeScript directly through Node's native type stripping under the Vite+ environment. `vp check` is the validation gate.
 
 ## Context
 

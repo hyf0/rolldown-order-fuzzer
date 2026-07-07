@@ -4,13 +4,16 @@ This repository is a fresh redesign of the Rolldown execution-order fuzzer.
 
 Before changing behavior, read the relevant records in `.agents/docs/`. The old repository was deliberately deleted; do not recover old `.mjs` scripts unless a record explains the behavior being restored and the new TypeScript design still wants it.
 
-Use plain English in repo files. Keep implementation TypeScript strongly typed and runnable by Node's native TypeScript support; see [techknowly-stack.md](techknowly-stack.md).
+Use plain English in repo files. Keep implementation TypeScript strongly typed and runnable by Node's native TypeScript support through Vite+; see [techknowly-stack.md](techknowly-stack.md).
+
+Prefer Vite+ commands in this repository: `vp install`, `vp check`, `vp exec node src/main.ts`, and `vp staged`.
 
 ## Project Context Records (PCR)
 
-This project follows **Project Context Records (PCR)** — methodology: https://github.com/hyf0/project-context-records. PCR keeps the project's durable design context — the *why*, the decisions, the architecture — so you inherit it instead of re-deriving or re-litigating what's already settled.
+This project follows **Project Context Records (PCR)** — methodology: https://github.com/hyf0/project-context-records. PCR keeps the project's durable design context — the _why_, the decisions, the architecture — so you inherit it instead of re-deriving or re-litigating what's already settled.
 
 When working here:
+
 - **Where they live.** Records are in `.agents/docs/` — one topic per file, cross-linked with relative Markdown links (`[name](./name.md)`).
 - **Read first.** If a record covers the area you're touching, read it before acting.
 - **Record as you go.** Proactively write down context worth keeping — and whenever a human asks you to. No required format, no fixed list of what qualifies: if it's true about this project, not visible in the code, and useful beyond the moment, it's worth a record.

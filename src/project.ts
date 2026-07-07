@@ -11,6 +11,7 @@ export const projectStatus: ProjectStatus = {
   runtime: "node-native-typescript",
   contextRecords: [
     ".agents/docs/legacy-fuzzer-behavior.md",
-    ".agents/docs/redesign-principles.md"
-  ]
+    ".agents/docs/redesign-principles.md",
+    ".agents/docs/vite-plus-adoption.md",
+  ],
 };

@@ -3,11 +3,24 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/main.ts",
-    "check": "tsc --noEmit"
+    "start": "vp exec node src/main.ts",
+    "check": "vp check",
+    "prepare": "vp config"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vite-plus": "latest"
+  },
+  "overrides": {
+    "vite": "npm:@voidzero-dev/vite-plus-core@latest",
+    "vitest": "4.1.9"
+  },
+  "devEngines": {
+    "packageManager": {
+      "name": "npm",
+      "version": "11.18.0",
+      "onFail": "download"
+    }
   }
 }
