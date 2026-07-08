@@ -97,7 +97,9 @@ Generation is deterministic from seed and size. The first mixed campaign covers:
 - multiple entries with overlapping mixed dependencies
 - manual chunk groups that separate carriers from interop modules
 
-Random generation starts after fixed scenarios pass through the complete pipeline.
+The fixed scenarios passed the complete pipeline (1000-seed clean campaigns), so random generation is now live: half of the seeds select `random-mixed`, which builds a forward-edge random DAG of mixed-format modules with all four dependency operations, an optional self-contained single-format cycle ring, entries that may also be imported by other modules, optional manual chunk groups, and schedules interleaving entries with dynamic-import triggers, including registrations that never fire. Two shapes are deliberately unreachable because they sit outside the oracle contract: mixed-format cycles (Node's require-of-evaluating-ESM error depends on the runtime entry point into the cycle) and cycles closed by value imports (TDZ is documented as not preserved by `strictExecutionOrder`). The schedule validator models the runner: after an awaited trigger, the dynamic target's synchronous subtree counts as evaluated, so nested registrations become triggerable.
+
+The first random-mixed window immediately reproduced the released-Rolldown crash family `init_<m> is not a function` (cyclic chunk graphs from manual groups; fixed by declaration-form wrappers in rolldown#10104), which the fixed templates could not reach.
 
 ## Rolldown build contract
 

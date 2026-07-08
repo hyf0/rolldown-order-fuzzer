@@ -261,8 +261,7 @@ describe("withRolldownBuild", () => {
     "keeps the generated manual-chunk graph free of harness runtime modules",
     { timeout: 30_000 },
     async () => {
-      const generated = generateCase(5, 4);
-      expect(generated.template).toBe("manual-chunk-separation");
+      const generated = findManualChunkCase();
       const rendered = renderProgram(generated.program);
       const expectedSourceFiles = [...rendered.modulePaths.values(), rendered.schedulePath].sort();
 
@@ -1144,4 +1143,14 @@ function validBuildChildRequest(): BuildChildRequest {
       minify: false,
     },
   };
+}
+
+function findManualChunkCase(): ReturnType<typeof generateCase> {
+  for (let seed = 0; seed < 1_000; seed += 1) {
+    const candidate = generateCase(seed, 4);
+    if (candidate.template === "manual-chunk-separation") {
+      return candidate;
+    }
+  }
+  throw new Error("No manual-chunk-separation case found within 1000 seeds");
 }

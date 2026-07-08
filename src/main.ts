@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { executeManifest } from "./execute.ts";
-import { generateCase, type GeneratedCase } from "./generate.ts";
+import { generateCase, MAX_CASE_SIZE, type GeneratedCase } from "./generate.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -29,11 +29,12 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 6 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 7 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
   readonly cases: number;
+  readonly caseSize: number;
   readonly rolldownPackage: string;
   readonly outDir: string;
   readonly continueOnFail: boolean;
@@ -130,17 +131,19 @@ export interface ExecuteGeneratedCaseDependencies {
 const DEFAULT_OPTIONS: CampaignOptions = {
   seed: 1,
   cases: 1,
+  caseSize: DEFAULT_CASE_SIZE,
   rolldownPackage: process.env.ROLLDOWN_PACKAGE ?? "rolldown",
   outDir: "failures",
   continueOnFail: false,
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
   let cases = DEFAULT_OPTIONS.cases;
+  let caseSize = DEFAULT_OPTIONS.caseSize;
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
   let outDir = DEFAULT_OPTIONS.outDir;
   let continueOnFail = DEFAULT_OPTIONS.continueOnFail;
@@ -155,6 +158,9 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
         break;
       case "--cases":
         cases = parsePositiveInteger(readArgumentValue(argv, ++index, argument), argument);
+        break;
+      case "--case-size":
+        caseSize = parseCaseSize(readArgumentValue(argv, ++index, argument), argument);
         break;
       case "--rolldown-package":
         rolldownPackage = readNonEmptyValue(argv, ++index, argument);
@@ -180,7 +186,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   }
   validateSeedRange(seed, cases);
 
-  return { seed, cases, rolldownPackage, outDir, continueOnFail };
+  return { seed, cases, caseSize, rolldownPackage, outDir, continueOnFail };
 }
 
 export async function runCampaign(
@@ -211,7 +217,7 @@ async function runCampaignCases(
 
   for (let caseIndex = 0; caseIndex < options.cases; caseIndex += 1) {
     const seed = (options.seed + caseIndex) % UINT32_RANGE;
-    const generated = dependencies.generate(seed, DEFAULT_CASE_SIZE);
+    const generated = dependencies.generate(seed, options.caseSize);
     const result = await dependencies.executeCase(generated, options);
     const didPass = result.verdict.kind === "pass";
     let artifactDirectory: string | undefined;
@@ -858,13 +864,13 @@ function isHarnessFailure(result: CampaignCaseResult): boolean {
 
 function createReplayMetadata(result: CampaignCaseResult): {
   readonly command: readonly string[];
-  readonly options: CampaignOptions & { readonly size: number };
+  readonly options: CampaignOptions;
   readonly runtimeIdentity: ObservedRuntimeIdentity;
 } {
   const options = {
     seed: result.generated.seed,
-    size: result.generated.size,
     cases: 1,
+    caseSize: result.generated.size,
     rolldownPackage: result.options.rolldownPackage,
     outDir: result.options.outDir,
     continueOnFail: false,
@@ -879,6 +885,8 @@ function createReplayMetadata(result: CampaignCaseResult): {
       String(options.seed),
       "--cases",
       "1",
+      "--case-size",
+      String(options.caseSize),
       "--rolldown-package",
       options.rolldownPackage,
       "--out-dir",
@@ -933,6 +941,14 @@ function parseUint32(value: string, argument: string): number {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 0 || parsed >= UINT32_RANGE) {
     throw new Error(`${argument} must be an unsigned 32-bit integer`);
+  }
+  return parsed;
+}
+
+function parseCaseSize(value: string, argument: string): number {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > MAX_CASE_SIZE) {
+    throw new Error(`${argument} must be an integer from 1 through ${MAX_CASE_SIZE}`);
   }
   return parsed;
 }

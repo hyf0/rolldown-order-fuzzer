@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, test } from "vite-plus/test";
 
-import { generateCase, MIXED_TEMPLATE_NAMES, type GeneratedCase } from "../src/generate.ts";
+import { generateCase, type GeneratedCase } from "../src/generate.ts";
 import {
   classifyCampaignVerdict,
   DEFAULT_CASE_SIZE,
@@ -44,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 6", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(6);
+  test("uses artifact schema version 7", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(7);
   });
 
   test("parses the complete campaign option set", () => {
@@ -55,6 +55,8 @@ describe("parseCliArgs", () => {
         "4294967295",
         "--cases",
         "12",
+        "--case-size",
+        "9",
         "--rolldown-package",
         "file:///tmp/rolldown.mjs",
         "--out-dir",
@@ -64,6 +66,7 @@ describe("parseCliArgs", () => {
     ).toEqual({
       seed: 4_294_967_295,
       cases: 12,
+      caseSize: 9,
       rolldownPackage: "file:///tmp/rolldown.mjs",
       outDir: "artifacts",
       continueOnFail: true,
@@ -81,6 +84,12 @@ describe("parseCliArgs", () => {
       "--seed must be an unsigned 32-bit integer",
     );
     expect(() => parseCliArgs(["--cases", "0"])).toThrowError("--cases must be a positive integer");
+    expect(() => parseCliArgs(["--case-size", "0"])).toThrowError(
+      "--case-size must be an integer from 1 through 16",
+    );
+    expect(() => parseCliArgs(["--case-size", "17"])).toThrowError(
+      "--case-size must be an integer from 1 through 16",
+    );
     expect(() => parseCliArgs(["--out-dir", ""])).toThrowError("--out-dir must not be empty");
     expect(() => parseCliArgs(["--out-dir", "--continue-on-fail"])).toThrowError(
       "Missing value for --out-dir",
@@ -436,7 +445,11 @@ describe("runCampaign", () => {
         "",
       ].join("\n"),
     );
-    const generated = generateCase(2, DEFAULT_CASE_SIZE);
+    // The fake package reports exactly one entry chunk, so pick a one-entry case.
+    const generated = findGeneratedCase(
+      (candidate) => candidate.program.entries.length === 1,
+      "single-entry case",
+    );
     const options = campaignOptions({
       seed: generated.seed,
       rolldownPackage: pathToFileURL(packagePath).href,
@@ -517,7 +530,11 @@ describe("runCampaign", () => {
         "",
       ].join("\n"),
     );
-    const generated = generateCase(2, DEFAULT_CASE_SIZE);
+    // The fake package reports exactly one entry chunk, so pick a one-entry case.
+    const generated = findGeneratedCase(
+      (candidate) => candidate.program.entries.length === 1,
+      "single-entry case",
+    );
     const options = campaignOptions({
       seed: generated.seed,
       rolldownPackage: pathToFileURL(packagePath).href,
@@ -878,10 +895,24 @@ describe("runCampaign", () => {
         },
       );
 
-      expect(summary).toEqual({ casesRun: 9, passed: 9, failed: 0, exitCode: 0 });
-      expect(lines.at(-1)).toBe("summary cases=9 pass=9 fail=0");
-      for (const template of MIXED_TEMPLATE_NAMES) {
-        expect(lines.some((line) => line.includes(`template=${template}`))).toBe(true);
+      // Installed Rolldown may genuinely fail generated cases; this test verifies the
+      // campaign plumbing, so it accepts real verdicts and rejects only harness noise.
+      expect(summary.casesRun).toBe(9);
+      expect(summary.passed + summary.failed).toBe(9);
+      expect(summary.exitCode).toBe(summary.failed === 0 ? 0 : 1);
+      expect(lines.at(-1)).toBe(`summary cases=9 pass=${summary.passed} fail=${summary.failed}`);
+      for (const line of lines.slice(0, -1)) {
+        expect(line).toMatch(/^(PASS|FAIL) case=\d+ seed=\d+ template=/);
+        expect(line).not.toContain("harness-error");
+      }
+      for (let seed = 0; seed < 9; seed += 1) {
+        const expectedTemplate = generateCase(seed, DEFAULT_CASE_SIZE).template;
+        expect(
+          lines.some(
+            (line) =>
+              line.includes(` seed=${seed} `) && line.includes(`template=${expectedTemplate}`),
+          ),
+        ).toBe(true);
       }
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -990,6 +1021,8 @@ describe("writeFailureArtifacts", () => {
           "7",
           "--cases",
           "1",
+          "--case-size",
+          String(generated.size),
           "--rolldown-package",
           "rolldown",
           "--out-dir",
@@ -998,8 +1031,8 @@ describe("writeFailureArtifacts", () => {
         ],
         options: {
           seed: generated.seed,
-          size: generated.size,
           cases: 1,
+          caseSize: generated.size,
           rolldownPackage: options.rolldownPackage,
           outDir: directory,
           continueOnFail: false,
@@ -1332,6 +1365,7 @@ function campaignOptions(overrides: Partial<CampaignOptions> = {}): CampaignOpti
   return {
     seed: 100,
     cases: 1,
+    caseSize: DEFAULT_CASE_SIZE,
     rolldownPackage: "rolldown",
     outDir: "failures",
     continueOnFail: false,
@@ -1424,4 +1458,17 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
+}
+
+function findGeneratedCase(
+  matches: (candidate: GeneratedCase) => boolean,
+  description: string,
+): GeneratedCase {
+  for (let seed = 0; seed < 1_000; seed += 1) {
+    const candidate = generateCase(seed, DEFAULT_CASE_SIZE);
+    if (matches(candidate)) {
+      return candidate;
+    }
+  }
+  throw new Error(`No ${description} found within 1000 seeds`);
 }

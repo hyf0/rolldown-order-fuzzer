@@ -147,7 +147,7 @@ describe("validateProgramModel", () => {
     expect(validateProgramModel(program)).toEqual([]);
   });
 
-  test("does not predict completion of a triggered dynamic import", () => {
+  test("treats an awaited trigger's dynamic subtree as evaluated", () => {
     const program = {
       modules: [
         {
@@ -189,8 +189,19 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
-      'schedule[2].registration: dynamic import registration "load-nested" is unavailable before module "lazy" is evaluated',
+    expect(validateProgramModel(program)).toEqual([]);
+
+    const nestedBeforeParent = {
+      ...program,
+      schedule: [
+        { kind: "import-entry", entry: "main" },
+        { kind: "trigger-dynamic-import", registration: "load-nested" },
+        { kind: "trigger-dynamic-import", registration: "load-lazy" },
+      ],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(nestedBeforeParent)).toEqual([
+      'schedule[1].registration: dynamic import registration "load-nested" is unavailable before module "lazy" is evaluated',
     ]);
   });
 

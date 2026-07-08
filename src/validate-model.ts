@@ -286,6 +286,20 @@ function validateSchedule(
         errors.push(
           `${path}.registration: dynamic import registration ${quote(operation.registration)} is unavailable before module ${quote(ownerId)} is evaluated`,
         );
+      } else {
+        // The runner awaits the trigger, so the dynamic target's synchronous
+        // subtree has evaluated and its registrations are available afterwards.
+        const target = modulesById
+          .get(ownerId)
+          ?.dependencies.find(
+            (dependency) =>
+              dependency.kind === "esm-dynamic-import" &&
+              dependency.registration === operation.registration,
+          );
+        const targetModule = target === undefined ? undefined : modulesById.get(target.target);
+        if (targetModule !== undefined) {
+          markSynchronouslyEvaluated(targetModule, modulesById, evaluatedModules);
+        }
       }
       continue;
     }

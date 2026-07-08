@@ -54,12 +54,71 @@ describe("generateCase", () => {
         continue;
       }
 
-      expect(generated.coverageTags).toContain(`template:${template}`);
-      expect(generated.coverageTags).toContain("mechanism:mixed-esm-cjs");
+      if (template !== "random-mixed") {
+        expect(generated.coverageTags).toContain(`template:${template}`);
+        expect(generated.coverageTags).toContain("mechanism:mixed-esm-cjs");
+        assertTemplateGraph(template, generated.program);
+      }
       expect(generated.coverageTags).toEqual([...generated.coverageTags].sort());
       expect(generated.coverageTags).toEqual(deriveCoverageTags(generated.program));
-      assertTemplateGraph(template, generated.program);
       expect(validateProgramModel(generated.program)).toEqual([]);
+    }
+  });
+
+  test("generates only valid programs across many seeds and sizes", () => {
+    for (let seed = 0; seed < 500; seed += 1) {
+      const generated = generateCase(seed, 1 + (seed % 16));
+      expect(
+        validateProgramModel(generated.program),
+        `seed ${seed} produced an invalid program`,
+      ).toEqual([]);
+      expect(generated.program.schedule.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("random-mixed reaches the new mechanism coverage from ordinary seeds", () => {
+    const wanted = [
+      "mechanism:dynamic-import",
+      "mechanism:untriggered-dynamic-import",
+      "mechanism:cycle",
+      "mechanism:esm-cycle",
+      "mechanism:cjs-cycle",
+      "mechanism:entry-also-imported",
+      "mechanism:manual-chunks",
+      "mechanism:multiple-entries",
+    ];
+    const wantedSet = new Set(wanted);
+    const reached = new Set<string>();
+
+    for (let seed = 0; seed < 5_000 && reached.size < wanted.length; seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      for (const tag of generated.coverageTags) {
+        if (wantedSet.has(tag)) {
+          reached.add(tag);
+        }
+      }
+    }
+
+    expect(wanted.filter((tag) => !reached.has(tag))).toEqual([]);
+  });
+
+  test("random-mixed never closes a cycle across module formats", () => {
+    for (let seed = 0; seed < 2_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (
+        generated.template !== "random-mixed" ||
+        !generated.coverageTags.includes("mechanism:cycle")
+      ) {
+        continue;
+      }
+      expect(
+        generated.coverageTags.includes("mechanism:esm-cycle") ||
+          generated.coverageTags.includes("mechanism:cjs-cycle"),
+        `seed ${seed} produced a mixed-format cycle`,
+      ).toBe(true);
     }
   });
 

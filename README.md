@@ -25,18 +25,19 @@ The CLI accepts:
 
 - `--seed N`: initial unsigned 32-bit seed; defaults to `1`.
 - `--cases N`: positive case count; defaults to `1`.
+- `--case-size N`: generation size from 1 through 16; defaults to `4`. Larger sizes grow the random graphs.
 - `--rolldown-package SPECIFIER`: package specifier or file URL; defaults to `ROLLDOWN_PACKAGE`, then `rolldown`.
 - `--out-dir DIRECTORY`: failure artifact root; defaults to `failures`.
 - `--continue-on-fail`: run every requested case.
 - `--stop-on-fail`: stop after the first failure; this is the default.
 
-Each case uses size `4`. Campaign seeds increment by one and wrap as unsigned 32-bit integers. The CLI rejects a seed and case-count combination when its last arithmetic seed would exceed JavaScript's safe-integer range. A reported case can be replayed exactly with:
+Campaign seeds increment by one and wrap as unsigned 32-bit integers. The CLI rejects a seed and case-count combination when its last arithmetic seed would exceed JavaScript's safe-integer range. A reported case can be replayed exactly with:
 
 ```sh
-vp exec node src/main.ts --seed <reported-seed> --cases 1
+vp exec node src/main.ts --seed <reported-seed> --cases 1 --case-size <reported-size>
 ```
 
-Generation selects one controlled template and varies only bounded graph parameters, import forms, event values, and schedule order. The MVP templates cover ESM importing side-effectful CJS, multiple ESM carriers sharing CJS, CJS requiring synchronous ESM, overlapping multiple entries, and manual chunks separating carriers from interop modules. Coverage tags are derived from the resulting `ProgramModel`, not declared by the selected template.
+Half of the seeds select the `random-mixed` generator: a forward-edge random DAG of ESM/CJS modules with side-effect, value, and dynamic imports plus top-level `require`, an optional self-contained single-format cycle ring, entries that other modules may also import, optional manual chunk groups, and a schedule that interleaves entry evaluation with dynamic-import triggers (some registrations intentionally never fire). Mixed-format cycles and value-import cycles are never generated, keeping Node's require-of-evaluating-ESM error and TDZ (both outside the oracle contract) out of the corpus. The other half keeps the five fixed MVP templates: ESM importing side-effectful CJS, multiple ESM carriers sharing CJS, CJS requiring synchronous ESM, overlapping multiple entries, and manual chunks separating carriers from interop modules. Coverage tags are derived from the resulting `ProgramModel`, not declared by the selected template; `template:*` tags describe structure, so a random program may carry a fixed template's tag or none.
 
 Each result line contains the case index, replay seed, template, coverage tags, and exact verdict signature. The process exits `0` when every case passes, `1` when any case fails, and `2` for invalid arguments or campaign harness errors.
 
