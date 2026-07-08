@@ -307,9 +307,16 @@ export async function inspectRolldownRuntimeIdentity(
         const packageContent = await hashPackageContents(packageInfo.rootPath);
         packageContentSha256 = packageContent.sha256;
         packageContentFiles = packageContent.files;
+        const entryRelativePath = relative(packageInfo.rootPath, resolvedEntryPath);
+        const runtimeDependencyNames = new Set(packageInfo.runtimeDependencyNames);
+        if (entryRelativePath === "src" || entryRelativePath.startsWith(`src${sep}`)) {
+          for (const name of packageInfo.devDependencyNames) {
+            runtimeDependencyNames.add(name);
+          }
+        }
         runtimeDependencyPackages = await inspectPackageDependencies(
           packageInfo,
-          packageInfo.runtimeDependencyNames,
+          [...runtimeDependencyNames].sort(),
         );
         optionalBindingPackages = await inspectOptionalBindingPackages(packageInfo);
       }
@@ -473,6 +480,7 @@ interface PackageInfo {
   readonly packageJsonPath: string;
   readonly version: string | null;
   readonly runtimeDependencyNames: readonly string[];
+  readonly devDependencyNames: readonly string[];
   readonly optionalBindingNames: readonly string[];
 }
 
@@ -483,6 +491,7 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
       const packageJsonPath = join(directory, "package.json");
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
         readonly dependencies?: unknown;
+        readonly devDependencies?: unknown;
         readonly optionalDependencies?: unknown;
         readonly version?: unknown;
       };
@@ -491,6 +500,7 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
         packageJsonPath: await realpath(packageJsonPath),
         version: typeof packageJson.version === "string" ? packageJson.version : null,
         runtimeDependencyNames: readDependencyNames(packageJson.dependencies),
+        devDependencyNames: readDependencyNames(packageJson.devDependencies),
         optionalBindingNames: readOptionalBindingNames(packageJson.optionalDependencies),
       };
     } catch {}

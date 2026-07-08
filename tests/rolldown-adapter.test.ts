@@ -411,6 +411,43 @@ describe("withRolldownBuild", () => {
     }
   });
 
+  test("tracks dev dependencies for source entry points", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-source-dependency-"));
+    const dependencyDirectory = join(directory, "node_modules", "dependency");
+    const dependencyPath = join(dependencyDirectory, "index.js");
+    const sourceDirectory = join(directory, "src");
+    const packagePath = join(sourceDirectory, "index.mjs");
+    await mkdir(dependencyDirectory, { recursive: true });
+    await mkdir(sourceDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "package.json"),
+      `${JSON.stringify({
+        type: "module",
+        version: "1.0.0",
+        devDependencies: { dependency: "1.0.0" },
+      })}\n`,
+    );
+    await writeFile(
+      join(dependencyDirectory, "package.json"),
+      `${JSON.stringify({ name: "dependency", version: "1.0.0", main: "index.js" })}\n`,
+    );
+    await writeFile(packagePath, 'import "dependency"; export const rolldown = () => {};\n');
+
+    try {
+      await writeFile(dependencyPath, "module.exports = 1;\n");
+      const first = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
+      await writeFile(dependencyPath, "module.exports = 2;\n");
+      const second = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
+
+      expect(first.runtimeDependencyPackages).toHaveLength(1);
+      expect(first.runtimeDependencyPackages[0]?.contentSha256).not.toBe(
+        second.runtimeDependencyPackages[0]?.contentSha256,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("records NAPI binding-selection environment", async () => {
     const previousForceWasi = process.env.NAPI_RS_FORCE_WASI;
     const previousVersionCheck = process.env.NAPI_RS_ENFORCE_VERSION_CHECK;
