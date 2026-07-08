@@ -45,7 +45,7 @@ The renderer writes normal `.mjs` and `.cjs` files. Every observable operation c
 globalThis.__orderEvent({ module: "m1", phase: "evaluate", value: 1 });
 ```
 
-The renderer also writes one schedule file consumed by both source and bundle drivers.
+The child runner installs the event function, event array, and dynamic-import registry before loading any generated entry. These harness globals are not emitted as a source module or added to the generated dependency graph. The renderer also writes one schedule file consumed by both source and bundle drivers.
 
 ### Execution
 

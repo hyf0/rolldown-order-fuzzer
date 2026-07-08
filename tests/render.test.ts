@@ -9,12 +9,46 @@ import { promisify } from "node:util";
 
 import { describe, expect, test } from "vite-plus/test";
 
+import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 
 const execFileAsync = promisify(execFile);
 
 describe("renderProgram", () => {
+  test("renders only ProgramModel modules and the schedule manifest", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "dependency" }],
+          events: [],
+        },
+        {
+          id: "dependency",
+          format: "cjs",
+          dependencies: [],
+          events: [],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      manualChunkGroups: [
+        { name: "entry-group", moduleIds: ["entry"] },
+        { name: "dependency-group", moduleIds: ["dependency"] },
+      ],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(rendered.files.map((file) => file.path).sort()).toEqual(
+      [...rendered.modulePaths.values(), rendered.schedulePath].sort(),
+    );
+    expect(rendered.files).toHaveLength(program.modules.length + 1);
+    expect(rendered.files.some((file) => file.path === "runtime.cjs")).toBe(false);
+  });
+
   test("renders ESM static and value imports with derived exports and a schedule manifest", () => {
     const program = {
       modules: [
@@ -52,7 +86,6 @@ describe("renderProgram", () => {
     const rendered = renderProgram(program);
 
     expect(rendered.files.map((file) => file.path)).toEqual([
-      "runtime.cjs",
       "module-0000.mjs",
       "module-0001.mjs",
       "module-0002.mjs",
@@ -68,7 +101,6 @@ describe("renderProgram", () => {
     });
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
-        'import "./runtime.cjs";',
         'import "./module-0001.mjs";',
         'import { answer as importedAnswer } from "./module-0002.mjs";',
         "",
@@ -78,8 +110,6 @@ describe("renderProgram", () => {
     );
     expect(fileContents(rendered.files, "module-0002.mjs")).toBe(
       [
-        'import "./runtime.cjs";',
-        "",
         'globalThis.__orderEvent({"module":"value:target","phase":"evaluate","value":"ready"});',
         "",
         'const __orderExport0 = "answer";',
@@ -161,7 +191,6 @@ describe("renderProgram", () => {
 
     expect(fileContents(rendered.files, "module-0000.cjs")).toBe(
       [
-        'require("./runtime.cjs");',
         'require("./module-0004.mjs");',
         "",
         'globalThis.__orderEvent({"module":"cjs-entry","phase":"evaluate","value":null});',
@@ -176,8 +205,6 @@ describe("renderProgram", () => {
     );
     expect(fileContents(rendered.files, "module-0003.cjs")).toBe(
       [
-        'require("./runtime.cjs");',
-        "",
         'globalThis.__orderEvent({"module":"shared-cjs","phase":"evaluate","value":"once"});',
         "",
         'exports.shared = "shared";',
@@ -185,16 +212,16 @@ describe("renderProgram", () => {
       ].join("\n"),
     );
 
-    await withRenderedProgram(rendered.files, async (directory, orderGlobal) => {
-      await import(pathToFileURL(join(directory, "module-0000.cjs")).href);
-      await import(pathToFileURL(join(directory, "module-0001.mjs")).href);
-      await import(pathToFileURL(join(directory, "module-0002.mjs")).href);
-
-      expect(orderGlobal.__orderEvents).toEqual([
-        { module: "esm-target", phase: "evaluate", value: 2 },
-        { module: "cjs-entry", phase: "evaluate", value: null },
-        { module: "shared-cjs", phase: "evaluate", value: "once" },
-      ]);
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "esm-target", phase: "evaluate", value: 2 },
+          { version: 1, module: "cjs-entry", phase: "evaluate", value: null },
+          { version: 1, module: "shared-cjs", phase: "evaluate", value: "once" },
+        ],
+      });
     });
   });
 
@@ -230,13 +257,8 @@ describe("renderProgram", () => {
 
     const rendered = renderProgram(program);
 
-    expect(fileContents(rendered.files, "runtime.cjs")).toContain(
-      "globalThis.__orderDynamicImports ??= Object.create(null);",
-    );
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
-        'import "./runtime.cjs";',
-        "",
         "await 0;",
         "",
         'globalThis.__orderDynamicImports["load-lazy"] = () => import("./module-0001.mjs");',
@@ -246,19 +268,20 @@ describe("renderProgram", () => {
       ].join("\n"),
     );
 
-    await withRenderedProgram(rendered.files, async (directory, orderGlobal) => {
-      await import(pathToFileURL(join(directory, "module-0000.mjs")).href);
-      expect(orderGlobal.__orderEvents).toEqual([
-        { module: "async-entry", phase: "evaluate", value: "after-await" },
-      ]);
-
-      const loadLazy = orderGlobal.__orderDynamicImports?.["load-lazy"];
-      expect(loadLazy).toBeTypeOf("function");
-      await loadLazy?.();
-      expect(orderGlobal.__orderEvents).toEqual([
-        { module: "async-entry", phase: "evaluate", value: "after-await" },
-        { module: "lazy", phase: "evaluate", value: 3 },
-      ]);
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          {
+            version: 1,
+            module: "async-entry",
+            phase: "evaluate",
+            value: "after-await",
+          },
+          { version: 1, module: "lazy", phase: "evaluate", value: 3 },
+        ],
+      });
     });
   });
 
@@ -328,7 +351,6 @@ describe("renderProgram", () => {
 
     expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
       [
-        'import "./runtime.cjs";',
         'import { source as __orderExport0 } from "./module-0002.mjs";',
         "",
         'const __orderExport1 = "default";',
@@ -369,8 +391,6 @@ describe("renderProgram", () => {
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
       [
-        'require("./runtime.cjs");',
-        "",
         'Object.defineProperty(exports, "__proto__", { value: "__proto__", enumerable: true });',
         "",
       ].join("\n"),
@@ -412,7 +432,7 @@ describe("renderProgram", () => {
     const rendered = renderProgram(program);
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
-      ['require("./runtime.cjs");', "", 'module.exports = "default";', ""].join("\n"),
+      ['module.exports = "default";', ""].join("\n"),
     );
     await withRenderedProgram(rendered.files, async (directory) => {
       await import(pathToFileURL(join(directory, "module-0000.mjs")).href);
@@ -464,8 +484,6 @@ describe("renderProgram", () => {
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
       [
-        'require("./runtime.cjs");',
-        "",
         "module.exports = {};",
         'module.exports.answer = "answer";',
         'Object.defineProperty(module.exports, "__proto__", { value: "__proto__", enumerable: true });',
@@ -576,7 +594,6 @@ describe("renderProgram", () => {
     const source = fileContents(rendered.files, "module-0000.mjs");
 
     expect(rendered.files.map((file) => file.path)).toEqual([
-      "runtime.cjs",
       "module-0000.mjs",
       "module-0001.mjs",
       "schedule.json",
@@ -705,46 +722,16 @@ function fileContents(
   return file.contents;
 }
 
-interface OrderTestGlobal {
-  __orderEvents?: unknown[];
-  __orderEvent?: (event: unknown) => void;
-  __orderDynamicImports?: Record<string, () => Promise<unknown>>;
-}
-
 async function withRenderedProgram(
   files: readonly { readonly path: string; readonly contents: string }[],
-  run: (directory: string, orderGlobal: OrderTestGlobal) => Promise<void>,
+  run: (directory: string) => Promise<void>,
 ): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), "order-render-"));
-  const orderGlobal = globalThis as typeof globalThis & OrderTestGlobal;
-  const propertyNames = [
-    "__orderEvents",
-    "__orderEvent",
-    "__orderDynamicImports",
-  ] as const satisfies readonly (keyof OrderTestGlobal)[];
-  const previousDescriptors = new Map(
-    propertyNames.map((propertyName) => [
-      propertyName,
-      Object.getOwnPropertyDescriptor(orderGlobal, propertyName),
-    ]),
-  );
-
-  for (const propertyName of propertyNames) {
-    delete orderGlobal[propertyName];
-  }
 
   try {
     await Promise.all(files.map((file) => writeFile(join(directory, file.path), file.contents)));
-    await run(directory, orderGlobal);
+    await run(directory);
   } finally {
-    for (const propertyName of propertyNames) {
-      const descriptor = previousDescriptors.get(propertyName);
-      if (descriptor === undefined) {
-        delete orderGlobal[propertyName];
-      } else {
-        Object.defineProperty(orderGlobal, propertyName, descriptor);
-      }
-    }
     await rm(directory, { recursive: true, force: true });
   }
 }

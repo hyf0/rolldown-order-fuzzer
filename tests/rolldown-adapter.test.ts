@@ -17,6 +17,7 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 
 import { executeManifest } from "../src/execute.ts";
+import { generateCase } from "../src/generate.ts";
 import type { ProgramModel } from "../src/model.ts";
 import {
   withRolldownBuild,
@@ -244,6 +245,43 @@ describe("withRolldownBuild", () => {
       ],
     });
   });
+
+  test(
+    "keeps the generated manual-chunk graph free of harness runtime modules",
+    { timeout: 30_000 },
+    async () => {
+      const generated = generateCase(5, 4);
+      expect(generated.template).toBe("manual-chunk-separation");
+      const rendered = renderProgram(generated.program);
+      const expectedSourceFiles = [...rendered.modulePaths.values(), rendered.schedulePath].sort();
+
+      expect(rendered.files.map((file) => file.path).sort()).toEqual(expectedSourceFiles);
+      expect(rendered.files).toHaveLength(generated.program.modules.length + 1);
+      expect(rendered.files.some((file) => file.path === "runtime.cjs")).toBe(false);
+
+      const result = await withRolldownBuild(
+        generated.program,
+        rendered,
+        async (artifacts) => {
+          const [sourceOutcome, bundleOutcome, materializedSourceFiles] = await Promise.all([
+            executeManifest(artifacts.sourceManifestPath),
+            executeManifest(artifacts.bundleManifestPath),
+            readdir(artifacts.sourceDirectory),
+          ]);
+          return {
+            verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+            materializedSourceFiles: materializedSourceFiles.sort(),
+          };
+        },
+        { collectOrderTrace: false },
+      );
+
+      expect(successValue(result)).toEqual({
+        verdict: { kind: "pass", signature: "pass" },
+        materializedSourceFiles: expectedSourceFiles,
+      });
+    },
+  );
 
   test("reports an invalid configurable package specifier as a harness error", async () => {
     const program = singleEntryProgram();
@@ -593,8 +631,8 @@ describe("withRolldownBuild", () => {
         roots: [
           {
             root_module_id: "entry",
-            expected_order: ["<source>/runtime.cjs", "entry", "rolldown:runtime"],
-            predicted_pre_wrap_order: ["entry", "<source>/runtime.cjs"],
+            expected_order: ["<source>/unmapped.js", "entry", "rolldown:runtime"],
+            predicted_pre_wrap_order: ["entry", "<source>/unmapped.js"],
             at_risk_modules: ["entry"],
           },
         ],
@@ -613,7 +651,7 @@ describe("withRolldownBuild", () => {
         rendered_chunks: [
           {
             chunk_id: 1,
-            module_ids: ["entry", "<source>/runtime.cjs", "rolldown:runtime"],
+            module_ids: ["entry", "<source>/unmapped.js", "rolldown:runtime"],
             static_chunk_imports: [],
             dynamic_chunk_imports: [],
           },
@@ -622,7 +660,7 @@ describe("withRolldownBuild", () => {
           {
             kind: "direct-import",
             importer_id: "entry",
-            importee_id: "<source>/runtime.cjs",
+            importee_id: "<source>/unmapped.js",
             awaited: false,
             importer_tla_tainted: false,
             importee_tla_tainted: false,
@@ -1293,7 +1331,7 @@ function fakeCanonicalTraceRolldownModule(): string {
     "  }",
     "  const moduleId = Object.values(options.input)[0];",
     "  const sourceRoot = dirname(moduleId);",
-    '  const runtimeId = join(sourceRoot, "runtime.cjs");',
+    '  const unmappedId = join(sourceRoot, "unmapped.js");',
     '  const virtualId = "rolldown:runtime";',
     '  const sessionDirectory = join(process.cwd(), "node_modules/.rolldown", sessionId);',
     "  return {",
@@ -1317,8 +1355,8 @@ function fakeCanonicalTraceRolldownModule(): string {
     "        build_id: `build-${sessionId}`,",
     "        roots: [{",
     "          root_module_id: moduleId,",
-    "          expected_order: [runtimeId, moduleId, virtualId],",
-    "          predicted_pre_wrap_order: [moduleId, runtimeId],",
+    "          expected_order: [unmappedId, moduleId, virtualId],",
+    "          predicted_pre_wrap_order: [moduleId, unmappedId],",
     "          at_risk_modules: [moduleId],",
     '          transport_detail: "discard",',
     "        }],",
@@ -1334,14 +1372,14 @@ function fakeCanonicalTraceRolldownModule(): string {
     "        }],",
     "        rendered_chunks: [{",
     "          chunk_id: 1,",
-    "          module_ids: [moduleId, runtimeId, virtualId],",
+    "          module_ids: [moduleId, unmappedId, virtualId],",
     "          static_chunk_imports: [],",
     "          dynamic_chunk_imports: [],",
     "        }],",
     "        init_obligations: [{",
     "          kind: 'direct-import',",
     "          importer_id: moduleId,",
-    "          importee_id: runtimeId,",
+    "          importee_id: unmappedId,",
     "          awaited: false,",
     "          importer_tla_tainted: false,",
     "          importee_tla_tainted: false,",

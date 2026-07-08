@@ -8,7 +8,7 @@
 
 ## Deliverable 2: source renderer
 
-- Create `src/render.ts` that writes `.mjs`, `.cjs`, the shared event bootstrap, and a schedule manifest.
+- Create `src/render.ts` that writes only modeled `.mjs` and `.cjs` modules plus a schedule manifest; the child runner installs the shared event and dynamic-import globals outside the generated graph.
 - Add `tests/render.test.ts` with ESM static import, CJS require, shared CJS carrier, and deterministic rendering cases.
 
 ## Deliverable 3: fresh-process driver and verdict

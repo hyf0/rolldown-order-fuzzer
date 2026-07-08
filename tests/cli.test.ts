@@ -753,9 +753,15 @@ describe("writeFailureArtifacts", () => {
           readonly bundleManifest: { readonly sha256: string; readonly value: unknown };
         };
       };
+      const expectedRenderedSourcePaths = result.rendered.files.map((file) => file.path).sort();
 
       expect(artifactDirectory).toBe(expectedArtifactDirectory);
       expect(artifactHash).toMatch(/^[a-f0-9]{64}$/);
+      expect(identity.inputs.renderedSourceFiles.map((file) => file.path)).toEqual(
+        expectedRenderedSourcePaths,
+      );
+      expect(expectedRenderedSourcePaths).not.toContain("runtime.cjs");
+      expect(expectedRenderedSourcePaths).toHaveLength(generated.program.modules.length + 1);
       await expect(readJson(join(artifactDirectory, "model.json"))).resolves.toEqual(
         generated.program,
       );

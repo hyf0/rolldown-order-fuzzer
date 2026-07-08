@@ -19,7 +19,6 @@ export interface RenderedProgram {
   readonly schedule: RenderedScheduleManifest;
 }
 
-const RUNTIME_PATH = "runtime.cjs";
 const SCHEDULE_PATH = "schedule.json";
 
 export function renderProgram(program: ProgramModel): RenderedProgram {
@@ -36,7 +35,7 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
     program.modules.map((module, index) => [module.id, modulePath(index, module.format)]),
   );
   const requestedExports = collectRequestedExports(program);
-  const files: RenderedFile[] = [{ path: RUNTIME_PATH, contents: renderRuntime() }];
+  const files: RenderedFile[] = [];
 
   for (const module of program.modules) {
     const path = getRequiredPath(modulePaths, module.id);
@@ -100,12 +99,15 @@ function renderModule(
   requestedExports: readonly string[],
 ): string {
   if (module.format === "cjs") {
-    const requireLines = [`require("./${RUNTIME_PATH}");`];
+    const requireLines: string[] = [];
     for (const dependency of module.dependencies) {
       requireLines.push(`require("./${getRequiredPath(modulePaths, dependency.target)}");`);
     }
 
-    const sections: string[][] = [requireLines];
+    const sections: string[][] = [];
+    if (requireLines.length > 0) {
+      sections.push(requireLines);
+    }
     if (module.events.length > 0) {
       sections.push(renderEvents(module));
     }
@@ -116,7 +118,7 @@ function renderModule(
     return renderSections(sections);
   }
 
-  const importLines = [`import "./${RUNTIME_PATH}";`];
+  const importLines: string[] = [];
   const dynamicRegistrationLines: string[] = [];
   const usedBindings = new Set<string>();
   for (const dependency of module.dependencies) {
@@ -135,7 +137,10 @@ function renderModule(
     }
   }
 
-  const sections: string[][] = [importLines];
+  const sections: string[][] = [];
+  if (importLines.length > 0) {
+    sections.push(importLines);
+  }
   if (module.hasTopLevelAwait === true) {
     sections.push(["await 0;"]);
   }
@@ -228,17 +233,6 @@ function renderScheduleEntry(
     path: getRequiredPath(modulePaths, entry.moduleId),
     format: module.format,
   };
-}
-
-function renderRuntime(): string {
-  return [
-    "globalThis.__orderEvents ??= [];",
-    "globalThis.__orderEvent ??= (event) => {",
-    "  globalThis.__orderEvents.push(event);",
-    "};",
-    "globalThis.__orderDynamicImports ??= Object.create(null);",
-    "",
-  ].join("\n");
 }
 
 function getRequiredPath(paths: ReadonlyMap<string, string>, id: string): string {
