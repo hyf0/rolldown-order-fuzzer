@@ -27,8 +27,6 @@ import {
 import { renderProgram } from "../src/render.ts";
 import { classifyVerdict } from "../src/verdict.ts";
 
-const DEVTOOLS_SESSION_ID_ALLOCATION_ATTEMPTS = 64;
-
 describe("withRolldownBuild", () => {
   test("builds a rendered ESM program and passes the source-versus-bundle verdict", async () => {
     const program = {
@@ -357,7 +355,7 @@ describe("withRolldownBuild", () => {
           async (): Promise<never> => {
             throw new Error("build callback must not run");
           },
-          { packageSpecifier },
+          { packageSpecifier, collectOrderTrace: false },
         );
 
         expect(result).toMatchObject({
@@ -582,13 +580,7 @@ describe("withRolldownBuild", () => {
 
   test("collects the strict execution order action after close and cleans its session", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterSessionDirectories?: string[];
-      __rolldownAdapterSessionIds?: string[];
-    };
-    delete state.__rolldownAdapterSessionDirectories;
-    delete state.__rolldownAdapterSessionIds;
-    let sessionDirectory = "";
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       fakeRolldownModule([orderTraceAction()]),
@@ -597,21 +589,84 @@ describe("withRolldownBuild", () => {
           program,
           renderProgram(program),
           async (artifacts) => {
-            sessionDirectory = state.__rolldownAdapterSessionDirectories?.[0] ?? "";
-            await expect(access(sessionDirectory)).resolves.toBeUndefined();
+            temporaryDirectory = artifacts.temporaryDirectory;
+            const sessions = await sessionDirectoryNames(
+              join(temporaryDirectory, "node_modules", ".rolldown"),
+            );
+            expect(sessions).toHaveLength(1);
             return artifacts.orderTrace;
           },
           { packageSpecifier },
         );
 
         expect(successValue(result)).toEqual(orderTraceAction());
-        expect(state.__rolldownAdapterSessionIds).toHaveLength(1);
       },
     );
 
-    await expect(access(sessionDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-    delete state.__rolldownAdapterSessionDirectories;
-    delete state.__rolldownAdapterSessionIds;
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("isolates a producer that appends to a fixed pre-existing session", async () => {
+    const program = singleEntryProgram();
+    const repositoryCwd = process.cwd();
+    const sentinelDirectory = join(repositoryCwd, "node_modules", ".rolldown", "unknown-session");
+    const sentinelExisted = await access(sentinelDirectory)
+      .then(() => true)
+      .catch(() => false);
+    const sentinelMeta = await readFile(join(sentinelDirectory, "meta.json"), "utf8").catch(
+      () => '{"sentinel":"meta"}\n',
+    );
+    const sentinelLogs = await readFile(join(sentinelDirectory, "logs.json"), "utf8").catch(
+      () => '{"sentinel":"logs"}\n',
+    );
+    let temporaryDirectory = "";
+
+    if (!sentinelExisted) {
+      await mkdir(sentinelDirectory, { recursive: true });
+      await Promise.all([
+        writeFile(join(sentinelDirectory, "meta.json"), sentinelMeta),
+        writeFile(join(sentinelDirectory, "logs.json"), sentinelLogs),
+      ]);
+    }
+
+    try {
+      await withTemporaryModule(fakeFixedSessionRolldownModule(), async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (artifacts) => {
+            temporaryDirectory = artifacts.temporaryDirectory;
+            return artifacts.orderTrace;
+          },
+          { packageSpecifier },
+        );
+
+        expect(successValue(result)).toMatchObject({
+          action: "StrictExecutionOrderPlanReady",
+          version: 1,
+          roots: [{ root_module_id: "entry" }],
+          plan_modules: [{ module_id: "entry" }],
+        });
+      });
+
+      expect(process.cwd()).toBe(repositoryCwd);
+      await expect(readFile(join(sentinelDirectory, "meta.json"), "utf8")).resolves.toBe(
+        sentinelMeta,
+      );
+      await expect(readFile(join(sentinelDirectory, "logs.json"), "utf8")).resolves.toBe(
+        sentinelLogs,
+      );
+      await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      if (sentinelExisted) {
+        await Promise.all([
+          writeFile(join(sentinelDirectory, "meta.json"), sentinelMeta),
+          writeFile(join(sentinelDirectory, "logs.json"), sentinelLogs),
+        ]);
+      } else {
+        await rm(sentinelDirectory, { recursive: true, force: true });
+      }
+    }
   });
 
   test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {
@@ -694,10 +749,7 @@ describe("withRolldownBuild", () => {
 
   test("reports malformed matching actions as harness errors and cleans the session", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterSessionDirectories?: string[];
-    };
-    delete state.__rolldownAdapterSessionDirectories;
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       fakeRolldownModule([{ ...orderTraceAction(), version: 2 }]),
@@ -708,7 +760,12 @@ describe("withRolldownBuild", () => {
           async (): Promise<never> => {
             throw new Error("build callback must not run");
           },
-          { packageSpecifier },
+          {
+            packageSpecifier,
+            onFailureArtifacts: (_failure, artifacts) => {
+              temporaryDirectory = artifacts.temporaryDirectory;
+            },
+          },
         );
 
         expect(result).toMatchObject({
@@ -722,295 +779,56 @@ describe("withRolldownBuild", () => {
       },
     );
 
-    const sessionDirectory = state.__rolldownAdapterSessionDirectories?.[0] ?? "";
-    await expect(access(sessionDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-    delete state.__rolldownAdapterSessionDirectories;
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("assigns unique devtools sessions to concurrent builds", async () => {
     const program = singleEntryProgram();
     const rendered = renderProgram(program);
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterSessionDirectories?: string[];
-      __rolldownAdapterSessionIds?: string[];
-    };
-    delete state.__rolldownAdapterSessionDirectories;
-    delete state.__rolldownAdapterSessionIds;
 
     await withTemporaryModule(fakeRolldownModule([]), async (packageSpecifier) => {
       const results = await Promise.all([
-        withRolldownBuild(program, rendered, async (artifacts) => artifacts.orderTrace, {
-          packageSpecifier,
-        }),
-        withRolldownBuild(program, rendered, async (artifacts) => artifacts.orderTrace, {
-          packageSpecifier,
-        }),
+        withRolldownBuild(
+          program,
+          rendered,
+          async (artifacts) => ({
+            temporaryDirectory: artifacts.temporaryDirectory,
+            sessions: await sessionDirectoryNames(
+              join(artifacts.temporaryDirectory, "node_modules", ".rolldown"),
+            ),
+            trace: artifacts.orderTrace,
+          }),
+          { packageSpecifier },
+        ),
+        withRolldownBuild(
+          program,
+          rendered,
+          async (artifacts) => ({
+            temporaryDirectory: artifacts.temporaryDirectory,
+            sessions: await sessionDirectoryNames(
+              join(artifacts.temporaryDirectory, "node_modules", ".rolldown"),
+            ),
+            trace: artifacts.orderTrace,
+          }),
+          { packageSpecifier },
+        ),
       ]);
 
-      expect(results.map(successValue)).toEqual([null, null]);
-      expect(state.__rolldownAdapterSessionIds).toHaveLength(2);
-      expect(new Set(state.__rolldownAdapterSessionIds).size).toBe(2);
-      const counters = (state.__rolldownAdapterSessionIds ?? [])
-        .map(sessionIdCounter)
-        .sort((left, right) => left - right);
-      expect(counters).toHaveLength(2);
-      expect(counters[1]).toBe((counters[0] ?? -1) + 1);
-    });
-
-    const sessionDirectories = state.__rolldownAdapterSessionDirectories ?? [];
-    expect(sessionDirectories).toHaveLength(2);
-    await Promise.all(
-      sessionDirectories.map((directory) =>
-        expect(access(directory)).rejects.toMatchObject({ code: "ENOENT" }),
-      ),
-    );
-    delete state.__rolldownAdapterSessionDirectories;
-    delete state.__rolldownAdapterSessionIds;
-  });
-
-  test("skips a pre-existing first candidate before calling an honoring producer", async () => {
-    const program = singleEntryProgram();
-    const rendered = renderProgram(program);
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterSessionIds?: string[];
-    };
-
-    await withPredictedNextSessionId(async (requestedSessionId) => {
-      const sentinelDirectory = join(
-        process.cwd(),
-        "node_modules",
-        ".rolldown",
-        requestedSessionId,
-      );
-      await mkdir(sentinelDirectory, { recursive: true });
-      await writeFile(
-        join(sentinelDirectory, "meta.json"),
-        `${JSON.stringify({
-          action: "SessionMeta",
-          inputs: [{ name: "sentinel", filename: "/unrelated/sentinel.js" }],
-        })}\n`,
-      );
-      await writeFile(
-        join(sentinelDirectory, "logs.json"),
-        `${JSON.stringify({ action: "BuildEnd", sentinel: true })}\n`,
-      );
-
-      try {
-        await withTemporaryModule(
-          fakeRolldownModule([orderTraceAction()]),
-          async (packageSpecifier) => {
-            const result = await withRolldownBuild(
-              program,
-              rendered,
-              async (artifacts) => artifacts.orderTrace,
-              { packageSpecifier },
-            );
-
-            expect(successValue(result)).toEqual(orderTraceAction());
-          },
-        );
-
-        const actualSessionId = state.__rolldownAdapterSessionIds?.at(-1);
-        expect(actualSessionId).toBeTypeOf("string");
-        expect(actualSessionId).not.toBe(requestedSessionId);
-        expect(sessionIdCounter(actualSessionId ?? "")).toBe(
-          sessionIdCounter(requestedSessionId) + 1,
-        );
-        await expect(access(sentinelDirectory)).resolves.toBeUndefined();
-        await expect(readFile(join(sentinelDirectory, "logs.json"), "utf8")).resolves.toContain(
-          '"sentinel":true',
-        );
-      } finally {
-        await rm(sentinelDirectory, { recursive: true, force: true });
-      }
-    });
-  });
-
-  test("reports a harness error when every bounded session candidate exists", async () => {
-    const program = singleEntryProgram();
-
-    await withPredictedNextSessionId(async (firstSessionId) => {
-      const devtoolsRoot = join(process.cwd(), "node_modules", ".rolldown");
-      const sessionIds = Array.from(
-        { length: DEVTOOLS_SESSION_ID_ALLOCATION_ATTEMPTS },
-        (_, index) =>
-          sessionIdWithCounter(firstSessionId, sessionIdCounter(firstSessionId) + index),
-      );
-      const sentinelDirectories = sessionIds.map((sessionId) => join(devtoolsRoot, sessionId));
+      const values = results.map(successValue);
+      expect(values.map((value) => value.trace)).toEqual([null, null]);
+      expect(values.every((value) => value.sessions.length === 1)).toBe(true);
+      expect(new Set(values.flatMap((value) => value.sessions)).size).toBe(2);
       await Promise.all(
-        sentinelDirectories.map(async (directory) => {
-          await mkdir(directory, { recursive: true });
-          await writeFile(join(directory, "sentinel.txt"), "keep\n");
-        }),
+        values.map((value) =>
+          expect(access(value.temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" }),
+        ),
       );
-
-      try {
-        await withTemporaryModule(fakeNoSessionRolldownModule(), async (packageSpecifier) => {
-          const result = await withRolldownBuild(
-            program,
-            renderProgram(program),
-            async (): Promise<never> => {
-              throw new Error("build callback must not run");
-            },
-            { packageSpecifier },
-          );
-
-          expect(result).toMatchObject({
-            status: "harness-error",
-            stage: "collect-order-trace",
-            error: {
-              name: "Error",
-              message: "Unable to allocate a unique Rolldown devtools session ID after 64 attempts",
-            },
-          });
-        });
-
-        await Promise.all(
-          sentinelDirectories.map((directory) =>
-            expect(readFile(join(directory, "sentinel.txt"), "utf8")).resolves.toBe("keep\n"),
-          ),
-        );
-      } finally {
-        await Promise.all(
-          sentinelDirectories.map((directory) => rm(directory, { recursive: true, force: true })),
-        );
-      }
     });
-  });
-
-  test("skips a candidate created while loading the honoring producer", async () => {
-    const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterSessionIds?: string[];
-    };
-
-    await withPredictedNextSessionId(async (requestedSessionId) => {
-      const sentinelDirectory = join(
-        process.cwd(),
-        "node_modules",
-        ".rolldown",
-        requestedSessionId,
-      );
-
-      try {
-        await withTemporaryModule(
-          fakeImportCollisionRolldownModule(requestedSessionId),
-          async (packageSpecifier) => {
-            const result = await withRolldownBuild(
-              program,
-              renderProgram(program),
-              async (artifacts) => artifacts.orderTrace,
-              { packageSpecifier },
-            );
-
-            expect(successValue(result)).toEqual(orderTraceAction());
-          },
-        );
-
-        const actualSessionId = state.__rolldownAdapterSessionIds?.at(-1);
-        expect(actualSessionId).toBeTypeOf("string");
-        expect(actualSessionId).not.toBe(requestedSessionId);
-        expect(sessionIdCounter(actualSessionId ?? "")).toBe(
-          sessionIdCounter(requestedSessionId) + 1,
-        );
-        await expect(readFile(join(sentinelDirectory, "sentinel.txt"), "utf8")).resolves.toBe(
-          "keep\n",
-        );
-      } finally {
-        await rm(sentinelDirectory, { recursive: true, force: true });
-      }
-    });
-  });
-
-  test("does not delete a pre-existing requested sentinel when package loading fails", async () => {
-    const program = singleEntryProgram();
-
-    await withPredictedNextSessionId(async (requestedSessionId) => {
-      const sentinelDirectory = join(
-        process.cwd(),
-        "node_modules",
-        ".rolldown",
-        requestedSessionId,
-      );
-      await mkdir(sentinelDirectory, { recursive: true });
-      await writeFile(join(sentinelDirectory, "sentinel.txt"), "keep\n");
-
-      try {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (): Promise<never> => {
-            throw new Error("build callback must not run");
-          },
-          { packageSpecifier: "rolldown-order-fuzzer-package-that-does-not-exist" },
-        );
-
-        expect(result).toMatchObject({
-          status: "harness-error",
-          stage: "load-package",
-        });
-        await expect(readFile(join(sentinelDirectory, "sentinel.txt"), "utf8")).resolves.toBe(
-          "keep\n",
-        );
-      } finally {
-        await rm(sentinelDirectory, { recursive: true, force: true });
-      }
-    });
-  });
-
-  test("preserves a requested sentinel while cleaning a separately owned legacy session", async () => {
-    const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterLegacySessionDirectories?: string[];
-    };
-    delete state.__rolldownAdapterLegacySessionDirectories;
-
-    await withPredictedNextSessionId(async (requestedSessionId) => {
-      const sentinelDirectory = join(
-        process.cwd(),
-        "node_modules",
-        ".rolldown",
-        requestedSessionId,
-      );
-      await mkdir(sentinelDirectory, { recursive: true });
-      await writeFile(join(sentinelDirectory, "sentinel.txt"), "keep\n");
-
-      try {
-        await withTemporaryModule(
-          fakeLegacyRolldownModule(`${JSON.stringify(orderTraceAction())}\n`),
-          async (packageSpecifier) => {
-            const result = await withRolldownBuild(
-              program,
-              renderProgram(program),
-              async (artifacts) => artifacts.orderTrace,
-              { packageSpecifier },
-            );
-
-            expect(successValue(result)).toEqual(orderTraceAction());
-          },
-        );
-
-        await expect(readFile(join(sentinelDirectory, "sentinel.txt"), "utf8")).resolves.toBe(
-          "keep\n",
-        );
-        const legacyDirectory = state.__rolldownAdapterLegacySessionDirectories?.[0] ?? "";
-        await expect(access(legacyDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-      } finally {
-        await rm(sentinelDirectory, { recursive: true, force: true });
-      }
-    });
-
-    delete state.__rolldownAdapterLegacySessionDirectories;
   });
 
   test("discovers and cleans a legacy session while leaving unrelated sessions untouched", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterLegacySessionDirectories?: string[];
-      __rolldownAdapterUnrelatedSessionDirectories?: string[];
-    };
-    delete state.__rolldownAdapterLegacySessionDirectories;
-    delete state.__rolldownAdapterUnrelatedSessionDirectories;
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       fakeLegacyRolldownModule(`${JSON.stringify(orderTraceAction())}\n`, 1, true),
@@ -1018,7 +836,13 @@ describe("withRolldownBuild", () => {
         const result = await withRolldownBuild(
           program,
           renderProgram(program),
-          async (artifacts) => artifacts.orderTrace,
+          async (artifacts) => {
+            temporaryDirectory = artifacts.temporaryDirectory;
+            expect(
+              await sessionDirectoryNames(join(temporaryDirectory, "node_modules", ".rolldown")),
+            ).toHaveLength(2);
+            return artifacts.orderTrace;
+          },
           { packageSpecifier },
         );
 
@@ -1026,21 +850,12 @@ describe("withRolldownBuild", () => {
       },
     );
 
-    const matched = state.__rolldownAdapterLegacySessionDirectories?.[0] ?? "";
-    const unrelated = state.__rolldownAdapterUnrelatedSessionDirectories?.[0] ?? "";
-    await expect(access(matched)).rejects.toMatchObject({ code: "ENOENT" });
-    await expect(access(unrelated)).resolves.toBeUndefined();
-    await rm(unrelated, { recursive: true, force: true });
-    delete state.__rolldownAdapterLegacySessionDirectories;
-    delete state.__rolldownAdapterUnrelatedSessionDirectories;
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("cleans a matched legacy session when it contains no strict-order action", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterLegacySessionDirectories?: string[];
-    };
-    delete state.__rolldownAdapterLegacySessionDirectories;
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       fakeLegacyRolldownModule(`${JSON.stringify({ action: "BuildEnd" })}\n`),
@@ -1048,7 +863,10 @@ describe("withRolldownBuild", () => {
         const result = await withRolldownBuild(
           program,
           renderProgram(program),
-          async (artifacts) => artifacts.orderTrace,
+          async (artifacts) => {
+            temporaryDirectory = artifacts.temporaryDirectory;
+            return artifacts.orderTrace;
+          },
           { packageSpecifier },
         );
 
@@ -1056,17 +874,12 @@ describe("withRolldownBuild", () => {
       },
     );
 
-    const matched = state.__rolldownAdapterLegacySessionDirectories?.[0] ?? "";
-    await expect(access(matched)).rejects.toMatchObject({ code: "ENOENT" });
-    delete state.__rolldownAdapterLegacySessionDirectories;
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("leaves ambiguous matching legacy sessions untouched and returns a null trace", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterLegacySessionDirectories?: string[];
-    };
-    delete state.__rolldownAdapterLegacySessionDirectories;
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       fakeLegacyRolldownModule(`${JSON.stringify(orderTraceAction())}\n`, 2),
@@ -1074,7 +887,13 @@ describe("withRolldownBuild", () => {
         const result = await withRolldownBuild(
           program,
           renderProgram(program),
-          async (artifacts) => artifacts.orderTrace,
+          async (artifacts) => {
+            temporaryDirectory = artifacts.temporaryDirectory;
+            expect(
+              await sessionDirectoryNames(join(temporaryDirectory, "node_modules", ".rolldown")),
+            ).toHaveLength(2);
+            return artifacts.orderTrace;
+          },
           { packageSpecifier },
         );
 
@@ -1082,21 +901,12 @@ describe("withRolldownBuild", () => {
       },
     );
 
-    const matched = state.__rolldownAdapterLegacySessionDirectories ?? [];
-    expect(matched).toHaveLength(2);
-    await Promise.all(
-      matched.map((directory) => expect(access(directory)).resolves.toBeUndefined()),
-    );
-    await Promise.all(matched.map((directory) => rm(directory, { recursive: true, force: true })));
-    delete state.__rolldownAdapterLegacySessionDirectories;
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("reports malformed logs from a matched legacy session and still cleans it", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterLegacySessionDirectories?: string[];
-    };
-    delete state.__rolldownAdapterLegacySessionDirectories;
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       fakeLegacyRolldownModule("{not-json}\n"),
@@ -1107,7 +917,12 @@ describe("withRolldownBuild", () => {
           async (): Promise<never> => {
             throw new Error("build callback must not run");
           },
-          { packageSpecifier },
+          {
+            packageSpecifier,
+            onFailureArtifacts: (_failure, artifacts) => {
+              temporaryDirectory = artifacts.temporaryDirectory;
+            },
+          },
         );
 
         expect(result).toMatchObject({
@@ -1120,9 +935,7 @@ describe("withRolldownBuild", () => {
       },
     );
 
-    const matched = state.__rolldownAdapterLegacySessionDirectories?.[0] ?? "";
-    await expect(access(matched)).rejects.toMatchObject({ code: "ENOENT" });
-    delete state.__rolldownAdapterLegacySessionDirectories;
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("cleans the installed package session when it uses a legacy generated ID", async () => {
@@ -1245,73 +1058,69 @@ function fakeRolldownModule(logs: readonly unknown[]): string {
   ].join("\n");
 }
 
-function fakeNoSessionRolldownModule(): string {
+function fakeFixedSessionRolldownModule(): string {
   return [
-    "",
-    "export async function rolldown(options) {",
-    "  return {",
-    "    async write() {",
-    "      const facadeModuleId = Object.values(options.input)[0];",
-    "      return {",
-    "        output: [{",
-    '          type: "chunk",',
-    '          fileName: "entries/__entry_0000.js",',
-    '          name: "__entry_0000",',
-    "          isEntry: true,",
-    "          facadeModuleId,",
-    "        }],",
-    "      };",
-    "    },",
-    "    async close() {},",
-    "  };",
-    "}",
-    "",
-  ].join("\n");
-}
-
-function fakeImportCollisionRolldownModule(collidingSessionId: string): string {
-  return [
-    'import { mkdirSync, writeFileSync } from "node:fs";',
-    'import { mkdir, writeFile } from "node:fs/promises";',
+    'import { appendFile, mkdir } from "node:fs/promises";',
     'import { join } from "node:path";',
     "",
-    `const collisionDirectory = join(process.cwd(), "node_modules/.rolldown", ${JSON.stringify(
-      collidingSessionId,
-    )});`,
-    "mkdirSync(collisionDirectory, { recursive: true });",
-    'writeFileSync(join(collisionDirectory, "sentinel.txt"), "keep\\n");',
+    'const sessionDirectory = join(process.cwd(), "node_modules/.rolldown/unknown-session");',
+    "await mkdir(sessionDirectory, { recursive: true });",
+    "await appendFile(",
+    '  join(sessionDirectory, "meta.json"),',
+    "  `${JSON.stringify({ action: 'ProducerReady', cwd: process.cwd() })}\\n`,",
+    ");",
+    "await appendFile(",
+    '  join(sessionDirectory, "logs.json"),',
+    "  `${JSON.stringify({ action: 'BuildStart', cwd: process.cwd() })}\\n`,",
+    ");",
     "",
     "export async function rolldown(options) {",
-    "  const sessionId = options.devtools?.sessionId;",
-    '  if (typeof sessionId !== "string" || sessionId.length === 0) {',
-    '    throw new Error("missing devtools session id");',
-    "  }",
-    '  const sessionDirectory = join(process.cwd(), "node_modules/.rolldown", sessionId);',
-    "  globalThis.__rolldownAdapterSessionIds ??= [];",
-    "  globalThis.__rolldownAdapterSessionIds.push(sessionId);",
+    "  const moduleId = Object.values(options.input)[0];",
     "  return {",
     "    async write() {",
-    "      const facadeModuleId = Object.values(options.input)[0];",
     "      return {",
     "        output: [{",
     '          type: "chunk",',
     '          fileName: "entries/__entry_0000.js",',
     '          name: "__entry_0000",',
     "          isEntry: true,",
-    "          facadeModuleId,",
+    "          facadeModuleId: moduleId,",
     "        }],",
     "      };",
     "    },",
     "    async close() {",
-    "      const facadeModuleId = Object.values(options.input)[0];",
-    "      await mkdir(sessionDirectory, { recursive: true });",
-    "      await writeFile(",
+    "      const action = {",
+    '        action: "StrictExecutionOrderPlanReady",',
+    "        version: 1,",
+    "        roots: [{",
+    "          root_module_id: moduleId,",
+    "          expected_order: [moduleId],",
+    "          predicted_pre_wrap_order: [moduleId],",
+    "          at_risk_modules: [moduleId],",
+    "        }],",
+    "        plan_modules: [{ module_id: moduleId, reasons: ['direct-violation'] }],",
+    "        included_modules: [{",
+    "          module_id: moduleId,",
+    "          original_wrap_kind: 'none',",
+    "          final_wrap_kind: 'esm',",
+    "          final_chunk_id: 1,",
+    "          entry_chunk_id: 1,",
+    "          wrapper_included: true,",
+    "          tla_tainted: false,",
+    "        }],",
+    "        rendered_chunks: [{",
+    "          chunk_id: 1,",
+    "          module_ids: [moduleId],",
+    "          static_chunk_imports: [],",
+    "          dynamic_chunk_imports: [],",
+    "        }],",
+    "        init_obligations: [],",
+    "      };",
+    "      await appendFile(",
     '        join(sessionDirectory, "meta.json"),',
-    "        `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'main', filename: facadeModuleId }] })}\\n`,",
+    "        `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'main', filename: moduleId }] })}\\n`,",
     "      );",
-    `      await writeFile(join(sessionDirectory, "logs.json"), ${JSON.stringify(
-      `${JSON.stringify(orderTraceAction())}\n`,
-    )});`,
+    "      await appendFile(join(sessionDirectory, 'logs.json'), `${JSON.stringify(action)}\\n`);",
     "    },",
     "  };",
     "}",
@@ -1479,50 +1288,6 @@ async function sessionDirectoryNames(root: string): Promise<string[]> {
     }
     throw error;
   }
-}
-
-async function withPredictedNextSessionId(
-  run: (sessionId: string) => Promise<void>,
-): Promise<void> {
-  const state = globalThis as typeof globalThis & {
-    __rolldownAdapterSessionIds?: string[];
-  };
-  delete state.__rolldownAdapterSessionIds;
-
-  try {
-    await withTemporaryModule(fakeRolldownModule([]), async (packageSpecifier) => {
-      const result = await withRolldownBuild(
-        singleEntryProgram(),
-        renderProgram(singleEntryProgram()),
-        async (artifacts) => artifacts.orderTrace,
-        { packageSpecifier },
-      );
-      expect(successValue(result)).toBeNull();
-    });
-    const previousSessionId = (
-      globalThis as typeof globalThis & {
-        __rolldownAdapterSessionIds?: string[];
-      }
-    ).__rolldownAdapterSessionIds?.at(-1);
-    expect(previousSessionId).toBeTypeOf("string");
-    if (previousSessionId === undefined) {
-      throw new Error("missing predicted session id");
-    }
-    const separator = previousSessionId.lastIndexOf("-");
-    const counter = Number.parseInt(previousSessionId.slice(separator + 1), 36);
-    const nextSessionId = sessionIdWithCounter(previousSessionId, counter + 1);
-    await run(nextSessionId);
-  } finally {
-    delete state.__rolldownAdapterSessionIds;
-  }
-}
-
-function sessionIdCounter(sessionId: string): number {
-  return Number.parseInt(sessionId.slice(sessionId.lastIndexOf("-") + 1), 36);
-}
-
-function sessionIdWithCounter(sessionId: string, counter: number): string {
-  return `${sessionId.slice(0, sessionId.lastIndexOf("-") + 1)}${counter.toString(36)}`;
 }
 
 function orderTraceAction() {
