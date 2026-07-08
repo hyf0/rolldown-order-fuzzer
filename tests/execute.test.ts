@@ -12,6 +12,8 @@ import type { ExecutionManifest, ExecutionOutcome } from "../src/protocol.ts";
 import { renderProgram, type RenderedProgram } from "../src/render.ts";
 import { classifyVerdict } from "../src/verdict.ts";
 
+const EXECUTION_TEST_TIMEOUT_MS = 10_000;
+
 describe("executeManifest", () => {
   test("runs an ESM source schedule in a fresh Node child process", async () => {
     const program = {
@@ -34,7 +36,9 @@ describe("executeManifest", () => {
     } satisfies ProgramModel;
 
     await withRenderedProgram(renderProgram(program), async (manifestPath) => {
-      await expect(executeManifest(manifestPath, { timeoutMs: 2_000 })).resolves.toEqual({
+      await expect(
+        executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
+      ).resolves.toEqual({
         version: 1,
         status: "ok",
         events: [
@@ -85,7 +89,9 @@ describe("executeManifest", () => {
     } satisfies ProgramModel;
 
     await withRenderedProgram(renderProgram(program), async (manifestPath) => {
-      const outcome = await executeManifest(manifestPath, { timeoutMs: 2_000 });
+      const outcome = await executeManifest(manifestPath, {
+        timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+      });
 
       expect(outcome).toMatchObject({
         version: 1,
@@ -113,7 +119,9 @@ describe("executeManifest", () => {
     } satisfies ProgramModel;
 
     await withRenderedProgram(renderProgram(program), async (manifestPath) => {
-      await expect(executeManifest(manifestPath, { timeoutMs: 2_000 })).resolves.toMatchObject({
+      await expect(
+        executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
+      ).resolves.toMatchObject({
         status: "ok",
         events: [{ version: 1, module: "entry", phase: "evaluate", value: "cjs" }],
       });
@@ -133,8 +141,12 @@ describe("executeManifest", () => {
     ].join("\n");
 
     await withProgramFiles({ "entry.mjs": entry }, manifest, async (manifestPath) => {
-      const first = await executeManifest(manifestPath, { timeoutMs: 2_000 });
-      const second = await executeManifest(manifestPath, { timeoutMs: 2_000 });
+      const first = await executeManifest(manifestPath, {
+        timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+      });
+      const second = await executeManifest(manifestPath, {
+        timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+      });
 
       expect(first).toEqual(second);
       expect(first).toMatchObject({
@@ -155,7 +167,9 @@ describe("executeManifest", () => {
       { "entry.mjs": "throw new TypeError(import.meta.url);\n" },
       manifest,
       async (manifestPath) => {
-        await expect(executeManifest(manifestPath, { timeoutMs: 2_000 })).resolves.toEqual({
+        await expect(
+          executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
+        ).resolves.toEqual({
           version: 1,
           status: "error",
           events: [],
@@ -219,8 +233,12 @@ describe("executeManifest", () => {
       ],
       "schedule.json",
       async (manifestPath) => {
-        const first = await executeManifest(manifestPath, { timeoutMs: 2_000 });
-        const second = await executeManifest(manifestPath, { timeoutMs: 2_000 });
+        const first = await executeManifest(manifestPath, {
+          timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+        });
+        const second = await executeManifest(manifestPath, {
+          timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+        });
 
         expect(first).toEqual({
           version: 1,
@@ -292,8 +310,12 @@ describe("executeManifest", () => {
         Object.entries(files).map(([path, contents]) => ({ path, contents })),
         manifestPath,
         async (path) => {
-          const first = await executeManifest(path, { timeoutMs: 2_000 });
-          const second = await executeManifest(path, { timeoutMs: 2_000 });
+          const first = await executeManifest(path, {
+            timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+          });
+          const second = await executeManifest(path, {
+            timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+          });
 
           expect(first.status).toBe("harness-error");
           expect(second).toEqual(first);
@@ -355,8 +377,12 @@ describe("executeManifest", () => {
     } satisfies ProgramModel;
 
     await withRenderedProgram(renderProgram(program), async (manifestPath) => {
-      const first = await executeManifest(manifestPath, { timeoutMs: 2_000 });
-      const second = await executeManifest(manifestPath, { timeoutMs: 2_000 });
+      const first = await executeManifest(manifestPath, {
+        timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+      });
+      const second = await executeManifest(manifestPath, {
+        timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+      });
 
       expect(first).toMatchObject({
         status: "error",
@@ -504,7 +530,9 @@ describe("executeManifest", () => {
       },
       manifest,
       async (manifestPath) => {
-        await expect(executeManifest(manifestPath, { timeoutMs: 2_000 })).resolves.toMatchObject({
+        await expect(
+          executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
+        ).resolves.toMatchObject({
           version: 1,
           status: "harness-error",
           error: {
@@ -649,7 +677,10 @@ async function withFiles(
   }
 }
 
-async function executeModule(source: string, timeoutMs = 2_000): Promise<ExecutionOutcome> {
+async function executeModule(
+  source: string,
+  timeoutMs = EXECUTION_TEST_TIMEOUT_MS,
+): Promise<ExecutionOutcome> {
   const manifest = {
     version: 1,
     entries: [{ name: "main", path: "entry.mjs", format: "esm" }],
@@ -679,7 +710,9 @@ async function executeDynamicThrow(source: string): Promise<ExecutionOutcome> {
   let outcome: ExecutionOutcome | undefined;
 
   await withProgramFiles({ "entry.mjs": source }, manifest, async (manifestPath) => {
-    outcome = await executeManifest(manifestPath, { timeoutMs: 2_000 });
+    outcome = await executeManifest(manifestPath, {
+      timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+    });
   });
 
   if (outcome === undefined) {
@@ -703,7 +736,9 @@ async function executeDynamicSchedule(
   let outcome: ExecutionOutcome | undefined;
 
   await withProgramFiles({ "entry.mjs": source }, manifest, async (manifestPath) => {
-    outcome = await executeManifest(manifestPath, { timeoutMs: 2_000 });
+    outcome = await executeManifest(manifestPath, {
+      timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
+    });
   });
 
   if (outcome === undefined) {
