@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, test } from "vite-plus/test";
 
@@ -1125,6 +1125,45 @@ describe("withRolldownBuild", () => {
     expect(callbackRan).toBe(false);
   });
 
+  test("terminates helper subprocesses for traced and opt-out timeouts", async () => {
+    for (const collectOrderTrace of [true, false]) {
+      await withTemporaryModule(fakeHangingHelperRolldownModule(), async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          singleEntryProgram(),
+          renderProgram(singleEntryProgram()),
+          async (): Promise<never> => {
+            throw new Error("timed out helper callback must not run");
+          },
+          {
+            packageSpecifier,
+            collectOrderTrace,
+            traceChildTimeoutMs: 1_000,
+          },
+        );
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: {
+            message: "Traced build child timed out after 1000ms",
+          },
+        });
+
+        const pidPath = join(dirname(fileURLToPath(packageSpecifier)), "helper-pids.json");
+        const pids = JSON.parse(await readFile(pidPath, "utf8")) as {
+          readonly childPid: number;
+          readonly helperPid: number;
+        };
+        try {
+          expect(await waitForProcessExit(pids.childPid, 2_000)).toBe(true);
+          expect(await waitForProcessExit(pids.helperPid, 2_000)).toBe(true);
+        } finally {
+          killProcessIfAlive(pids.helperPid);
+          await waitForProcessExit(pids.helperPid, 2_000);
+        }
+      });
+    }
+  }, 15_000);
+
   test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {
     const program = singleEntryProgram();
     const rendered = renderProgram(program);
@@ -1584,6 +1623,26 @@ function fakeFixedSessionRolldownModule(): string {
   ].join("\n");
 }
 
+function fakeHangingHelperRolldownModule(): string {
+  return [
+    'import { spawn } from "node:child_process";',
+    'import { writeFile } from "node:fs/promises";',
+    'import { fileURLToPath } from "node:url";',
+    "",
+    "const helper = spawn(",
+    "  process.execPath,",
+    '  ["-e", "setInterval(() => {}, 1000)"],',
+    '  { stdio: "ignore" },',
+    ");",
+    "await writeFile(",
+    '  fileURLToPath(new URL("./helper-pids.json", import.meta.url)),',
+    "  JSON.stringify({ childPid: process.pid, helperPid: helper.pid }),",
+    ");",
+    "await new Promise(() => {});",
+    "",
+  ].join("\n");
+}
+
 function fakeCanonicalTraceRolldownModule(): string {
   return [
     'import { mkdir, writeFile } from "node:fs/promises";',
@@ -1743,6 +1802,39 @@ async function sessionDirectoryNames(root: string): Promise<string[]> {
       return [];
     }
     throw error;
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processIsAlive(pid)) {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return !processIsAlive(pid);
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error instanceof Error && "code" in error && error.code === "ESRCH") {
+      return false;
+    }
+    throw error;
+  }
+}
+
+function killProcessIfAlive(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && error.code === "ESRCH")) {
+      throw error;
+    }
   }
 }
 

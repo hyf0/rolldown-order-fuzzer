@@ -1,6 +1,6 @@
 /// <reference types="node" />
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import {
@@ -801,11 +801,15 @@ async function runTraceChildProcess(
       [...traceChildExecArgv(process.execArgv), TRACE_CHILD_PATH, requestPath, responsePath],
       {
         cwd,
+        detached: process.platform !== "win32",
         stdio: "ignore",
+        windowsHide: true,
       },
     );
     let settled = false;
     let timedOut = false;
+    let childClosed = false;
+    let forceTerminationSent = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
       clearTimeout(timeoutTimer);
@@ -829,23 +833,61 @@ async function runTraceChildProcess(
       }
     };
     const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
-      settle(timedOut ? { status: "timeout", timeoutMs } : { status: "closed", code, signal });
+      childClosed = true;
+      if (!timedOut) {
+        settle({ status: "closed", code, signal });
+      } else if (forceTerminationSent) {
+        settle({ status: "timeout", timeoutMs });
+      }
     };
     const timeoutTimer = setTimeout(() => {
       if (settled) {
         return;
       }
       timedOut = true;
-      child.kill("SIGTERM");
+      terminateChildProcessTree(child, false);
       killTimer = setTimeout(() => {
-        if (!settled) {
-          child.kill("SIGKILL");
+        if (settled) {
+          return;
+        }
+        forceTerminationSent = true;
+        terminateChildProcessTree(child, true);
+        if (childClosed) {
+          settle({ status: "timeout", timeoutMs });
         }
       }, TRACE_CHILD_TERMINATION_GRACE_MS);
     }, timeoutMs);
     child.once("error", onError);
     child.once("close", onClose);
   });
+}
+
+function terminateChildProcessTree(child: ChildProcess, force: boolean): void {
+  if (child.pid === undefined) {
+    return;
+  }
+  if (process.platform === "win32") {
+    const killer = spawn("taskkill", ["/PID", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    killer.once("error", () => {
+      child.kill(force ? "SIGKILL" : "SIGTERM");
+    });
+    killer.once("close", (code) => {
+      if (code !== 0) {
+        child.kill(force ? "SIGKILL" : "SIGTERM");
+      }
+    });
+    killer.unref();
+    return;
+  }
+
+  try {
+    process.kill(-child.pid, force ? "SIGKILL" : "SIGTERM");
+  } catch {
+    child.kill(force ? "SIGKILL" : "SIGTERM");
+  }
 }
 
 export function traceChildExecArgv(execArgv: readonly string[]): readonly string[] {
