@@ -714,6 +714,7 @@ describe("runCampaign", () => {
     const nativeTargetRoot = await mkdtemp(join(tmpdir(), "order-runtime-binding-target-"));
     const bindingPath = join(bindingRoot, "binding.node");
     const bindingTargetPath = join(nativeTargetRoot, "binding.node");
+    const retargetedBindingPath = join(nativeTargetRoot, "retargeted-binding.node");
     const ignoredLinkPath = join(bindingRoot, "ignored.js");
     const ignoredTargetPath = join(nativeTargetRoot, "ignored.js");
     const bindingName = "@rolldown/binding-darwin-arm64";
@@ -746,6 +747,7 @@ describe("runCampaign", () => {
           })}\n`,
         ),
         writeFile(bindingTargetPath, Buffer.from([0, 1, 2, 3])),
+        writeFile(retargetedBindingPath, Buffer.from([0, 1, 2, 3])),
         writeFile(ignoredTargetPath, "ignored = 1;\n"),
       ]);
       await Promise.all([
@@ -756,7 +758,10 @@ describe("runCampaign", () => {
       const specifier = pathToFileURL(mainEntry).href;
       const first = await inspectRolldownRuntimeIdentity(specifier);
       const identical = await inspectRolldownRuntimeIdentity(specifier);
-      await writeFile(bindingTargetPath, Buffer.from([3, 2, 1, 0]));
+      await rm(bindingPath);
+      await symlink(retargetedBindingPath, bindingPath);
+      const retargetedBinding = await inspectRolldownRuntimeIdentity(specifier);
+      await writeFile(retargetedBindingPath, Buffer.from([3, 2, 1, 0]));
       const changedBinding = await inspectRolldownRuntimeIdentity(specifier);
       await writeFile(ignoredTargetPath, "ignored = 2;\n");
       const ignoredChange = await inspectRolldownRuntimeIdentity(specifier);
@@ -764,6 +769,9 @@ describe("runCampaign", () => {
       expect(identical).toEqual(first);
       expect(first.resolvedEntrySha256).toBe(changedBinding.resolvedEntrySha256);
       expect(first.packageContentSha256).toBe(changedBinding.packageContentSha256);
+      expect(retargetedBinding.optionalBindingPackages[0]?.contentSha256).not.toBe(
+        first.optionalBindingPackages[0]?.contentSha256,
+      );
       expect(first.optionalBindingPackages).toEqual([
         {
           name: bindingName,
@@ -775,15 +783,18 @@ describe("runCampaign", () => {
         },
       ]);
       expect(changedBinding.optionalBindingPackages[0]?.contentSha256).not.toBe(
-        first.optionalBindingPackages[0]?.contentSha256,
+        retargetedBinding.optionalBindingPackages[0]?.contentSha256,
       );
       expect(ignoredChange.optionalBindingPackages).toEqual(changedBinding.optionalBindingPackages);
 
       const generated = generateCase(7, DEFAULT_CASE_SIZE);
       const base = failedCase(generated);
       expect(failureArtifactPath({ ...base, runtimeIdentity: first }, root, 0)).not.toBe(
-        failureArtifactPath({ ...base, runtimeIdentity: changedBinding }, root, 0),
+        failureArtifactPath({ ...base, runtimeIdentity: retargetedBinding }, root, 0),
       );
+      expect(
+        failureArtifactPath({ ...base, runtimeIdentity: retargetedBinding }, root, 0),
+      ).not.toBe(failureArtifactPath({ ...base, runtimeIdentity: changedBinding }, root, 0));
     } finally {
       await Promise.all([
         rm(root, { recursive: true, force: true }),
