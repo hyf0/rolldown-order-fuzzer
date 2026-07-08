@@ -16,7 +16,7 @@ export interface ExecuteManifestOptions {
   readonly timeoutMs?: number;
 }
 
-const DEFAULT_TIMEOUT_MS = 5_000;
+const DEFAULT_TIMEOUT_MS = 10_000;
 const TERMINATION_GRACE_MS = 250;
 const CHILD_RUNNER_PATH = fileURLToPath(new URL("./child-runner.ts", import.meta.url));
 
