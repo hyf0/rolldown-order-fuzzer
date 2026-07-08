@@ -1,5 +1,6 @@
 /// <reference types="node" />
 
+import { createHash } from "node:crypto";
 import {
   access,
   mkdir,
@@ -8,10 +9,11 @@ import {
   readdir,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, test } from "vite-plus/test";
@@ -34,7 +36,11 @@ import {
 import { projectStatus } from "../src/project.ts";
 import type { ExecutionOutcome } from "../src/protocol.ts";
 import { renderProgram } from "../src/render.ts";
-import { withRolldownBuild, type ObservedRuntimeIdentity } from "../src/rolldown-adapter.ts";
+import {
+  inspectRolldownRuntimeIdentity,
+  withRolldownBuild,
+  type ObservedRuntimeIdentity,
+} from "../src/rolldown-adapter.ts";
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
@@ -550,6 +556,16 @@ describe("runCampaign", () => {
         resolvedEntryPath: resolvedPackagePath,
         packageVersion: "1.2.3",
         resolvedEntrySha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+        packageRootPath: await realpath(directory),
+        packageJsonPath: await realpath(join(directory, "package.json")),
+        packageContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+        packageContentFiles: ["package.json", "rolldown.mjs"],
+        fuzzerLockfilePath: await realpath(
+          fileURLToPath(new URL("../package-lock.json", import.meta.url)),
+        ),
+        fuzzerLockfileSha256: createHash("sha256")
+          .update(await readFile(fileURLToPath(new URL("../package-lock.json", import.meta.url))))
+          .digest("hex"),
       });
 
       const artifactDirectory = await writeFailureArtifacts(result, directory, 0);
@@ -609,6 +625,69 @@ describe("runCampaign", () => {
       expect(copied).toBe("delayed\n");
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("hashes runtime-relevant package contents without following external symlinks", async () => {
+    const packageRoot = await mkdtemp(join(tmpdir(), "order-runtime-package-"));
+    const outsideRoot = await mkdtemp(join(tmpdir(), "order-runtime-outside-"));
+    const entryPath = join(packageRoot, "dist/index.mjs");
+    const sharedPath = join(packageRoot, "dist/shared.mjs");
+    const nativePath = join(packageRoot, "native/addon.node");
+    const ignoredPath = join(packageRoot, "node_modules/ignored.js");
+    const outsidePath = join(outsideRoot, "outside.js");
+
+    try {
+      await Promise.all([
+        mkdir(dirname(entryPath), { recursive: true }),
+        mkdir(dirname(nativePath), { recursive: true }),
+        mkdir(dirname(ignoredPath), { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(packageRoot, "package.json"),
+          `${JSON.stringify({ type: "module", version: "9.8.7" })}\n`,
+        ),
+        writeFile(entryPath, 'export { value } from "./shared.mjs";\n'),
+        writeFile(sharedPath, "export const value = 1;\n"),
+        writeFile(nativePath, Buffer.from([0, 1, 2, 3])),
+        writeFile(join(packageRoot, "runtime-helper.js"), "export const helper = 1;\n"),
+        writeFile(ignoredPath, "ignored = 1;\n"),
+        writeFile(outsidePath, "outside = 1;\n"),
+      ]);
+      await symlink(outsidePath, join(packageRoot, "dist/outside-link.js"));
+
+      const specifier = pathToFileURL(entryPath).href;
+      const first = await inspectRolldownRuntimeIdentity(specifier);
+      const identical = await inspectRolldownRuntimeIdentity(specifier);
+      await writeFile(sharedPath, "export const value = 2;\n");
+      const changedShared = await inspectRolldownRuntimeIdentity(specifier);
+      await writeFile(nativePath, Buffer.from([3, 2, 1, 0]));
+      const changedNative = await inspectRolldownRuntimeIdentity(specifier);
+      await Promise.all([
+        writeFile(ignoredPath, "ignored = 2;\n"),
+        writeFile(outsidePath, "outside = 2;\n"),
+      ]);
+      const ignoredChanges = await inspectRolldownRuntimeIdentity(specifier);
+
+      expect(identical).toEqual(first);
+      expect(first.packageVersion).toBe("9.8.7");
+      expect(first.resolvedEntrySha256).toBe(changedShared.resolvedEntrySha256);
+      expect(changedShared.packageContentSha256).not.toBe(first.packageContentSha256);
+      expect(changedNative.packageContentSha256).not.toBe(changedShared.packageContentSha256);
+      expect(ignoredChanges.packageContentSha256).toBe(changedNative.packageContentSha256);
+      expect(first.packageContentFiles).toEqual([
+        "dist/index.mjs",
+        "dist/shared.mjs",
+        "native/addon.node",
+        "package.json",
+        "runtime-helper.js",
+      ]);
+    } finally {
+      await Promise.all([
+        rm(packageRoot, { recursive: true, force: true }),
+        rm(outsideRoot, { recursive: true, force: true }),
+      ]);
     }
   });
 
@@ -1177,6 +1256,12 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     resolvedEntryPath: null,
     packageVersion: null,
     resolvedEntrySha256: null,
+    packageRootPath: null,
+    packageJsonPath: null,
+    packageContentSha256: null,
+    packageContentFiles: [],
+    fuzzerLockfilePath: null,
+    fuzzerLockfileSha256: null,
   };
 }
 

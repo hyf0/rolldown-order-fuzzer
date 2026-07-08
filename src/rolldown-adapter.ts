@@ -13,7 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type {
   CodeSplittingGroup,
@@ -39,6 +39,19 @@ import type { RenderedProgram } from "./render.ts";
 
 const BUNDLE_PACKAGE_JSON = '{\n  "type": "module"\n}\n';
 const DEVTOOLS_SESSION_ID_ALLOCATION_ATTEMPTS = 64;
+const COMPACT_PACKAGE_MAX_FILES = 512;
+const COMPACT_PACKAGE_MAX_BYTES = 32 * 1024 * 1024;
+const IGNORED_PACKAGE_DIRECTORIES = new Set([
+  "node_modules",
+  ".git",
+  ".cache",
+  "cache",
+  "caches",
+  ".vite",
+  ".rolldown",
+  "coverage",
+]);
+const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 let nextDevtoolsSession = 0;
 
 export const ROLLDOWN_BUILD_OPTIONS = {
@@ -93,6 +106,12 @@ export interface ObservedRuntimeIdentity {
   readonly resolvedEntryPath: string | null;
   readonly packageVersion: string | null;
   readonly resolvedEntrySha256: string | null;
+  readonly packageRootPath: string | null;
+  readonly packageJsonPath: string | null;
+  readonly packageContentSha256: string | null;
+  readonly packageContentFiles: readonly string[];
+  readonly fuzzerLockfilePath: string | null;
+  readonly fuzzerLockfileSha256: string | null;
 }
 
 export interface SuccessfulRolldownAdapterResult<T> {
@@ -238,6 +257,10 @@ export async function inspectRolldownRuntimeIdentity(
   let resolvedEntryPath: string | null = null;
   let packageVersion: string | null = null;
   let resolvedEntrySha256: string | null = null;
+  let packageRootPath: string | null = null;
+  let packageJsonPath: string | null = null;
+  let packageContentSha256: string | null = null;
+  let packageContentFiles: readonly string[] = [];
 
   try {
     resolvedEntryUrl = import.meta.resolve(packageSpecifier);
@@ -245,12 +268,26 @@ export async function inspectRolldownRuntimeIdentity(
 
   if (resolvedEntryUrl?.startsWith("file:") === true) {
     try {
-      resolvedEntryPath = fileURLToPath(resolvedEntryUrl);
+      resolvedEntryPath = await realpath(fileURLToPath(resolvedEntryUrl));
+      resolvedEntryUrl = pathToFileURL(resolvedEntryPath).href;
       const contents = await readFile(resolvedEntryPath);
       resolvedEntrySha256 = createHash("sha256").update(contents).digest("hex");
-      packageVersion = await findNearestPackageVersion(dirname(resolvedEntryPath));
     } catch {}
+
+    if (resolvedEntryPath !== null) {
+      const packageInfo = await findNearestPackageInfo(dirname(resolvedEntryPath));
+      if (packageInfo !== null) {
+        packageRootPath = packageInfo.rootPath;
+        packageJsonPath = packageInfo.packageJsonPath;
+        packageVersion = packageInfo.version;
+        const packageContent = await hashPackageContents(packageInfo.rootPath);
+        packageContentSha256 = packageContent.sha256;
+        packageContentFiles = packageContent.files;
+      }
+    }
   }
+
+  const lockfile = await inspectFuzzerLockfile();
 
   return {
     processVersion: process.version,
@@ -261,19 +298,34 @@ export async function inspectRolldownRuntimeIdentity(
     resolvedEntryPath,
     packageVersion,
     resolvedEntrySha256,
+    packageRootPath,
+    packageJsonPath,
+    packageContentSha256,
+    packageContentFiles,
+    fuzzerLockfilePath: lockfile.path,
+    fuzzerLockfileSha256: lockfile.sha256,
   };
 }
 
-async function findNearestPackageVersion(startDirectory: string): Promise<string | null> {
+interface PackageInfo {
+  readonly rootPath: string;
+  readonly packageJsonPath: string;
+  readonly version: string | null;
+}
+
+async function findNearestPackageInfo(startDirectory: string): Promise<PackageInfo | null> {
   let directory = startDirectory;
   while (true) {
     try {
-      const packageJson = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as {
+      const packageJsonPath = join(directory, "package.json");
+      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
         readonly version?: unknown;
       };
-      if (typeof packageJson.version === "string") {
-        return packageJson.version;
-      }
+      return {
+        rootPath: await realpath(directory),
+        packageJsonPath: await realpath(packageJsonPath),
+        version: typeof packageJson.version === "string" ? packageJson.version : null,
+      };
     } catch {}
 
     const parent = dirname(directory);
@@ -282,6 +334,99 @@ async function findNearestPackageVersion(startDirectory: string): Promise<string
     }
     directory = parent;
   }
+}
+
+interface PackageFile {
+  readonly path: string;
+  readonly absolutePath: string;
+  readonly size: number;
+}
+
+async function hashPackageContents(
+  packageRoot: string,
+): Promise<{ readonly sha256: string | null; readonly files: readonly string[] }> {
+  try {
+    const allFiles = await collectPackageFiles(packageRoot);
+    const totalSize = allFiles.reduce((sum, file) => sum + file.size, 0);
+    const selected =
+      allFiles.length <= COMPACT_PACKAGE_MAX_FILES && totalSize <= COMPACT_PACKAGE_MAX_BYTES
+        ? allFiles
+        : allFiles.filter(isRuntimeRelevantPackageFile);
+    const sorted = [...selected].sort((left, right) => left.path.localeCompare(right.path));
+    const hash = createHash("sha256");
+    for (const file of sorted) {
+      hash
+        .update(file.path)
+        .update(Uint8Array.of(0))
+        .update(await readFile(file.absolutePath))
+        .update(Uint8Array.of(0));
+    }
+    return {
+      sha256: hash.digest("hex"),
+      files: sorted.map((file) => file.path),
+    };
+  } catch {
+    return { sha256: null, files: [] };
+  }
+}
+
+async function collectPackageFiles(packageRoot: string): Promise<readonly PackageFile[]> {
+  const files: PackageFile[] = [];
+  const pending: { readonly directory: string; readonly relativePath: string }[] = [
+    { directory: packageRoot, relativePath: "" },
+  ];
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) {
+      continue;
+    }
+    const entries = await readdir(current.directory, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      const path =
+        current.relativePath.length === 0 ? entry.name : `${current.relativePath}/${entry.name}`;
+      const absolutePath = join(current.directory, entry.name);
+      if (entry.isDirectory()) {
+        if (!IGNORED_PACKAGE_DIRECTORIES.has(entry.name)) {
+          pending.push({ directory: absolutePath, relativePath: path });
+        }
+      } else if (entry.isFile()) {
+        const metadata = await lstat(absolutePath);
+        files.push({ path, absolutePath, size: metadata.size });
+      }
+    }
+  }
+  return files;
+}
+
+function isRuntimeRelevantPackageFile(file: PackageFile): boolean {
+  return (
+    file.path === "package.json" ||
+    file.path === "bin" ||
+    file.path.startsWith("bin/") ||
+    file.path.startsWith("dist/") ||
+    file.path.endsWith(".node")
+  );
+}
+
+async function inspectFuzzerLockfile(): Promise<{
+  readonly path: string | null;
+  readonly sha256: string | null;
+}> {
+  for (const name of ["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"]) {
+    try {
+      const path = await realpath(join(FUZZER_ROOT, name));
+      return {
+        path,
+        sha256: createHash("sha256")
+          .update(await readFile(path))
+          .digest("hex"),
+      };
+    } catch {}
+  }
+  return { path: null, sha256: null };
 }
 
 type RolldownFunction = (inputOptions: InputOptions) => Promise<RolldownBuild>;
