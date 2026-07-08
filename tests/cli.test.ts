@@ -743,6 +743,16 @@ describe("writeFailureArtifacts", () => {
       const artifactHash = expectedArtifactDirectory.slice(
         expectedArtifactDirectory.lastIndexOf("-") + 1,
       );
+      const identity = (await readJson(join(artifactDirectory, "identity.json"))) as {
+        readonly inputs: {
+          readonly renderedSourceFiles: readonly {
+            readonly path: string;
+            readonly sha256: string;
+          }[];
+          readonly sourceManifest: { readonly sha256: string; readonly value: unknown };
+          readonly bundleManifest: { readonly sha256: string; readonly value: unknown };
+        };
+      };
 
       expect(artifactDirectory).toBe(expectedArtifactDirectory);
       expect(artifactHash).toMatch(/^[a-f0-9]{64}$/);
@@ -760,6 +770,16 @@ describe("writeFailureArtifacts", () => {
         coverageTags: generated.coverageTags,
         rolldownPackage: options.rolldownPackage,
         runtimeIdentity: result.runtimeIdentity,
+        renderedSourceFiles: identity.inputs.renderedSourceFiles,
+        sourceManifest: {
+          path: result.rendered.schedulePath,
+          sha256: identity.inputs.sourceManifest.sha256,
+        },
+        bundleManifest: {
+          path: result.rendered.schedulePath,
+          sha256: identity.inputs.bundleManifest.sha256,
+          isNull: false,
+        },
       });
       await expect(readJson(join(artifactDirectory, "identity.json"))).resolves.toMatchObject({
         hash: artifactHash,
@@ -774,6 +794,15 @@ describe("writeFailureArtifacts", () => {
           },
           rolldownPackage: options.rolldownPackage,
           runtimeIdentity: result.runtimeIdentity,
+          renderedSourceFiles: identity.inputs.renderedSourceFiles,
+          sourceManifest: {
+            sha256: identity.inputs.sourceManifest.sha256,
+            value: result.rendered.schedule,
+          },
+          bundleManifest: {
+            sha256: identity.inputs.bundleManifest.sha256,
+            value: result.bundleManifest,
+          },
           verdictSignature: result.verdict.signature,
         },
       });
@@ -854,6 +883,31 @@ describe("writeFailureArtifacts", () => {
         code: "ENOENT",
       });
       expect((await readdir(directory)).filter((name) => name.startsWith(".case-"))).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("records a deterministic null bundle manifest identity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-cli-null-manifest-"));
+    const result = failedCase(generateCase(7, DEFAULT_CASE_SIZE));
+
+    try {
+      const artifactDirectory = await writeFailureArtifacts(result, directory, 3);
+      await expect(readJson(join(artifactDirectory, "identity.json"))).resolves.toMatchObject({
+        inputs: {
+          bundleManifest: {
+            sha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+            value: null,
+          },
+        },
+      });
+      await expect(readJson(join(artifactDirectory, "case.json"))).resolves.toMatchObject({
+        bundleManifest: {
+          sha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+          isNull: true,
+        },
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -961,6 +1015,7 @@ describe("writeFailureArtifacts", () => {
         signature: "stable-signature",
       },
       bundleOutcome: ok([event("bundle", 1)]),
+      bundleManifest: renderProgram(generated.program).schedule,
       bundleFiles: [{ path: "entry.js", contents: Buffer.from("first\n") }],
       orderTrace: orderTraceAction(),
     } as const satisfies CampaignCaseResult;
@@ -979,14 +1034,37 @@ describe("writeFailureArtifacts", () => {
       ...base,
       bundleFiles: [{ path: "entry.js", contents: Buffer.from("second\n") }],
     } satisfies CampaignCaseResult;
+    const changedSource = {
+      ...base,
+      rendered: {
+        ...base.rendered,
+        files: base.rendered.files.map((file, index) =>
+          index === 0 ? { ...file, contents: `${file.contents}// changed\n` } : file,
+        ),
+      },
+    } satisfies CampaignCaseResult;
+    const changedBundleManifest = {
+      ...base,
+      bundleManifest: {
+        ...base.bundleManifest,
+        entries: base.bundleManifest.entries.map((entry, index) =>
+          index === 0 ? { ...entry, path: `${entry.path}.changed` } : entry,
+        ),
+      },
+    } satisfies CampaignCaseResult;
 
     expect(
       new Set(
-        [base, changedOutcome, changedTrace, changedBytes].map((result) =>
-          failureArtifactPath(result, directory, 3),
-        ),
+        [
+          base,
+          changedOutcome,
+          changedTrace,
+          changedBytes,
+          changedSource,
+          changedBundleManifest,
+        ].map((result) => failureArtifactPath(result, directory, 3)),
       ).size,
-    ).toBe(4);
+    ).toBe(6);
   });
 
   test("reports the current hashed artifact path from the campaign", async () => {

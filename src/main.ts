@@ -31,7 +31,7 @@ const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/
 let campaignEnvironmentLock = Promise.resolve();
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 2 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 3 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
@@ -444,6 +444,20 @@ interface FailureArtifactIdentity {
     readonly verdict: CampaignVerdict;
     readonly verdictSignature: string;
     readonly canonicalOrderTrace: StrictExecutionOrderPlanReady | null;
+    readonly renderedSourceFiles: readonly {
+      readonly path: string;
+      readonly sha256: string;
+    }[];
+    readonly sourceManifest: {
+      readonly path: string;
+      readonly sha256: string;
+      readonly value: ExecutionManifest;
+    };
+    readonly bundleManifest: {
+      readonly path: string;
+      readonly sha256: string;
+      readonly value: ExecutionManifest | null;
+    };
     readonly bundleFiles: readonly {
       readonly path: string;
       readonly sha256: string;
@@ -483,25 +497,61 @@ function createFailureArtifactIdentity(
     verdict: result.verdict,
     verdictSignature: result.verdict.signature,
     canonicalOrderTrace: result.orderTrace,
+    renderedSourceFiles: result.rendered.files
+      .map((file) => ({
+        path: file.path,
+        sha256: hashPathAndContents(file.path, Buffer.from(file.contents, "utf8")),
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path)),
+    sourceManifest: hashManifest(result.rendered.schedulePath, result.rendered.schedule),
+    bundleManifest: hashManifest(result.rendered.schedulePath, result.bundleManifest),
     bundleFiles: result.bundleFiles
       .map((file) => ({
         path: file.path,
-        sha256: hashCapturedFile(file),
+        sha256: hashPathAndContents(file.path, file.contents),
       }))
       .sort((left, right) => left.path.localeCompare(right.path)),
   };
   return {
-    hash: createHash("sha256").update(JSON.stringify(inputs)).digest("hex"),
+    hash: createHash("sha256").update(canonicalJsonStringify(inputs)).digest("hex"),
     inputs,
   };
 }
 
-function hashCapturedFile(file: CapturedFile): string {
-  return createHash("sha256")
-    .update(file.path)
-    .update(Uint8Array.of(0))
-    .update(file.contents)
-    .digest("hex");
+function hashPathAndContents(path: string, contents: Uint8Array): string {
+  return createHash("sha256").update(path).update(Uint8Array.of(0)).update(contents).digest("hex");
+}
+
+function hashManifest<T extends ExecutionManifest | null>(
+  path: string,
+  value: T,
+): { readonly path: string; readonly sha256: string; readonly value: T } {
+  return {
+    path,
+    sha256: hashPathAndContents(path, Buffer.from(canonicalJsonStringify(value), "utf8")),
+    value,
+  };
+}
+
+function canonicalJsonStringify(value: unknown): string {
+  return JSON.stringify(canonicalizeJsonValue(value));
+}
+
+function canonicalizeJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJsonValue);
+  }
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+
+  const record = value as Record<string, unknown>;
+  return Object.fromEntries(
+    Object.keys(record)
+      .sort()
+      .filter((key) => record[key] !== undefined)
+      .map((key) => [key, canonicalizeJsonValue(record[key])]),
+  );
 }
 
 function failureArtifactName(result: CampaignCaseResult, caseIndex: number, hash: string): string {
@@ -529,6 +579,16 @@ async function writeArtifactDirectory(
       coverageTags: result.generated.coverageTags,
       rolldownPackage: result.options.rolldownPackage,
       runtimeIdentity: result.runtimeIdentity,
+      renderedSourceFiles: identity.inputs.renderedSourceFiles,
+      sourceManifest: {
+        path: identity.inputs.sourceManifest.path,
+        sha256: identity.inputs.sourceManifest.sha256,
+      },
+      bundleManifest: {
+        path: identity.inputs.bundleManifest.path,
+        sha256: identity.inputs.bundleManifest.sha256,
+        isNull: identity.inputs.bundleManifest.value === null,
+      },
     }),
     writeJson(join(artifactDirectory, "identity.json"), identity),
     writeJson(join(artifactDirectory, "replay.json"), createReplayMetadata(result)),
