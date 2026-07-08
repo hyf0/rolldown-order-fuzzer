@@ -41,6 +41,12 @@ Half of the seeds select the `random-mixed` generator: a forward-edge random DAG
 
 Each result line contains the case index, replay seed, template, coverage tags, and exact verdict signature. The process exits `0` when every case passes, `1` when any case fails, and `2` for invalid arguments or campaign harness errors.
 
+A failing case's `model.json` can be reduced with the greedy shrinker, which keeps an edit only when the program stays valid and the verdict keeps the same failure kind (and error identity for crashes):
+
+```sh
+vp exec node src/shrink.ts --model <artifact>/model.json --out shrunk.json --rolldown-package <specifier>
+```
+
 ## Isolated Rolldown builds
 
 Each Rolldown build runs in a dedicated Node child process whose working directory is the adapter's unique temporary directory. The child imports the configured Rolldown package, reconstructs serializable input/output options and manual chunk groups, runs `rolldown`, `bundle.write`, and `bundle.close`, then returns only serializable output metadata.
