@@ -379,8 +379,11 @@ describe("withRolldownBuild", () => {
     const directory = await mkdtemp(join(tmpdir(), "rolldown-runtime-dependency-"));
     const dependencyDirectory = join(directory, "node_modules", "dependency");
     const dependencyPath = join(dependencyDirectory, "index.js");
+    const transitiveDirectory = join(directory, "node_modules", "transitive");
+    const transitivePath = join(transitiveDirectory, "index.js");
     const packagePath = join(directory, "index.mjs");
     await mkdir(dependencyDirectory, { recursive: true });
+    await mkdir(transitiveDirectory, { recursive: true });
     await writeFile(
       join(directory, "package.json"),
       `${JSON.stringify({
@@ -396,21 +399,52 @@ describe("withRolldownBuild", () => {
         version: "1.0.0",
         type: "commonjs",
         exports: "./index.js",
+        dependencies: { transitive: "1.0.0" },
       })}\n`,
+    );
+    await writeFile(
+      join(transitiveDirectory, "package.json"),
+      '{"name":"transitive","version":"1.0.0","main":"index.js"}\n',
     );
     await writeFile(packagePath, 'import "dependency"; export const rolldown = () => {};\n');
 
     try {
-      await writeFile(dependencyPath, "module.exports = 1;\n");
+      await writeFile(dependencyPath, 'module.exports = require("transitive");\n');
+      await writeFile(transitivePath, "module.exports = 1;\n");
       const first = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
-      await writeFile(dependencyPath, "module.exports = 2;\n");
+      await writeFile(transitivePath, "module.exports = 2;\n");
       const second = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
 
       expect(first.packageContentSha256).toBe(second.packageContentSha256);
-      expect(first.runtimeDependencyPackages).toHaveLength(1);
-      expect(first.runtimeDependencyPackages[0]?.contentSha256).not.toBe(
-        second.runtimeDependencyPackages[0]?.contentSha256,
+      expect(first.runtimeDependencyPackages.map((item) => item.name)).toEqual([
+        "dependency",
+        "transitive",
+      ]);
+      expect(first.runtimeDependencyPackages[1]?.contentSha256).not.toBe(
+        second.runtimeDependencyPackages[1]?.contentSha256,
       );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("records the target workspace lockfile", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-workspace-lockfile-"));
+    const packageDirectory = join(directory, "packages", "rolldown");
+    const entryPath = join(packageDirectory, "dist", "index.mjs");
+    const lockfilePath = join(directory, "pnpm-lock.yaml");
+    await mkdir(dirname(entryPath), { recursive: true });
+    await writeFile(
+      join(packageDirectory, "package.json"),
+      '{"type":"module","version":"1.0.0"}\n',
+    );
+    await writeFile(entryPath, "export const rolldown = () => {};\n");
+    await writeFile(lockfilePath, "lockfileVersion: '9.0'\n");
+
+    try {
+      const identity = await inspectRolldownRuntimeIdentity(pathToFileURL(entryPath).href);
+      expect(identity.compilerLockfilePath).toBe(await realpath(lockfilePath));
+      expect(identity.compilerLockfileSha256).toMatch(/^[a-f0-9]{64}$/);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1098,6 +1132,8 @@ describe("withRolldownBuild", () => {
     expect(
       buildChildExecArgv([
         "--conditions=build-child",
+        "-C",
+        "dev",
         "--import",
         "/tmp/register.mjs",
         "--inspect=127.0.0.1:9229",
@@ -1105,7 +1141,7 @@ describe("withRolldownBuild", () => {
         "--eval",
         "process.exit()",
       ]),
-    ).toEqual(["--conditions=build-child", "--import", "/tmp/register.mjs"]);
+    ).toEqual(["--conditions=build-child", "-C", "dev", "--import", "/tmp/register.mjs"]);
   });
 
   test("hashes an absolute native override despite ambiguous binding loaders", async () => {

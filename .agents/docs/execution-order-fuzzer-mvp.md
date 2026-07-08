@@ -110,7 +110,7 @@ The parent and child strictly validate their versioned protocol. Output filename
 
 Every build has a bounded timeout. Timeout handling terminates the child process tree with TERM followed by KILL and a bounded final-close grace, so a package loader or helper subprocess cannot stall a campaign indefinitely.
 
-The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 7 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity, including package source files, direct runtime dependencies, source-entry dev dependencies, and NAPI binding-selection environment. The adapter compares that identity before and after each build. The differential source-versus-bundle execution result is the sole semantic oracle.
+The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 8 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity, including package source files, recursive runtime dependencies, compiler and fuzzer lockfiles, fuzzer source, and NAPI binding-selection environment. The adapter compares that identity before and after each build. Replay commands require the recorded fuzzer source hash. The differential source-versus-bundle execution result is the sole semantic oracle.
 
 ## Regression policy
 

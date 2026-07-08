@@ -29,13 +29,14 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 7 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 8 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
   readonly cases: number;
   readonly rolldownPackage: string;
   readonly outDir: string;
+  readonly expectedFuzzerSha256?: string;
   readonly continueOnFail: boolean;
 }
 
@@ -136,13 +137,14 @@ const DEFAULT_OPTIONS: CampaignOptions = {
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--expected-fuzzer-sha256 HASH] [--continue-on-fail|--stop-on-fail]";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
   let cases = DEFAULT_OPTIONS.cases;
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
   let outDir = DEFAULT_OPTIONS.outDir;
+  let expectedFuzzerSha256: string | undefined;
   let continueOnFail = DEFAULT_OPTIONS.continueOnFail;
   let sawContinue = false;
   let sawStop = false;
@@ -162,6 +164,9 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
       case "--out-dir":
         outDir = readNonEmptyValue(argv, ++index, argument);
         break;
+      case "--expected-fuzzer-sha256":
+        expectedFuzzerSha256 = parseSha256(readArgumentValue(argv, ++index, argument), argument);
+        break;
       case "--continue-on-fail":
         sawContinue = true;
         continueOnFail = true;
@@ -180,7 +185,14 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   }
   validateSeedRange(seed, cases);
 
-  return { seed, cases, rolldownPackage, outDir, continueOnFail };
+  return {
+    seed,
+    cases,
+    rolldownPackage,
+    outDir,
+    ...(expectedFuzzerSha256 === undefined ? {} : { expectedFuzzerSha256 }),
+    continueOnFail,
+  };
 }
 
 export async function runCampaign(
@@ -214,6 +226,12 @@ async function runCampaignCases(
     const seed = (options.seed + caseIndex) % UINT32_RANGE;
     const generated = dependencies.generate(seed, DEFAULT_CASE_SIZE);
     const result = await dependencies.executeCase(generated, options);
+    if (
+      options.expectedFuzzerSha256 !== undefined &&
+      result.runtimeIdentity.fuzzerSourceSha256 !== options.expectedFuzzerSha256
+    ) {
+      throw new Error("Fuzzer source hash does not match replay");
+    }
     const currentRuntimeIdentity = canonicalJsonStringify(result.runtimeIdentity);
     if (runtimeIdentity === undefined) {
       runtimeIdentity = currentRuntimeIdentity;
@@ -869,30 +887,36 @@ function createReplayMetadata(result: CampaignCaseResult): {
   readonly options: CampaignOptions & { readonly size: number };
   readonly runtimeIdentity: ObservedRuntimeIdentity;
 } {
-  const options = {
+  const expectedFuzzerSha256 = result.runtimeIdentity.fuzzerSourceSha256;
+  const options: CampaignOptions & { readonly size: number } = {
     seed: result.generated.seed,
     size: result.generated.size,
     cases: 1,
     rolldownPackage: result.options.rolldownPackage,
     outDir: result.options.outDir,
+    ...(expectedFuzzerSha256 === null ? {} : { expectedFuzzerSha256 }),
     continueOnFail: false,
   };
+  const command = [
+    "vp",
+    "exec",
+    "node",
+    "src/main.ts",
+    "--seed",
+    String(options.seed),
+    "--cases",
+    "1",
+    "--rolldown-package",
+    options.rolldownPackage,
+    "--out-dir",
+    options.outDir,
+  ];
+  if (expectedFuzzerSha256 !== null) {
+    command.push("--expected-fuzzer-sha256", expectedFuzzerSha256);
+  }
+  command.push("--stop-on-fail");
   return {
-    command: [
-      "vp",
-      "exec",
-      "node",
-      "src/main.ts",
-      "--seed",
-      String(options.seed),
-      "--cases",
-      "1",
-      "--rolldown-package",
-      options.rolldownPackage,
-      "--out-dir",
-      options.outDir,
-      "--stop-on-fail",
-    ],
+    command,
     options,
     runtimeIdentity: result.runtimeIdentity,
   };
@@ -961,6 +985,13 @@ function parsePositiveInteger(value: string, argument: string): number {
     throw new Error(`${argument} must be a positive integer`);
   }
   return parsed;
+}
+
+function parseSha256(value: string, argument: string): string {
+  if (!/^[a-f0-9]{64}$/.test(value)) {
+    throw new Error(`${argument} must be a SHA-256 hash`);
+  }
+  return value;
 }
 
 function validateSeedRange(seed: number, cases: number): void {

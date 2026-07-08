@@ -106,8 +106,12 @@ export interface ObservedRuntimeIdentity {
   readonly packageJsonPath: string | null;
   readonly packageContentSha256: string | null;
   readonly packageContentFiles: readonly string[];
+  readonly compilerLockfilePath: string | null;
+  readonly compilerLockfileSha256: string | null;
   readonly fuzzerLockfilePath: string | null;
   readonly fuzzerLockfileSha256: string | null;
+  readonly fuzzerSourceSha256: string | null;
+  readonly fuzzerSourceFiles: readonly string[];
   readonly runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[];
   readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
   readonly napiRsForceWasi: string | null;
@@ -283,6 +287,8 @@ export async function inspectRolldownRuntimeIdentity(
   let packageJsonPath: string | null = null;
   let packageContentSha256: string | null = null;
   let packageContentFiles: readonly string[] = [];
+  let compilerLockfilePath: string | null = null;
+  let compilerLockfileSha256: string | null = null;
   let runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[] = [];
   let optionalBindingPackages: readonly ObservedBindingPackageIdentity[] = [];
   let runtimeBindingLoaderCandidates: readonly string[] = [];
@@ -305,11 +311,17 @@ export async function inspectRolldownRuntimeIdentity(
         packageRootPath = packageInfo.rootPath;
         packageJsonPath = packageInfo.packageJsonPath;
         packageVersion = packageInfo.version;
+        const compilerLockfile = await inspectNearestLockfile(packageInfo.rootPath);
+        compilerLockfilePath = compilerLockfile.path;
+        compilerLockfileSha256 = compilerLockfile.sha256;
         const packageContent = await hashPackageContents(packageInfo.rootPath);
         packageContentSha256 = packageContent.sha256;
         packageContentFiles = packageContent.files;
         const entryRelativePath = relative(packageInfo.rootPath, resolvedEntryPath);
-        const runtimeDependencyNames = new Set(packageInfo.runtimeDependencyNames);
+        const runtimeDependencyNames = new Set([
+          ...packageInfo.runtimeDependencyNames,
+          ...packageInfo.optionalDependencyNames,
+        ]);
         if (entryRelativePath === "src" || entryRelativePath.startsWith(`src${sep}`)) {
           for (const name of packageInfo.devDependencyNames) {
             runtimeDependencyNames.add(name);
@@ -336,6 +348,7 @@ export async function inspectRolldownRuntimeIdentity(
   }
 
   const lockfile = await inspectFuzzerLockfile();
+  const fuzzerSource = await inspectFuzzerSource();
   const napiRsNativeLibrary = await inspectNativeLibraryOverride(runtimeBindingLoaderCandidates);
 
   return {
@@ -351,8 +364,12 @@ export async function inspectRolldownRuntimeIdentity(
     packageJsonPath,
     packageContentSha256,
     packageContentFiles,
+    compilerLockfilePath,
+    compilerLockfileSha256,
     fuzzerLockfilePath: lockfile.path,
     fuzzerLockfileSha256: lockfile.sha256,
+    fuzzerSourceSha256: fuzzerSource.sha256,
+    fuzzerSourceFiles: fuzzerSource.files,
     runtimeDependencyPackages,
     optionalBindingPackages,
     napiRsForceWasi: process.env.NAPI_RS_FORCE_WASI ?? null,
@@ -506,6 +523,8 @@ interface PackageInfo {
   readonly version: string | null;
   readonly runtimeDependencyNames: readonly string[];
   readonly devDependencyNames: readonly string[];
+  readonly optionalDependencyNames: readonly string[];
+  readonly peerDependencyNames: readonly string[];
   readonly optionalBindingNames: readonly string[];
 }
 
@@ -518,6 +537,7 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
         readonly dependencies?: unknown;
         readonly devDependencies?: unknown;
         readonly optionalDependencies?: unknown;
+        readonly peerDependencies?: unknown;
         readonly version?: unknown;
       };
       return {
@@ -526,6 +546,8 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
         version: typeof packageJson.version === "string" ? packageJson.version : null,
         runtimeDependencyNames: readDependencyNames(packageJson.dependencies),
         devDependencyNames: readDependencyNames(packageJson.devDependencies),
+        optionalDependencyNames: readDependencyNames(packageJson.optionalDependencies),
+        peerDependencyNames: readDependencyNames(packageJson.peerDependencies),
         optionalBindingNames: readOptionalBindingNames(packageJson.optionalDependencies),
       };
     } catch {}
@@ -553,20 +575,38 @@ async function inspectPackageDependencies(
   packageInfo: PackageInfo,
   dependencyNames: readonly string[],
 ): Promise<readonly ObservedBindingPackageIdentity[]> {
-  const requireFromPackage = createRequire(packageInfo.packageJsonPath);
   const identities: ObservedBindingPackageIdentity[] = [];
-  for (const name of dependencyNames) {
+  const pending = dependencyNames.map((name) => ({ owner: packageInfo, name }));
+  const visitedRoots = new Set<string>();
+  while (pending.length > 0) {
+    const dependency = pending.shift();
+    if (dependency === undefined) {
+      continue;
+    }
     try {
-      const dependencyInfo = await resolveDependencyPackageInfo(requireFromPackage, name);
+      const dependencyInfo = await resolveDependencyPackageInfo(
+        createRequire(dependency.owner.packageJsonPath),
+        dependency.name,
+      );
+      if (!visitedRoots.add(dependencyInfo.rootPath)) {
+        continue;
+      }
       const contents = await hashPackageContents(dependencyInfo.rootPath);
       identities.push({
-        name,
+        name: dependency.name,
         version: dependencyInfo.version,
         packageRootPath: dependencyInfo.rootPath,
         packageJsonPath: dependencyInfo.packageJsonPath,
         contentSha256: contents.sha256,
         contentFiles: contents.files,
       });
+      for (const name of [
+        ...dependencyInfo.runtimeDependencyNames,
+        ...dependencyInfo.optionalDependencyNames,
+        ...dependencyInfo.peerDependencyNames,
+      ]) {
+        pending.push({ owner: dependencyInfo, name });
+      }
     } catch {}
   }
   return identities.sort((left, right) => left.name.localeCompare(right.name));
@@ -609,22 +649,28 @@ async function hashPackageContents(
       allFiles.length <= COMPACT_PACKAGE_MAX_FILES && totalSize <= COMPACT_PACKAGE_MAX_BYTES
         ? allFiles
         : allFiles.filter(isRuntimeRelevantPackageFile);
-    const sorted = [...selected].sort((left, right) => left.path.localeCompare(right.path));
-    const hash = createHash("sha256");
-    for (const file of sorted) {
-      hash.update(file.path).update(Uint8Array.of(0));
-      if (file.symlinkRealPath !== null) {
-        hash.update(file.symlinkRealPath).update(Uint8Array.of(0));
-      }
-      hash.update(await readFile(file.absolutePath)).update(Uint8Array.of(0));
-    }
-    return {
-      sha256: hash.digest("hex"),
-      files: sorted.map((file) => file.path),
-    };
+    return await hashPackageFiles(selected);
   } catch {
     return { sha256: null, files: [] };
   }
+}
+
+async function hashPackageFiles(
+  files: readonly PackageFile[],
+): Promise<{ readonly sha256: string; readonly files: readonly string[] }> {
+  const sorted = [...files].sort((left, right) => left.path.localeCompare(right.path));
+  const hash = createHash("sha256");
+  for (const file of sorted) {
+    hash.update(file.path).update(Uint8Array.of(0));
+    if (file.symlinkRealPath !== null) {
+      hash.update(file.symlinkRealPath).update(Uint8Array.of(0));
+    }
+    hash.update(await readFile(file.absolutePath)).update(Uint8Array.of(0));
+  }
+  return {
+    sha256: hash.digest("hex"),
+    files: sorted.map((file) => file.path),
+  };
 }
 
 async function collectPackageFiles(packageRoot: string): Promise<readonly PackageFile[]> {
@@ -690,18 +736,53 @@ async function inspectFuzzerLockfile(): Promise<{
   readonly path: string | null;
   readonly sha256: string | null;
 }> {
-  for (const name of ["package-lock.json", "npm-shrinkwrap.json", "pnpm-lock.yaml", "yarn.lock"]) {
-    try {
-      const path = await realpath(join(FUZZER_ROOT, name));
-      return {
-        path,
-        sha256: createHash("sha256")
-          .update(await readFile(path))
-          .digest("hex"),
-      };
-    } catch {}
+  return inspectNearestLockfile(FUZZER_ROOT);
+}
+
+async function inspectNearestLockfile(startDirectory: string): Promise<{
+  readonly path: string | null;
+  readonly sha256: string | null;
+}> {
+  let directory = startDirectory;
+  while (true) {
+    for (const name of [
+      "package-lock.json",
+      "npm-shrinkwrap.json",
+      "pnpm-lock.yaml",
+      "yarn.lock",
+    ]) {
+      try {
+        const path = await realpath(join(directory, name));
+        return {
+          path,
+          sha256: createHash("sha256")
+            .update(await readFile(path))
+            .digest("hex"),
+        };
+      } catch {}
+    }
+    const parent = dirname(directory);
+    if (parent === directory) {
+      return { path: null, sha256: null };
+    }
+    directory = parent;
   }
-  return { path: null, sha256: null };
+}
+
+async function inspectFuzzerSource(): Promise<{
+  readonly sha256: string | null;
+  readonly files: readonly string[];
+}> {
+  try {
+    const files = (await collectPackageFiles(FUZZER_ROOT)).filter(
+      (file) =>
+        file.path.startsWith("src/") ||
+        ["package.json", "package-lock.json", "tsconfig.json"].includes(file.path),
+    );
+    return await hashPackageFiles(files);
+  } catch {
+    return { sha256: null, files: [] };
+  }
 }
 
 interface BuiltRolldown {
@@ -991,6 +1072,7 @@ export function buildChildExecArgv(execArgv: readonly string[]): readonly string
   const result: string[] = [];
   const flagsWithValues = new Set([
     "--conditions",
+    "-C",
     "--import",
     "--require",
     "-r",

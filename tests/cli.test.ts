@@ -44,11 +44,12 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 7", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(7);
+  test("uses artifact schema version 8", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(8);
   });
 
   test("parses the complete campaign option set", () => {
+    const fuzzerHash = "a".repeat(64);
     expect(
       parseCliArgs([
         "--seed",
@@ -59,6 +60,8 @@ describe("parseCliArgs", () => {
         "file:///tmp/rolldown.mjs",
         "--out-dir",
         "artifacts",
+        "--expected-fuzzer-sha256",
+        fuzzerHash,
         "--continue-on-fail",
       ]),
     ).toEqual({
@@ -66,6 +69,7 @@ describe("parseCliArgs", () => {
       cases: 12,
       rolldownPackage: "file:///tmp/rolldown.mjs",
       outDir: "artifacts",
+      expectedFuzzerSha256: fuzzerHash,
       continueOnFail: true,
     });
 
@@ -87,6 +91,9 @@ describe("parseCliArgs", () => {
     );
     expect(() => parseCliArgs(["--rolldown-package", "--stop-on-fail"])).toThrowError(
       "Missing value for --rolldown-package",
+    );
+    expect(() => parseCliArgs(["--expected-fuzzer-sha256", "bad"])).toThrowError(
+      "--expected-fuzzer-sha256 must be a SHA-256 hash",
     );
     expect(() => parseCliArgs(["--continue-on-fail", "--stop-on-fail"])).toThrowError(
       "Choose only one of --continue-on-fail and --stop-on-fail",
@@ -199,6 +206,26 @@ describe("runCampaign", () => {
         writeLine: () => {},
       }),
     ).rejects.toThrowError("Rolldown runtime identity changed during campaign");
+  });
+
+  test("rejects a replay from a different fuzzer revision", async () => {
+    const expectedFuzzerSha256 = "a".repeat(64);
+
+    await expect(
+      runCampaign(campaignOptions({ expectedFuzzerSha256 }), {
+        executeCase: async (generated) => {
+          const result = passedCase(generated);
+          return {
+            ...result,
+            runtimeIdentity: {
+              ...result.runtimeIdentity,
+              fuzzerSourceSha256: "b".repeat(64),
+            },
+          };
+        },
+        writeLine: () => {},
+      }),
+    ).rejects.toThrowError("Fuzzer source hash does not match replay");
   });
 
   test("returns exit code 2 for classified harness failures", async () => {
@@ -485,12 +512,16 @@ describe("runCampaign", () => {
         packageJsonPath: await realpath(join(directory, "package.json")),
         packageContentSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
         packageContentFiles: ["package.json", "rolldown.mjs"],
+        compilerLockfilePath: null,
+        compilerLockfileSha256: null,
         fuzzerLockfilePath: await realpath(
           fileURLToPath(new URL("../package-lock.json", import.meta.url)),
         ),
         fuzzerLockfileSha256: createHash("sha256")
           .update(await readFile(fileURLToPath(new URL("../package-lock.json", import.meta.url))))
           .digest("hex"),
+        fuzzerSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+        fuzzerSourceFiles: expect.arrayContaining(["src/main.ts"]) as unknown as string[],
         runtimeDependencyPackages: [],
         optionalBindingPackages: [],
         napiRsForceWasi: null,
@@ -1013,6 +1044,8 @@ describe("writeFailureArtifacts", () => {
           "rolldown",
           "--out-dir",
           directory,
+          "--expected-fuzzer-sha256",
+          result.runtimeIdentity.fuzzerSourceSha256,
           "--stop-on-fail",
         ],
         options: {
@@ -1021,6 +1054,7 @@ describe("writeFailureArtifacts", () => {
           cases: 1,
           rolldownPackage: options.rolldownPackage,
           outDir: directory,
+          expectedFuzzerSha256: result.runtimeIdentity.fuzzerSourceSha256,
           continueOnFail: false,
         },
         runtimeIdentity: result.runtimeIdentity,
@@ -1421,8 +1455,12 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     packageJsonPath: null,
     packageContentSha256: null,
     packageContentFiles: [],
+    compilerLockfilePath: null,
+    compilerLockfileSha256: null,
     fuzzerLockfilePath: null,
     fuzzerLockfileSha256: null,
+    fuzzerSourceSha256: "a".repeat(64),
+    fuzzerSourceFiles: ["src/main.ts"],
     runtimeDependencyPackages: [],
     optionalBindingPackages: [],
     napiRsForceWasi: null,
