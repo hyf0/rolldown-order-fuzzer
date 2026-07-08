@@ -532,6 +532,18 @@ describe("runCampaign", () => {
       expect(failureArtifactPath(first, directory, 0)).toBe(
         failureArtifactPath(second, directory, 0),
       );
+      const firstArtifact = await writeFailureArtifacts(first, join(directory, "first"), 0);
+      const secondArtifact = await writeFailureArtifacts(second, join(directory, "second"), 0);
+      const firstPersistedOutcome = await readFile(
+        join(firstArtifact, "bundle-outcome.json"),
+        "utf8",
+      );
+      const secondPersistedOutcome = await readFile(
+        join(secondArtifact, "bundle-outcome.json"),
+        "utf8",
+      );
+      expect(secondPersistedOutcome).toBe(firstPersistedOutcome);
+      expect(firstPersistedOutcome).toContain("<rolldown-root>/source/");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1209,6 +1221,26 @@ describe("writeFailureArtifacts", () => {
         code: "ENOENT",
       });
       expect((await readdir(directory)).filter((name) => name.startsWith(".case-"))).toEqual([]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("rejects an existing artifact whose persisted contents were modified", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-cli-tampered-"));
+    const generated = generateCase(7, DEFAULT_CASE_SIZE);
+    const result = failedCase(generated);
+
+    try {
+      const artifactDirectory = await writeFailureArtifacts(result, directory, 3);
+      await writeFile(join(artifactDirectory, "signature.txt"), "tampered\n");
+
+      await expect(writeFailureArtifacts(result, directory, 3)).rejects.toThrow(
+        "Existing failure artifact is incomplete or has a different identity",
+      );
+      await expect(readFile(join(artifactDirectory, "signature.txt"), "utf8")).resolves.toBe(
+        "tampered\n",
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

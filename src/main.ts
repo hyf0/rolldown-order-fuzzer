@@ -419,42 +419,20 @@ async function requireCompleteExistingArtifact(
   const invalid = new Error(
     `Existing failure artifact is incomplete or has a different identity: ${artifactDirectory}`,
   );
-  let persistedIdentity: unknown;
-  try {
-    persistedIdentity = JSON.parse(
-      await readFile(join(artifactDirectory, "identity.json"), "utf8"),
-    ) as unknown;
-  } catch {
-    throw invalid;
-  }
-  if (canonicalJsonStringify(persistedIdentity) !== canonicalJsonStringify(identity)) {
-    throw invalid;
-  }
-
-  const requiredFiles = [
-    "identity.json",
-    "model.json",
-    "case.json",
-    "replay.json",
-    "source-manifest.json",
-    "bundle-manifest.json",
-    "source-outcome.json",
-    "bundle-outcome.json",
-    "order-trace.json",
-    "verdict.json",
-    "signature.txt",
-    ...result.rendered.files.map((file) => `source/${file.path}`),
-    ...result.bundleFiles.map((file) => `bundle/${file.path}`),
-  ];
-  for (const relativePath of requiredFiles) {
+  for (const file of createArtifactFiles(result, caseIndexFromIdentity(identity), identity)) {
     try {
-      if (!(await lstat(join(artifactDirectory, relativePath))).isFile()) {
+      const persisted = await readFile(join(artifactDirectory, file.path));
+      if (!persisted.equals(Buffer.from(file.contents))) {
         throw invalid;
       }
     } catch {
       throw invalid;
     }
   }
+}
+
+function caseIndexFromIdentity(identity: FailureArtifactIdentity): number {
+  return identity.inputs.case.index;
 }
 
 export function failureArtifactPath(
@@ -613,11 +591,27 @@ async function writeArtifactDirectory(
   caseIndex: number,
   identity: FailureArtifactIdentity,
 ): Promise<void> {
-  const sourceDirectory = join(artifactDirectory, "source");
-  await mkdir(sourceDirectory, { recursive: true });
-  await Promise.all([
-    writeJson(join(artifactDirectory, "model.json"), result.generated.program),
-    writeJson(join(artifactDirectory, "case.json"), {
+  await Promise.all(
+    createArtifactFiles(result, caseIndex, identity).map(async (file) => {
+      const path = join(artifactDirectory, file.path);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, file.contents);
+    }),
+  );
+}
+
+function createArtifactFiles(
+  result: CampaignCaseResult,
+  caseIndex: number,
+  identity: FailureArtifactIdentity,
+): CapturedFile[] {
+  const jsonFile = (path: string, value: unknown): CapturedFile => ({
+    path,
+    contents: Buffer.from(`${JSON.stringify(value, null, 2)}\n`, "utf8"),
+  });
+  return [
+    jsonFile("model.json", result.generated.program),
+    jsonFile("case.json", {
       artifactSchemaVersion: FAILURE_ARTIFACT_SCHEMA_VERSION,
       executionProtocolVersion: EXECUTION_PROTOCOL_VERSION,
       artifactIdentity: identity.hash,
@@ -639,26 +633,24 @@ async function writeArtifactDirectory(
         isNull: identity.inputs.bundleManifest.value === null,
       },
     }),
-    writeJson(join(artifactDirectory, "identity.json"), identity),
-    writeJson(join(artifactDirectory, "replay.json"), createReplayMetadata(result)),
-    writeJson(join(artifactDirectory, "source-manifest.json"), result.rendered.schedule),
-    writeJson(join(artifactDirectory, "bundle-manifest.json"), result.bundleManifest),
-    writeJson(join(artifactDirectory, "source-outcome.json"), result.sourceOutcome),
-    writeJson(join(artifactDirectory, "bundle-outcome.json"), result.bundleOutcome),
-    writeJson(join(artifactDirectory, "order-trace.json"), result.orderTrace),
-    writeJson(join(artifactDirectory, "verdict.json"), result.verdict),
-    writeFile(join(artifactDirectory, "signature.txt"), `${result.verdict.signature}\n`),
-    ...result.rendered.files.map(async (file) => {
-      const path = join(sourceDirectory, file.path);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, file.contents);
-    }),
-    ...result.bundleFiles.map(async (file) => {
-      const path = join(artifactDirectory, "bundle", file.path);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, file.contents);
-    }),
-  ]);
+    jsonFile("identity.json", identity),
+    jsonFile("replay.json", createReplayMetadata(result)),
+    jsonFile("source-manifest.json", result.rendered.schedule),
+    jsonFile("bundle-manifest.json", result.bundleManifest),
+    jsonFile("source-outcome.json", result.sourceOutcome),
+    jsonFile("bundle-outcome.json", identity.inputs.bundleOutcome),
+    jsonFile("order-trace.json", result.orderTrace),
+    jsonFile("verdict.json", result.verdict),
+    { path: "signature.txt", contents: Buffer.from(`${result.verdict.signature}\n`, "utf8") },
+    ...result.rendered.files.map((file) => ({
+      path: `source/${file.path}`,
+      contents: Buffer.from(file.contents, "utf8"),
+    })),
+    ...result.bundleFiles.map((file) => ({
+      path: `bundle/${file.path}`,
+      contents: file.contents,
+    })),
+  ];
 }
 
 async function pathExists(path: string): Promise<boolean> {
@@ -943,10 +935,6 @@ function validateSeedRange(seed: number, cases: number): void {
   if (!Number.isSafeInteger(seed + cases - 1)) {
     throw new Error("--seed and --cases must define a safe integer range");
   }
-}
-
-function writeJson(path: string, value: unknown): Promise<void> {
-  return writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function errorMessage(error: unknown): string {
