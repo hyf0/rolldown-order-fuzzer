@@ -47,7 +47,7 @@ describe("classifyVerdict", () => {
       kind: "mismatch",
       reason: "events-mismatch",
       signature:
-        'events-mismatch:source=[["source","evaluate",1]]:bundle=[["bundle","evaluate",2]]',
+        'events-mismatch:error=["TypeError","same failure"]:source=[["source","evaluate",1]]:bundle=[["bundle","evaluate",2]]',
     });
 
     const events = [event("shared", 1)];

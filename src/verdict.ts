@@ -76,7 +76,14 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
         `error-mismatch:source=${serializeError(source.error)}:bundle=${serializeError(bundle.error)}`,
       );
     }
-    return compareEvents(source.events, bundle.events);
+    const eventVerdict = compareEvents(source.events, bundle.events);
+    if (eventVerdict.kind === "pass") {
+      return eventVerdict;
+    }
+    return mismatch(
+      eventVerdict.reason,
+      `${eventVerdict.reason}:error=${serializeError(source.error)}:${eventVerdict.signature.slice(eventVerdict.reason.length + 1)}`,
+    );
   }
 
   if (bundle.status === "timeout") {
@@ -92,7 +99,7 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
 function compareEvents(
   expected: readonly ExecutionEvent[],
   actual: readonly ExecutionEvent[],
-): Verdict {
+): PassingVerdict | MismatchVerdict {
   if (eventsEqual(expected, actual)) {
     return PASS;
   }
