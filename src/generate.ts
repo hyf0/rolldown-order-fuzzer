@@ -14,6 +14,7 @@ export const MIXED_TEMPLATE_NAMES = [
   "cjs-requires-esm",
   "overlapping-entries",
   "manual-chunk-separation",
+  "dynamic-entry-cjs-carrier",
 ] as const;
 
 export type MixedTemplateName = (typeof MIXED_TEMPLATE_NAMES)[number];
@@ -62,6 +63,7 @@ const TEMPLATE_BUILDERS: Readonly<Record<MixedTemplateName, TemplateBuilder>> = 
   "cjs-requires-esm": buildCjsRequiresEsm,
   "overlapping-entries": buildOverlappingEntries,
   "manual-chunk-separation": buildManualChunkSeparation,
+  "dynamic-entry-cjs-carrier": buildDynamicEntryCjsCarrier,
 };
 
 function buildEsmImportsCjs(rng: SeededRng, size: number): TemplateResult {
@@ -226,6 +228,65 @@ function buildManualChunkSeparation(rng: SeededRng, size: number): TemplateResul
   };
 }
 
+function buildDynamicEntryCjsCarrier(rng: SeededRng, size: number): TemplateResult {
+  const earlyCount = 1 + Math.min(size - 1, 2);
+  const earlyModules = Array.from({ length: earlyCount }, (_, index) => {
+    const id = `early-${index}`;
+    return esmModule(id, [], events(id, rng, 1));
+  });
+  const cjsCount = 1 + Math.min(size - 1, 2);
+  const cjsModules = Array.from({ length: cjsCount }, (_, index): CjsModuleModel => {
+    const id = `cjs-leaf-${index}`;
+    return cjsModule(
+      id,
+      index + 1 < cjsCount ? [{ kind: "cjs-require", target: `cjs-leaf-${index + 1}` }] : [],
+      events(id, rng, 1),
+    );
+  });
+  const cjsDependency: EsmDependencyOperation = rng.boolean()
+    ? {
+        kind: "esm-value-import",
+        target: "cjs-leaf-0",
+        importedName: "value",
+        localName: "cjsValue",
+      }
+    : { kind: "esm-side-effect-import", target: "cjs-leaf-0" };
+  const carrier = esmModule("carrier", [cjsDependency], events("carrier", rng, 1));
+  const dynamicEntry = esmModule(
+    "dynamic-entry",
+    [
+      ...earlyModules.map((module) => ({
+        kind: "esm-side-effect-import" as const,
+        target: module.id,
+      })),
+      { kind: "esm-side-effect-import", target: carrier.id },
+    ],
+    events("dynamic-entry", rng, 1),
+  );
+  const entry = esmModule(
+    "entry",
+    [
+      {
+        kind: "esm-dynamic-import",
+        target: dynamicEntry.id,
+        registration: "load-dynamic-entry",
+      },
+    ],
+    events("entry", rng, 1),
+  );
+
+  return {
+    program: {
+      modules: [entry, dynamicEntry, ...earlyModules, carrier, ...cjsModules],
+      entries: [{ name: "main", moduleId: entry.id }],
+      schedule: [
+        { kind: "import-entry", entry: "main" },
+        { kind: "trigger-dynamic-import", registration: "load-dynamic-entry" },
+      ],
+    },
+  };
+}
+
 export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   const tags = new Set<string>();
   const modulesById = new Map(program.modules.map((module) => [module.id, module]));
@@ -239,6 +300,9 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
 
   for (const module of program.modules) {
     for (const dependency of module.dependencies) {
+      if (dependency.kind === "esm-dynamic-import") {
+        tags.add("mechanism:dynamic-import");
+      }
       const target = modulesById.get(dependency.target);
       if (module.format === "esm" && target?.format === "cjs") {
         tags.add("mechanism:esm-imports-cjs");
@@ -269,6 +333,9 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   }
   if (requiresSynchronousEsm) {
     tags.add("mechanism:synchronous-esm");
+  }
+  if (program.schedule.some((operation) => operation.kind === "trigger-dynamic-import")) {
+    tags.add("mechanism:scheduled-dynamic-import");
   }
 
   const hasOverlappingEntries = entriesOverlap(program, modulesById);
@@ -301,6 +368,9 @@ function deriveTemplateName(
   hasOverlappingEntries: boolean,
   esmCarriersByCjsTarget: ReadonlyMap<string, ReadonlySet<string>>,
 ): MixedTemplateName | undefined {
+  if (tags.has("mechanism:scheduled-dynamic-import") && tags.has("mechanism:esm-imports-cjs")) {
+    return "dynamic-entry-cjs-carrier";
+  }
   if ((program.manualChunkGroups?.length ?? 0) > 0) {
     return "manual-chunk-separation";
   }

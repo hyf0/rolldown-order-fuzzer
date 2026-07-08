@@ -867,7 +867,7 @@ describe("runCampaign", () => {
       const summary = await runCampaign(
         campaignOptions({
           seed: 0,
-          cases: 9,
+          cases: 18,
           continueOnFail: true,
           outDir: directory,
         }),
@@ -878,8 +878,8 @@ describe("runCampaign", () => {
         },
       );
 
-      expect(summary).toEqual({ casesRun: 9, passed: 9, failed: 0, exitCode: 0 });
-      expect(lines.at(-1)).toBe("summary cases=9 pass=9 fail=0");
+      expect(summary).toEqual({ casesRun: 18, passed: 18, failed: 0, exitCode: 0 });
+      expect(lines.at(-1)).toBe("summary cases=18 pass=18 fail=0");
       for (const template of MIXED_TEMPLATE_NAMES) {
         expect(lines.some((line) => line.includes(`template=${template}`))).toBe(true);
       }

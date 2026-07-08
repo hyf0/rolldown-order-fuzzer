@@ -35,6 +35,16 @@ describe("generateCase", () => {
     expect([...reached].sort()).toEqual([...MIXED_TEMPLATE_NAMES].sort());
   });
 
+  test("generates scheduled dynamic entries that execute through a CJS carrier", () => {
+    const generated = Array.from({ length: 1_000 }, (_, seed) => generateCase(seed, 4)).find(
+      (candidate) =>
+        candidate.coverageTags.includes("mechanism:scheduled-dynamic-import") &&
+        candidate.coverageTags.includes("mechanism:esm-imports-cjs"),
+    );
+
+    expect(generated).toBeDefined();
+  });
+
   test("returns valid programs with template and mechanism coverage tags", () => {
     const casesByTemplate = new Map<MixedTemplateName, ReturnType<typeof generateCase>>();
 
@@ -113,6 +123,26 @@ function assertTemplateGraph(template: MixedTemplateName, program: ProgramModel)
     expect(intersection(reachable[0] ?? new Set(), reachable[1] ?? new Set()).size).toBeGreaterThan(
       0,
     );
+    return;
+  }
+
+  if (template === "dynamic-entry-cjs-carrier") {
+    const dynamicRegistrations = new Set(
+      program.modules.flatMap((module) =>
+        module.dependencies
+          .filter((dependency) => dependency.kind === "esm-dynamic-import")
+          .map((dependency) => dependency.registration),
+      ),
+    );
+    expect(dynamicRegistrations.size).toBeGreaterThan(0);
+    expect(
+      program.schedule.some(
+        (operation) =>
+          operation.kind === "trigger-dynamic-import" &&
+          dynamicRegistrations.has(operation.registration),
+      ),
+    ).toBe(true);
+    expect(esmToCjsEdges(program, modulesById).length).toBeGreaterThan(0);
     return;
   }
 
