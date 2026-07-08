@@ -142,7 +142,15 @@ function validateModules(
         );
       }
 
-      if (typeof event.value === "number" && !Number.isFinite(event.value)) {
+      if ("binding" in event && !localBindings.has(event.binding)) {
+        errors.push(
+          `modules[${moduleIndex}].events[${eventIndex}].binding: unknown imported binding ${quote(event.binding)}`,
+        );
+      } else if (
+        "value" in event &&
+        typeof event.value === "number" &&
+        !Number.isFinite(event.value)
+      ) {
         errors.push(
           `modules[${moduleIndex}].events[${eventIndex}].value: expected a finite JSON number`,
         );

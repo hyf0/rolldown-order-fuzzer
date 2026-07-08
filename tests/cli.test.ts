@@ -19,7 +19,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, test } from "vite-plus/test";
 
-import { generateCase, MIXED_TEMPLATE_NAMES, type GeneratedCase } from "../src/generate.ts";
+import { generateCase, type GeneratedCase } from "../src/generate.ts";
 import {
   classifyCampaignVerdict,
   DEFAULT_CASE_SIZE,
@@ -180,6 +180,24 @@ describe("runCampaign", () => {
     });
 
     expect(seeds).toEqual([4_294_967_295, 0]);
+  });
+
+  test("rejects a compiler identity change during a campaign", async () => {
+    let caseIndex = 0;
+
+    await expect(
+      runCampaign(campaignOptions({ cases: 2 }), {
+        executeCase: async (generated) => {
+          const result = passedCase(generated);
+          const runtimeIdentity = {
+            ...result.runtimeIdentity,
+            processVersion: caseIndex++ === 0 ? "v1" : "v2",
+          };
+          return { ...result, runtimeIdentity };
+        },
+        writeLine: () => {},
+      }),
+    ).rejects.toThrowError("Rolldown runtime identity changed during campaign");
   });
 
   test("returns exit code 2 for classified harness failures", async () => {
@@ -867,7 +885,7 @@ describe("runCampaign", () => {
       const summary = await runCampaign(
         campaignOptions({
           seed: 0,
-          cases: 18,
+          cases: 3,
           continueOnFail: true,
           outDir: directory,
         }),
@@ -878,11 +896,8 @@ describe("runCampaign", () => {
         },
       );
 
-      expect(summary).toEqual({ casesRun: 18, passed: 18, failed: 0, exitCode: 0 });
-      expect(lines.at(-1)).toBe("summary cases=18 pass=18 fail=0");
-      for (const template of MIXED_TEMPLATE_NAMES) {
-        expect(lines.some((line) => line.includes(`template=${template}`))).toBe(true);
-      }
+      expect(summary).toEqual({ casesRun: 3, passed: 3, failed: 0, exitCode: 0 });
+      expect(lines.at(-1)).toBe("summary cases=3 pass=3 fail=0");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

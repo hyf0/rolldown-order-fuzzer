@@ -2,11 +2,20 @@ export type ModuleFormat = "esm" | "cjs";
 
 export type EventValue = string | number | boolean | null;
 
-export interface EventRecord {
+interface EventRecordBase {
   readonly module: string;
   readonly phase: string;
+}
+
+export interface LiteralEventRecord extends EventRecordBase {
   readonly value: EventValue;
 }
+
+export interface BindingEventRecord extends EventRecordBase {
+  readonly binding: string;
+}
+
+export type EventRecord = LiteralEventRecord | BindingEventRecord;
 
 export interface EsmSideEffectImportOperation {
   readonly kind: "esm-side-effect-import";

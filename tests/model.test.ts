@@ -514,6 +514,25 @@ describe("validateProgramModel", () => {
     ]);
   });
 
+  test("rejects events that observe an unavailable binding", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "entry", phase: "observe", binding: "missing" }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].events[0].binding: unknown imported binding "missing"',
+    ]);
+  });
+
   test("returns multiple validation errors in model order", () => {
     const program = {
       modules: [

@@ -22,7 +22,7 @@ The first campaign targets synchronous ESM/CommonJS interaction. Exact top-level
 
 `ProgramModel` contains modules, named entries, an explicit schedule, and optional manual chunk groups.
 
-Each `ModuleModel` has a stable ID, a format (`esm` or `cjs`), ordered dependency operations, and ordered event operations. The model must reject dangling references, duplicate module IDs, invalid entry IDs, and unsupported syntax combinations.
+Each `ModuleModel` has a stable ID, a format (`esm` or `cjs`), ordered dependency operations, and ordered event operations. Events can record a literal or an imported binding. The model must reject dangling references, unavailable observed bindings, duplicate module IDs, invalid entry IDs, and unsupported syntax combinations.
 
 Initial dependency operations:
 
@@ -97,6 +97,7 @@ Generation is deterministic from seed and size. The first mixed campaign covers:
 - multiple entries with overlapping mixed dependencies
 - manual chunk groups that separate carriers from interop modules
 - scheduled dynamic entries that execute ordinary ESM before an ESM-to-CJS carrier
+- CJS entries that synchronously reference another wrapped entry
 
 Random generation starts after fixed scenarios pass through the complete pipeline.
 

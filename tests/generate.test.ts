@@ -45,6 +45,37 @@ describe("generateCase", () => {
     expect(generated).toBeDefined();
   });
 
+  test("observes every generated value import", () => {
+    let valueImportCount = 0;
+
+    for (let seed = 0; seed < 1_000; seed += 1) {
+      const generated = generateCase(seed, 4);
+      for (const module of generated.program.modules) {
+        for (const dependency of module.dependencies) {
+          if (dependency.kind !== "esm-value-import") {
+            continue;
+          }
+          valueImportCount += 1;
+          expect(
+            module.events.some(
+              (event) => "binding" in event && event.binding === dependency.localName,
+            ),
+          ).toBe(true);
+        }
+      }
+    }
+
+    expect(valueImportCount).toBeGreaterThan(0);
+  });
+
+  test("generates internal references to wrapped entry modules", () => {
+    const generated = Array.from({ length: 1_000 }, (_, seed) => generateCase(seed, 4)).find(
+      (candidate) => candidate.coverageTags.includes("mechanism:internal-entry-reference"),
+    );
+
+    expect(generated).toBeDefined();
+  });
+
   test("returns valid programs with template and mechanism coverage tags", () => {
     const casesByTemplate = new Map<MixedTemplateName, ReturnType<typeof generateCase>>();
 
@@ -143,6 +174,27 @@ function assertTemplateGraph(template: MixedTemplateName, program: ProgramModel)
       ),
     ).toBe(true);
     expect(esmToCjsEdges(program, modulesById).length).toBeGreaterThan(0);
+    return;
+  }
+
+  if (template === "internal-wrapped-entry-order") {
+    const entryModuleIds = new Set(program.entries.map((entry) => entry.moduleId));
+    expect(
+      program.modules.some((module) =>
+        module.dependencies.some(
+          (dependency) => module.id !== dependency.target && entryModuleIds.has(dependency.target),
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      program.modules.some(
+        (module) =>
+          module.format === "cjs" &&
+          module.dependencies.some(
+            (dependency) => modulesById.get(dependency.target)?.format === "esm",
+          ),
+      ),
+    ).toBe(true);
     return;
   }
 

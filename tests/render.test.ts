@@ -127,6 +127,46 @@ describe("renderProgram", () => {
     );
   });
 
+  test("renders imported binding observations as event values", async () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "value",
+              importedName: "answer",
+              localName: "importedAnswer",
+            },
+          ],
+          events: [{ module: "entry", phase: "observe", binding: "importedAnswer" }],
+        },
+        {
+          id: "value",
+          format: "esm",
+          dependencies: [],
+          events: [],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0000.mjs")).toContain(
+      'globalThis.__orderEvent({"module":"entry","phase":"observe","value":importedAnswer});',
+    );
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toMatchObject({
+        status: "ok",
+        events: [{ module: "entry", phase: "observe", value: "answer" }],
+      });
+    });
+  });
+
   test("renders top-level CJS require and one shared CJS carrier path", async () => {
     const program = {
       modules: [

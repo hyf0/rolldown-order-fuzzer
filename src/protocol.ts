@@ -1,4 +1,4 @@
-import type { EventRecord, EventValue, ModuleFormat, ScheduleOperation } from "./model.ts";
+import type { EventValue, ModuleFormat, ScheduleOperation } from "./model.ts";
 
 export const EXECUTION_PROTOCOL_VERSION = 1 as const;
 export const MAX_EXECUTION_EVENTS = 512 as const;
@@ -15,8 +15,11 @@ export interface ExecutionManifest {
   readonly operations: readonly ScheduleOperation[];
 }
 
-export interface ExecutionEvent extends EventRecord {
+export interface ExecutionEvent {
   readonly version: typeof EXECUTION_PROTOCOL_VERSION;
+  readonly module: string;
+  readonly phase: string;
+  readonly value: EventValue;
 }
 
 export interface NormalizedError {

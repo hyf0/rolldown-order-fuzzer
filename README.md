@@ -36,7 +36,7 @@ Each case uses size `4`. Campaign seeds increment by one and wrap as unsigned 32
 vp exec node src/main.ts --seed <reported-seed> --cases 1
 ```
 
-Generation selects one controlled template and varies only bounded graph parameters, import forms, event values, and schedule order. The MVP templates cover ESM importing side-effectful CJS, multiple ESM carriers sharing CJS, CJS requiring synchronous ESM, overlapping multiple entries, manual chunks separating carriers from interop modules, and scheduled dynamic entries whose eager dependency order crosses an ESM-to-CJS carrier. Coverage tags are derived from the resulting `ProgramModel`, not declared by the selected template.
+Generation selects one controlled template and varies only bounded graph parameters, import forms, event values, and schedule order. The MVP templates cover ESM importing side-effectful CJS, multiple ESM carriers sharing CJS, CJS requiring synchronous ESM, overlapping multiple entries, manual chunks separating carriers from interop modules, scheduled dynamic entries whose eager dependency order crosses an ESM-to-CJS carrier, and internal references to wrapped entry modules. Generated value imports are observed through the imported binding. Coverage tags are derived from the resulting `ProgramModel`, not declared by the selected template.
 
 Each result line contains the case index, replay seed, template, coverage tags, and exact verdict signature. The process exits `0` when every case passes, `1` when any case fails, and `2` for invalid arguments or campaign harness errors.
 
@@ -45,6 +45,8 @@ Each result line contains the case index, replay seed, template, coverage tags, 
 Each Rolldown build runs in a dedicated Node child process whose working directory is the adapter's unique temporary directory. The child imports the configured Rolldown package, reconstructs serializable input/output options and manual chunk groups, runs `rolldown`, `bundle.write`, and `bundle.close`, then returns only serializable output metadata.
 
 Both sides structurally validate the versioned child protocol before using it, including absolute paths, manual groups, output metadata, and error fields. The child inherits only safe Node execution arguments needed for TypeScript/loaders; inspector and eval flags are not forwarded.
+
+A campaign pins the first case's observed Node, package, lockfile, and native-binding identity. It aborts if that identity changes between cases.
 
 Every emitted chunk and asset filename must be a canonical forward-slash relative path confined to the bundle directory; absolute paths, drive/UNC paths, NULs, backslashes, and dot segments are rejected before manifest mapping. Bundle manifest mapping considers only output chunks explicitly marked as entries.
 

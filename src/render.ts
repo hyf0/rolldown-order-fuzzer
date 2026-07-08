@@ -158,8 +158,10 @@ function renderModule(
 }
 
 function renderEvents(module: ModuleModel): string[] {
-  return module.events.map(
-    (event) => `globalThis.__orderEvent(${serializeJavaScriptValue(event)});`,
+  return module.events.map((event) =>
+    "binding" in event
+      ? `globalThis.__orderEvent({"module":${serializeJavaScriptValue(event.module)},"phase":${serializeJavaScriptValue(event.phase)},"value":${event.binding}});`
+      : `globalThis.__orderEvent(${serializeJavaScriptValue(event)});`,
   );
 }
 

@@ -208,11 +208,18 @@ async function runCampaignCases(
   let failed = 0;
   let casesRun = 0;
   let sawHarnessFailure = false;
+  let runtimeIdentity: string | undefined;
 
   for (let caseIndex = 0; caseIndex < options.cases; caseIndex += 1) {
     const seed = (options.seed + caseIndex) % UINT32_RANGE;
     const generated = dependencies.generate(seed, DEFAULT_CASE_SIZE);
     const result = await dependencies.executeCase(generated, options);
+    const currentRuntimeIdentity = canonicalJsonStringify(result.runtimeIdentity);
+    if (runtimeIdentity === undefined) {
+      runtimeIdentity = currentRuntimeIdentity;
+    } else if (runtimeIdentity !== currentRuntimeIdentity) {
+      throw new Error(`Rolldown runtime identity changed during campaign at case ${caseIndex}`);
+    }
     const didPass = result.verdict.kind === "pass";
     let artifactDirectory: string | undefined;
 
