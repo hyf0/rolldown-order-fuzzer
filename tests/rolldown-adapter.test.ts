@@ -391,7 +391,12 @@ describe("withRolldownBuild", () => {
     );
     await writeFile(
       join(dependencyDirectory, "package.json"),
-      `${JSON.stringify({ name: "dependency", version: "1.0.0", main: "index.js" })}\n`,
+      `${JSON.stringify({
+        name: "dependency",
+        version: "1.0.0",
+        type: "commonjs",
+        exports: "./index.js",
+      })}\n`,
     );
     await writeFile(packagePath, 'import "dependency"; export const rolldown = () => {};\n');
 

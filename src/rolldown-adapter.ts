@@ -557,23 +557,39 @@ async function inspectPackageDependencies(
   const identities: ObservedBindingPackageIdentity[] = [];
   for (const name of dependencyNames) {
     try {
-      const packageJsonPath = await realpath(requireFromPackage.resolve(`${name}/package.json`));
-      const packageRootPath = await realpath(dirname(packageJsonPath));
-      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
-        readonly version?: unknown;
-      };
-      const contents = await hashPackageContents(packageRootPath);
+      const dependencyInfo = await resolveDependencyPackageInfo(requireFromPackage, name);
+      const contents = await hashPackageContents(dependencyInfo.rootPath);
       identities.push({
         name,
-        version: typeof packageJson.version === "string" ? packageJson.version : null,
-        packageRootPath,
-        packageJsonPath,
+        version: dependencyInfo.version,
+        packageRootPath: dependencyInfo.rootPath,
+        packageJsonPath: dependencyInfo.packageJsonPath,
         contentSha256: contents.sha256,
         contentFiles: contents.files,
       });
     } catch {}
   }
   return identities.sort((left, right) => left.name.localeCompare(right.name));
+}
+
+async function resolveDependencyPackageInfo(
+  requireFromPackage: NodeJS.Require,
+  name: string,
+): Promise<PackageInfo> {
+  try {
+    const packageJsonPath = await realpath(requireFromPackage.resolve(`${name}/package.json`));
+    const packageInfo = await findNearestPackageInfo(dirname(packageJsonPath));
+    if (packageInfo !== null) {
+      return packageInfo;
+    }
+  } catch {}
+
+  const entryPath = await realpath(requireFromPackage.resolve(name));
+  const packageInfo = await findNearestPackageInfo(dirname(entryPath));
+  if (packageInfo === null) {
+    throw new Error(`Could not locate package metadata for ${name}`);
+  }
+  return packageInfo;
 }
 
 interface PackageFile {
