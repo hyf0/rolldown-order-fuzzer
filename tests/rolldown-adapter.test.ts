@@ -20,11 +20,19 @@ import { executeManifest } from "../src/execute.ts";
 import { generateCase } from "../src/generate.ts";
 import type { ProgramModel } from "../src/model.ts";
 import {
+  traceChildExecArgv,
   withRolldownBuild,
   type RolldownAdapterResult,
   type RolldownBuildArtifacts,
 } from "../src/rolldown-adapter.ts";
 import { renderProgram } from "../src/render.ts";
+import {
+  parseTraceChildRequest,
+  parseTraceChildResponse,
+  runTraceChildFromUnknown,
+  TRACE_CHILD_PROTOCOL_VERSION,
+  type TraceChildRequest,
+} from "../src/rolldown-trace-child.ts";
 import { classifyVerdict } from "../src/verdict.ts";
 
 describe("withRolldownBuild", () => {
@@ -379,6 +387,54 @@ describe("withRolldownBuild", () => {
     delete state.__rolldownAdapterInputPath;
   });
 
+  test("never selects a non-entry chunk as an emitted entry", async () => {
+    const program = singleEntryProgram();
+
+    await withTemporaryModule(
+      [
+        "export async function rolldown(options) {",
+        "  return {",
+        "    async write() {",
+        "      const facadeModuleId = Object.values(options.input)[0];",
+        "      return {",
+        "        output: [",
+        "          {",
+        '            type: "chunk",',
+        '            fileName: "chunks/wrong.js",',
+        '            name: "__entry_0000",',
+        "            isEntry: false,",
+        "            facadeModuleId,",
+        "          },",
+        "          {",
+        '            type: "chunk",',
+        '            fileName: "entries/right.js",',
+        '            name: "different-name",',
+        "            isEntry: true,",
+        "            facadeModuleId,",
+        "          },",
+        "        ],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (artifacts) => artifacts.manifest.entries,
+          { packageSpecifier },
+        );
+
+        expect(successValue(result)).toEqual([
+          { name: "main", path: "entries/right.js", format: "esm" },
+        ]);
+      },
+    );
+  });
+
   test("maps entries and emitted files deterministically for package and file URL specifiers", async () => {
     const program = {
       modules: [
@@ -667,6 +723,123 @@ describe("withRolldownBuild", () => {
         await rm(sentinelDirectory, { recursive: true, force: true });
       }
     }
+  });
+
+  test("validates traced child requests before loading Rolldown", async () => {
+    const valid = validTraceChildRequest();
+    expect(parseTraceChildRequest(valid)).toEqual(valid);
+
+    const invalid = [
+      null,
+      {},
+      { ...valid, version: 2 },
+      { ...valid, packageSpecifier: "" },
+      { ...valid, input: [] },
+      { ...valid, input: { main: 1 } },
+      { ...valid, sourceDirectory: "relative/source" },
+      { ...valid, bundleDirectory: "relative/bundle" },
+      { ...valid, modulePaths: [["entry"]] },
+      {
+        ...valid,
+        manualChunkGroups: [{ name: "shared", modulePaths: ["relative/module.mjs"] }],
+      },
+      { ...valid, output: { ...valid.output, format: "cjs" } },
+      { ...valid, output: { ...valid.output, strictExecutionOrder: false } },
+    ];
+    for (const value of invalid) {
+      expect(() => parseTraceChildRequest(value)).toThrow(TypeError);
+    }
+
+    await expect(runTraceChildFromUnknown({ ...valid, version: 2 })).resolves.toMatchObject({
+      status: "failure",
+      failureStatus: "harness-error",
+      stage: "build",
+      error: { name: "TypeError" },
+    });
+  });
+
+  test("validates traced child responses before parent manifest mapping", () => {
+    const valid = {
+      version: TRACE_CHILD_PROTOCOL_VERSION,
+      status: "ok",
+      outputFiles: [
+        { type: "asset", fileName: "asset.txt" },
+        {
+          type: "chunk",
+          fileName: "entry.js",
+          name: "entry",
+          isEntry: true,
+          facadeModuleId: null,
+        },
+      ],
+      orderTrace: null,
+    } as const;
+    expect(parseTraceChildResponse(valid)).toEqual(valid);
+
+    const invalid = [
+      null,
+      {},
+      { ...valid, status: "unknown" },
+      { ...valid, outputFiles: null },
+      {
+        ...valid,
+        outputFiles: [
+          {
+            type: "chunk",
+            fileName: "entry.js",
+            name: "entry",
+            isEntry: "yes",
+            facadeModuleId: null,
+          },
+        ],
+      },
+      {
+        ...valid,
+        outputFiles: [
+          {
+            type: "chunk",
+            fileName: "entry.js",
+            name: "entry",
+            isEntry: true,
+            facadeModuleId: 1,
+          },
+        ],
+      },
+      { ...valid, orderTrace: {} },
+      {
+        version: TRACE_CHILD_PROTOCOL_VERSION,
+        status: "failure",
+        failureStatus: "harness-error",
+        stage: "build",
+        error: { name: 1, message: "bad" },
+        orderTrace: null,
+      },
+      {
+        version: TRACE_CHILD_PROTOCOL_VERSION,
+        status: "failure",
+        failureStatus: "unknown",
+        stage: "build",
+        error: { name: "Error", message: "bad" },
+        orderTrace: null,
+      },
+    ];
+    for (const value of invalid) {
+      expect(() => parseTraceChildResponse(value)).toThrow(TypeError);
+    }
+  });
+
+  test("forwards safe TypeScript execArgv without inspector conflicts", () => {
+    expect(
+      traceChildExecArgv([
+        "--conditions=trace-child",
+        "--import",
+        "/tmp/register.mjs",
+        "--inspect=127.0.0.1:9229",
+        "--inspect-brk",
+        "--eval",
+        "process.exit()",
+      ]),
+    ).toEqual(["--conditions=trace-child", "--import", "/tmp/register.mjs"]);
   });
 
   test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {
@@ -1288,6 +1461,28 @@ async function sessionDirectoryNames(root: string): Promise<string[]> {
     }
     throw error;
   }
+}
+
+function validTraceChildRequest(): TraceChildRequest {
+  return {
+    version: TRACE_CHILD_PROTOCOL_VERSION,
+    packageSpecifier: "rolldown",
+    input: { main: "/tmp/source/entry.mjs" },
+    preserveEntrySignatures: "allow-extension",
+    sourceDirectory: "/tmp/source",
+    bundleDirectory: "/tmp/bundle",
+    modulePaths: [["entry", "entry.mjs"]],
+    manualChunkGroups: [{ name: "shared", modulePaths: ["/tmp/source/shared.mjs"] }],
+    output: {
+      format: "esm",
+      strictExecutionOrder: true,
+      entryFileNames: "entries/[name].js",
+      chunkFileNames: "chunks/[name].js",
+      assetFileNames: "assets/[name][extname]",
+      cleanDir: false,
+      minify: false,
+    },
+  };
 }
 
 function orderTraceAction() {

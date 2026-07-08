@@ -14,6 +14,7 @@ import type {
 
 import {
   canonicalizeStrictExecutionOrderModuleIds,
+  parseStrictExecutionOrderPlanReady,
   parseStrictExecutionOrderLogs,
   type StrictExecutionOrderPlanReady,
 } from "./order-trace.ts";
@@ -73,6 +74,153 @@ export interface TraceChildFailure {
 export type TraceChildResponse = TraceChildSuccess | TraceChildFailure;
 
 type RolldownFunction = (inputOptions: InputOptions) => Promise<RolldownBuild>;
+
+export function parseTraceChildRequest(value: unknown): TraceChildRequest {
+  const request = requireRecord(value, "traced build request");
+  if (request.version !== TRACE_CHILD_PROTOCOL_VERSION) {
+    throw new TypeError(`Unsupported traced build request version: ${String(request.version)}`);
+  }
+  const packageSpecifier = requireNonEmptyString(
+    request.packageSpecifier,
+    "traced build packageSpecifier",
+  );
+  const inputRecord = requireRecord(request.input, "traced build input");
+  const input = Object.fromEntries(
+    Object.entries(inputRecord).map(([name, path]) => [
+      name,
+      requireNonEmptyString(path, `traced build input ${JSON.stringify(name)}`),
+    ]),
+  );
+  if (request.preserveEntrySignatures !== "allow-extension") {
+    throw new TypeError("traced build preserveEntrySignatures must be allow-extension");
+  }
+  const sourceDirectory = requireAbsolutePath(
+    request.sourceDirectory,
+    "traced build sourceDirectory",
+  );
+  const bundleDirectory = requireAbsolutePath(
+    request.bundleDirectory,
+    "traced build bundleDirectory",
+  );
+  const modulePaths = requireArray(request.modulePaths, "traced build modulePaths").map(
+    (value, index): readonly [string, string] => {
+      if (!Array.isArray(value) || value.length !== 2) {
+        throw new TypeError(`traced build modulePaths[${index}] must be a two-item tuple`);
+      }
+      return [
+        requireNonEmptyString(value[0], `traced build modulePaths[${index}][0]`),
+        requireNonEmptyString(value[1], `traced build modulePaths[${index}][1]`),
+      ];
+    },
+  );
+  const manualChunkGroups = requireArray(
+    request.manualChunkGroups,
+    "traced build manualChunkGroups",
+  ).map((value, index): TraceChildManualChunkGroup => {
+    const group = requireRecord(value, `traced build manualChunkGroups[${index}]`);
+    return {
+      name: requireNonEmptyString(group.name, `traced build manualChunkGroups[${index}].name`),
+      modulePaths: requireArray(
+        group.modulePaths,
+        `traced build manualChunkGroups[${index}].modulePaths`,
+      ).map((path, pathIndex) =>
+        requireAbsolutePath(
+          path,
+          `traced build manualChunkGroups[${index}].modulePaths[${pathIndex}]`,
+        ),
+      ),
+    };
+  });
+  const output = requireRecord(request.output, "traced build output");
+  if (
+    output.format !== "esm" ||
+    output.strictExecutionOrder !== true ||
+    output.cleanDir !== false ||
+    output.minify !== false
+  ) {
+    throw new TypeError("traced build output constants are invalid");
+  }
+  return {
+    version: TRACE_CHILD_PROTOCOL_VERSION,
+    packageSpecifier,
+    input,
+    preserveEntrySignatures: "allow-extension",
+    sourceDirectory,
+    bundleDirectory,
+    modulePaths,
+    manualChunkGroups,
+    output: {
+      format: "esm",
+      strictExecutionOrder: true,
+      entryFileNames: requireNonEmptyString(
+        output.entryFileNames,
+        "traced build output.entryFileNames",
+      ),
+      chunkFileNames: requireNonEmptyString(
+        output.chunkFileNames,
+        "traced build output.chunkFileNames",
+      ),
+      assetFileNames: requireNonEmptyString(
+        output.assetFileNames,
+        "traced build output.assetFileNames",
+      ),
+      cleanDir: false,
+      minify: false,
+    },
+  };
+}
+
+export function parseTraceChildResponse(value: unknown): TraceChildResponse {
+  const response = requireRecord(value, "traced build response");
+  if (response.version !== TRACE_CHILD_PROTOCOL_VERSION) {
+    throw new TypeError(`Unsupported traced build response version: ${String(response.version)}`);
+  }
+  const orderTrace =
+    response.orderTrace === null ? null : parseStrictExecutionOrderPlanReady(response.orderTrace);
+  if (response.status === "ok") {
+    return {
+      version: TRACE_CHILD_PROTOCOL_VERSION,
+      status: "ok",
+      outputFiles: requireArray(response.outputFiles, "traced build outputFiles").map(
+        parseOutputFile,
+      ),
+      orderTrace,
+    };
+  }
+  if (response.status === "failure") {
+    if (response.failureStatus !== "harness-error" && response.failureStatus !== "build-error") {
+      throw new TypeError("traced build failureStatus is invalid");
+    }
+    if (
+      response.stage !== "load-package" &&
+      response.stage !== "build" &&
+      response.stage !== "collect-order-trace"
+    ) {
+      throw new TypeError("traced build failure stage is invalid");
+    }
+    const error = requireRecord(response.error, "traced build failure error");
+    return {
+      version: TRACE_CHILD_PROTOCOL_VERSION,
+      status: "failure",
+      failureStatus: response.failureStatus,
+      stage: response.stage,
+      error: {
+        name: requireNonEmptyString(error.name, "traced build failure error.name"),
+        message: requireString(error.message, "traced build failure error.message"),
+      },
+      orderTrace,
+    };
+  }
+  throw new TypeError(`Unsupported traced build response status: ${String(response.status)}`);
+}
+
+export async function runTraceChildFromUnknown(value: unknown): Promise<TraceChildResponse> {
+  try {
+    return await runTraceChild(parseTraceChildRequest(value));
+  } catch (error) {
+    return childFailure("harness-error", "build", error, null);
+  }
+}
 
 export async function runTraceChild(request: TraceChildRequest): Promise<TraceChildResponse> {
   let loaded: unknown;
@@ -138,6 +286,35 @@ export async function runTraceChild(request: TraceChildRequest): Promise<TraceCh
     outputFiles: output.output.map(serializeOutputFile),
     orderTrace,
   };
+}
+
+function parseOutputFile(value: unknown, index: number): TraceChildOutputFile {
+  const output = requireRecord(value, `traced build outputFiles[${index}]`);
+  const fileName = requireNonEmptyString(
+    output.fileName,
+    `traced build outputFiles[${index}].fileName`,
+  );
+  if (output.type === "asset") {
+    return { type: "asset", fileName };
+  }
+  if (output.type === "chunk") {
+    if (typeof output.isEntry !== "boolean") {
+      throw new TypeError(`traced build outputFiles[${index}].isEntry must be boolean`);
+    }
+    if (output.facadeModuleId !== null && typeof output.facadeModuleId !== "string") {
+      throw new TypeError(
+        `traced build outputFiles[${index}].facadeModuleId must be string or null`,
+      );
+    }
+    return {
+      type: "chunk",
+      fileName,
+      name: requireNonEmptyString(output.name, `traced build outputFiles[${index}].name`),
+      isEntry: output.isEntry,
+      facadeModuleId: output.facadeModuleId,
+    };
+  }
+  throw new TypeError(`traced build outputFiles[${index}].type is invalid`);
 }
 
 function createOutputOptions(request: TraceChildRequest): OutputOptions {
@@ -341,6 +518,43 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function requireRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value) || Array.isArray(value)) {
+    throw new TypeError(`${label} must be an object`);
+  }
+  return value;
+}
+
+function requireArray(value: unknown, label: string): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`${label} must be an array`);
+  }
+  return value;
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string") {
+    throw new TypeError(`${label} must be a string`);
+  }
+  return value;
+}
+
+function requireNonEmptyString(value: unknown, label: string): string {
+  const string = requireString(value, label);
+  if (string.length === 0) {
+    throw new TypeError(`${label} must not be empty`);
+  }
+  return string;
+}
+
+function requireAbsolutePath(value: unknown, label: string): string {
+  const path = requireNonEmptyString(value, label);
+  if (!isAbsolute(path)) {
+    throw new TypeError(`${label} must be absolute`);
+  }
+  return path;
+}
+
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
@@ -352,8 +566,16 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
-  const request = JSON.parse(await readFile(requestPath, "utf8")) as TraceChildRequest;
-  const response = await runTraceChild(request);
+  let value: unknown;
+  try {
+    value = JSON.parse(await readFile(requestPath, "utf8")) as unknown;
+  } catch (error) {
+    value = error;
+  }
+  const response =
+    value instanceof Error
+      ? childFailure("harness-error", "build", value, null)
+      : await runTraceChildFromUnknown(value);
   await mkdir(dirname(responsePath), { recursive: true });
   await writeFile(responsePath, `${JSON.stringify(response)}\n`);
 }

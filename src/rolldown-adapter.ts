@@ -34,6 +34,7 @@ import {
 } from "./protocol.ts";
 import type { RenderedProgram } from "./render.ts";
 import {
+  parseTraceChildResponse,
   TRACE_CHILD_PROTOCOL_VERSION,
   type TraceChildRequest,
   type TraceChildResponse,
@@ -671,7 +672,7 @@ async function buildWithTraceChild(
 
   let response: TraceChildResponse;
   try {
-    response = JSON.parse(await readFile(responsePath, "utf8")) as TraceChildResponse;
+    response = parseTraceChildResponse(JSON.parse(await readFile(responsePath, "utf8")) as unknown);
   } catch (error) {
     return {
       status: "failed",
@@ -724,10 +725,14 @@ async function runTraceChildProcess(
   responsePath: string,
 ): Promise<TraceChildProcessResult> {
   return new Promise((resolveResult) => {
-    const child = spawn(process.execPath, [TRACE_CHILD_PATH, requestPath, responsePath], {
-      cwd,
-      stdio: "ignore",
-    });
+    const child = spawn(
+      process.execPath,
+      [...traceChildExecArgv(process.execArgv), TRACE_CHILD_PATH, requestPath, responsePath],
+      {
+        cwd,
+        stdio: "ignore",
+      },
+    );
     child.once("error", (error) => {
       resolveResult({ status: "spawn-error", error });
     });
@@ -735,6 +740,61 @@ async function runTraceChildProcess(
       resolveResult({ status: "closed", code, signal });
     });
   });
+}
+
+export function traceChildExecArgv(execArgv: readonly string[]): readonly string[] {
+  const result: string[] = [];
+  const flagsWithValues = new Set([
+    "--conditions",
+    "--import",
+    "--require",
+    "-r",
+    "--loader",
+    "--experimental-loader",
+  ]);
+  const standalone = new Set([
+    "--enable-source-maps",
+    "--no-warnings",
+    "--trace-warnings",
+    "--experimental-strip-types",
+    "--no-experimental-strip-types",
+    "--experimental-transform-types",
+  ]);
+  const allowedPrefixes = [
+    "--conditions=",
+    "--import=",
+    "--require=",
+    "--loader=",
+    "--experimental-loader=",
+    "--disable-warning=",
+  ];
+  const discardedValueFlags = new Set(["--eval", "-e", "--print", "-p", "--inspect-port"]);
+
+  for (let index = 0; index < execArgv.length; index += 1) {
+    const argument = execArgv[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (discardedValueFlags.has(argument)) {
+      index += 1;
+      continue;
+    }
+    if (argument.startsWith("--inspect") || argument.startsWith("--debug")) {
+      continue;
+    }
+    if (flagsWithValues.has(argument)) {
+      const value = execArgv[index + 1];
+      if (value !== undefined) {
+        result.push(argument, value);
+        index += 1;
+      }
+      continue;
+    }
+    if (standalone.has(argument) || allowedPrefixes.some((prefix) => argument.startsWith(prefix))) {
+      result.push(argument);
+    }
+  }
+  return result;
 }
 
 async function buildWithRolldown(
@@ -838,7 +898,7 @@ function createOutputOptions(
 type OutputChunkMetadata = TraceChildOutputFile & {
   readonly type: "chunk";
   readonly name: string;
-  readonly isEntry: boolean;
+  readonly isEntry: true;
   readonly facadeModuleId: string | null;
 };
 
@@ -859,7 +919,7 @@ function isOutputChunkMetadata(output: TraceChildOutputFile): output is OutputCh
   return (
     output.type === "chunk" &&
     typeof output.name === "string" &&
-    typeof output.isEntry === "boolean" &&
+    output.isEntry === true &&
     (typeof output.facadeModuleId === "string" || output.facadeModuleId === null)
   );
 }
