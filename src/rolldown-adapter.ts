@@ -136,7 +136,12 @@ export interface SuccessfulRolldownAdapterResult<T> {
 
 export interface FailedRolldownAdapterResult {
   readonly status: "harness-error" | "build-error";
-  readonly stage: "materialize-source" | "load-package" | "build" | "write-manifest";
+  readonly stage:
+    | "materialize-source"
+    | "load-package"
+    | "build"
+    | "write-manifest"
+    | "consume-output";
   readonly packageSpecifier: string;
   readonly error: NormalizedError;
 }
@@ -227,19 +232,26 @@ export async function withRolldownBuild<T>(
       );
     }
 
-    return {
-      status: "ok",
-      value: await callback({
-        temporaryDirectory,
-        sourceDirectory,
-        bundleDirectory,
-        sourceManifestPath,
-        bundleManifestPath,
-        manifest,
-        outputFiles: built.output.map((output) => output.fileName).sort(),
-        runtimeIdentity,
-      }),
+    const artifacts = {
+      temporaryDirectory,
+      sourceDirectory,
+      bundleDirectory,
+      sourceManifestPath,
+      bundleManifestPath,
+      manifest,
+      outputFiles: built.output.map((output) => output.fileName).sort(),
+      runtimeIdentity,
     };
+    try {
+      return {
+        status: "ok",
+        value: await callback(artifacts),
+      };
+    } catch (error) {
+      return await reportFailure(
+        failure("harness-error", "consume-output", packageSpecifier, error),
+      );
+    }
   } finally {
     await rm(temporaryDirectory, { recursive: true, force: true });
   }

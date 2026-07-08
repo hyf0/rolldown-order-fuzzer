@@ -323,6 +323,40 @@ describe("withRolldownBuild", () => {
     }
   });
 
+  test("classifies output consumer failures before cleaning build artifacts", async () => {
+    const program = singleEntryProgram();
+    let temporaryDirectory = "";
+    let observedEntry = "";
+
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(program),
+      async (artifacts): Promise<never> => {
+        throw new Error(`missing emitted file: ${artifacts.outputFiles[0]}`);
+      },
+      {
+        onFailureArtifacts: async (_failure, artifacts) => {
+          temporaryDirectory = artifacts.temporaryDirectory;
+          observedEntry = await readFile(
+            join(artifacts.bundleDirectory, "entries/__entry_0000.js"),
+            "utf8",
+          );
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      status: "harness-error",
+      stage: "consume-output",
+      error: {
+        name: "Error",
+        message: "missing emitted file: entries/__entry_0000.js",
+      },
+    });
+    expect(observedEntry.length).toBeGreaterThan(0);
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   test("classifies invalid Rolldown output after closing and cleaning up", async () => {
     const program = singleEntryProgram();
     let closeMarker: { readonly inputPath: string } | undefined;
@@ -649,6 +683,7 @@ describe("withRolldownBuild", () => {
       { ...valid, packageSpecifier: "" },
       { ...valid, input: [] },
       { ...valid, input: { main: 1 } },
+      { ...valid, input: { main: "relative/source.mjs" } },
       { ...valid, bundleDirectory: "relative/bundle" },
       {
         ...valid,

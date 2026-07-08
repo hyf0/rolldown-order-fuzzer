@@ -492,6 +492,65 @@ describe("runCampaign", () => {
     }
   });
 
+  test("persists a harness failure when reported output files are missing", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-cli-missing-output-"));
+    const packagePath = join(directory, "rolldown.mjs");
+    await writeFile(
+      packagePath,
+      [
+        "export async function rolldown(inputOptions) {",
+        "  return {",
+        "    async write() {",
+        "      return {",
+        "        output: [{",
+        '          type: "chunk",',
+        '          fileName: "entries/__entry_0000.js",',
+        '          name: "__entry_0000",',
+        "          isEntry: true,",
+        "          facadeModuleId: Object.values(inputOptions.input)[0],",
+        "        }],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const generated = generateCase(2, DEFAULT_CASE_SIZE);
+    const options = campaignOptions({
+      seed: generated.seed,
+      rolldownPackage: pathToFileURL(packagePath).href,
+      outDir: directory,
+    });
+
+    try {
+      const result = await executeGeneratedCase(generated, options);
+
+      expect(result.verdict).toMatchObject({
+        kind: "build-failure",
+        reason: "consume-output",
+      });
+      expect(result.bundleManifest).not.toBeNull();
+      expect(result.bundleFiles).toEqual([]);
+
+      const artifactDirectory = await writeFailureArtifacts(result, directory, 0);
+      await expect(readJson(join(artifactDirectory, "bundle-outcome.json"))).resolves.toMatchObject(
+        {
+          status: "not-run",
+          reason: "adapter-failure",
+          adapterFailure: {
+            status: "harness-error",
+            stage: "consume-output",
+            error: { name: "Error" },
+          },
+        },
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("awaits delayed failure artifact copying before adapter cleanup", async () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-delayed-copy-"));
     const packagePath = join(directory, "rolldown.mjs");

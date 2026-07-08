@@ -78,7 +78,7 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
   const input = Object.fromEntries(
     Object.entries(inputRecord).map(([name, path]) => [
       name,
-      requireNonEmptyString(path, `build input ${JSON.stringify(name)}`),
+      requireAbsolutePath(path, `build input ${JSON.stringify(name)}`),
     ]),
   );
   if (request.preserveEntrySignatures !== "allow-extension") {
