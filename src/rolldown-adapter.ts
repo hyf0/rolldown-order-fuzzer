@@ -50,6 +50,7 @@ const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/
 const TRACE_CHILD_PATH = fileURLToPath(new URL("./rolldown-trace-child.ts", import.meta.url));
 const DEFAULT_TRACE_CHILD_TIMEOUT_MS = 60_000;
 const TRACE_CHILD_TERMINATION_GRACE_MS = 250;
+const TRACE_CHILD_FINAL_CLOSE_GRACE_MS = 250;
 
 export const ROLLDOWN_BUILD_OPTIONS = {
   preserveEntrySignatures: "allow-extension",
@@ -780,7 +781,7 @@ async function buildWithTraceChild(
   };
 }
 
-type TraceChildProcessResult =
+export type TraceChildProcessResult =
   | { readonly status: "spawn-error"; readonly error: Error }
   | { readonly status: "timeout"; readonly timeoutMs: number }
   | {
@@ -789,32 +790,59 @@ type TraceChildProcessResult =
       readonly signal: NodeJS.Signals | null;
     };
 
+export type TraceChildProcessLike = Pick<ChildProcess, "pid" | "once" | "off" | "kill">;
+
+export interface TraceChildWaitOptions {
+  readonly terminationGraceMs?: number;
+  readonly finalCloseGraceMs?: number;
+  readonly terminate?: (child: TraceChildProcessLike, force: boolean) => void;
+}
+
 async function runTraceChildProcess(
   cwd: string,
   requestPath: string,
   responsePath: string,
   timeoutMs: number,
 ): Promise<TraceChildProcessResult> {
+  const child = spawn(
+    process.execPath,
+    [...traceChildExecArgv(process.execArgv), TRACE_CHILD_PATH, requestPath, responsePath],
+    {
+      cwd,
+      detached: process.platform !== "win32",
+      stdio: "ignore",
+      windowsHide: true,
+    },
+  );
+  return waitForTraceChildProcess(child, timeoutMs);
+}
+
+export async function waitForTraceChildProcess(
+  child: TraceChildProcessLike,
+  timeoutMs: number,
+  options: TraceChildWaitOptions = {},
+): Promise<TraceChildProcessResult> {
+  const terminationGraceMs = options.terminationGraceMs ?? TRACE_CHILD_TERMINATION_GRACE_MS;
+  const finalCloseGraceMs = options.finalCloseGraceMs ?? TRACE_CHILD_FINAL_CLOSE_GRACE_MS;
+  const terminate = options.terminate ?? terminateChildProcessTree;
+
   return new Promise((resolveResult) => {
-    const child = spawn(
-      process.execPath,
-      [...traceChildExecArgv(process.execArgv), TRACE_CHILD_PATH, requestPath, responsePath],
-      {
-        cwd,
-        detached: process.platform !== "win32",
-        stdio: "ignore",
-        windowsHide: true,
-      },
-    );
     let settled = false;
     let timedOut = false;
     let childClosed = false;
     let forceTerminationSent = false;
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let finalCloseTimer: ReturnType<typeof setTimeout> | undefined;
     const cleanup = () => {
-      clearTimeout(timeoutTimer);
+      if (timeoutTimer !== undefined) {
+        clearTimeout(timeoutTimer);
+      }
       if (killTimer !== undefined) {
         clearTimeout(killTimer);
+      }
+      if (finalCloseTimer !== undefined) {
+        clearTimeout(finalCloseTimer);
       }
       child.off("error", onError);
       child.off("close", onClose);
@@ -840,29 +868,33 @@ async function runTraceChildProcess(
         settle({ status: "timeout", timeoutMs });
       }
     };
-    const timeoutTimer = setTimeout(() => {
+    timeoutTimer = setTimeout(() => {
       if (settled) {
         return;
       }
       timedOut = true;
-      terminateChildProcessTree(child, false);
+      terminate(child, false);
       killTimer = setTimeout(() => {
         if (settled) {
           return;
         }
         forceTerminationSent = true;
-        terminateChildProcessTree(child, true);
+        terminate(child, true);
         if (childClosed) {
           settle({ status: "timeout", timeoutMs });
+        } else {
+          finalCloseTimer = setTimeout(() => {
+            settle({ status: "timeout", timeoutMs });
+          }, finalCloseGraceMs);
         }
-      }, TRACE_CHILD_TERMINATION_GRACE_MS);
+      }, terminationGraceMs);
     }, timeoutMs);
     child.once("error", onError);
     child.once("close", onClose);
   });
 }
 
-function terminateChildProcessTree(child: ChildProcess, force: boolean): void {
+function terminateChildProcessTree(child: TraceChildProcessLike, force: boolean): void {
   if (child.pid === undefined) {
     return;
   }

@@ -1,5 +1,6 @@
 /// <reference types="node" />
 
+import { EventEmitter } from "node:events";
 import {
   access,
   mkdir,
@@ -23,9 +24,11 @@ import type { ProgramModel } from "../src/model.ts";
 import {
   inspectRolldownRuntimeIdentity,
   traceChildExecArgv,
+  waitForTraceChildProcess,
   withRolldownBuild,
   type RolldownAdapterResult,
   type RolldownBuildArtifacts,
+  type TraceChildProcessLike,
 } from "../src/rolldown-adapter.ts";
 import { renderProgram } from "../src/render.ts";
 import {
@@ -1163,6 +1166,33 @@ describe("withRolldownBuild", () => {
       });
     }
   }, 15_000);
+
+  test("settles a timeout when the child never emits close", async () => {
+    const emitter = new EventEmitter();
+    const terminationPhases: boolean[] = [];
+    const child = {
+      pid: 123_456,
+      once: emitter.once.bind(emitter),
+      off: emitter.off.bind(emitter),
+      kill: () => true,
+    };
+    const startedAt = Date.now();
+
+    const result = await waitForTraceChildProcess(child as unknown as TraceChildProcessLike, 10, {
+      terminationGraceMs: 10,
+      finalCloseGraceMs: 10,
+      terminate: (_child, force) => {
+        terminationPhases.push(force);
+      },
+    });
+
+    expect(result).toEqual({ status: "timeout", timeoutMs: 10 });
+    expect(Date.now() - startedAt).toBeLessThan(500);
+    expect(terminationPhases).toEqual([false, true]);
+    expect(emitter.listenerCount("error")).toBe(0);
+    expect(emitter.listenerCount("close")).toBe(0);
+    emitter.emit("close", 0, null);
+  });
 
   test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {
     const program = singleEntryProgram();
