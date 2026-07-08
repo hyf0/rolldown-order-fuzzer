@@ -31,7 +31,7 @@ const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/
 let campaignEnvironmentLock = Promise.resolve();
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 3 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 4 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
@@ -493,7 +493,7 @@ function createFailureArtifactIdentity(
           : { groups: result.generated.program.manualChunkGroups },
     },
     sourceOutcome: result.sourceOutcome,
-    bundleOutcome: result.bundleOutcome,
+    bundleOutcome: normalizeBundleOutcomeForIdentity(result.bundleOutcome),
     verdict: result.verdict,
     verdictSignature: result.verdict.signature,
     canonicalOrderTrace: result.orderTrace,
@@ -750,6 +750,22 @@ function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailure
       failure.error.name,
       normalizeBuildFailureMessage(failure.error.message),
     ])}`,
+  };
+}
+
+function normalizeBundleOutcomeForIdentity(outcome: CampaignBundleOutcome): CampaignBundleOutcome {
+  if (outcome.status !== "not-run" || outcome.reason !== "adapter-failure") {
+    return outcome;
+  }
+  return {
+    ...outcome,
+    adapterFailure: {
+      ...outcome.adapterFailure,
+      error: {
+        ...outcome.adapterFailure.error,
+        message: normalizeBuildFailureMessage(outcome.adapterFailure.error.message),
+      },
+    },
   };
 }
 

@@ -44,6 +44,10 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
+  test("uses artifact schema version 4", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(4);
+  });
+
   test("parses the complete campaign option set", () => {
     expect(
       parseCliArgs([
@@ -496,6 +500,9 @@ describe("runCampaign", () => {
       expect(first.verdict.kind).toBe("build-failure");
       expect(second.verdict.signature).toBe(first.verdict.signature);
       expect(first.verdict.signature).toContain("<rolldown-root>/source/");
+      expect(failureArtifactPath(first, directory, 0)).toBe(
+        failureArtifactPath(second, directory, 0),
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
