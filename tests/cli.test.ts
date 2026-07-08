@@ -44,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 6", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(6);
+  test("uses artifact schema version 7", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(7);
   });
 
   test("parses the complete campaign option set", () => {
@@ -137,10 +137,11 @@ describe("runCampaign", () => {
     expect(artifacts).toEqual([0]);
     expect(summary).toEqual({ casesRun: 1, passed: 0, failed: 1, exitCode: 1 });
     expect(lines).toEqual([
+      expect.stringContaining("identity node=") as unknown as string,
       expect.stringContaining("FAIL case=0 seed=100 template=") as unknown as string,
       "summary cases=1 pass=0 fail=1",
     ]);
-    expect(lines[0]).toContain(
+    expect(lines[1]).toContain(
       'signature=events-missing:source=[["missing","evaluate",1]]:bundle=[]',
     );
   });
@@ -1335,7 +1336,7 @@ describe("writeFailureArtifacts", () => {
       });
 
       const expectedPath = failureArtifactPath(result, directory, 0);
-      expect(lines[0]).toContain(`artifact=${expectedPath}`);
+      expect(lines[1]).toContain(`artifact=${expectedPath}`);
       await expect(access(expectedPath)).resolves.toBeUndefined();
     } finally {
       await rm(directory, { recursive: true, force: true });

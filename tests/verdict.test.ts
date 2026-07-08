@@ -13,6 +13,21 @@ describe("classifyVerdict", () => {
     });
   });
 
+  test("detects events that cross schedule operation boundaries", () => {
+    const events = [event("entry", 1), event("lazy", 2)];
+
+    expect(
+      classifyVerdict(
+        { ...ok(events), operationBoundaries: [0, 1] },
+        { ...ok(events), operationBoundaries: [0, 2] },
+      ),
+    ).toEqual({
+      kind: "mismatch",
+      reason: "operation-boundary-mismatch",
+      signature: "operation-boundary-mismatch:source=[0,1]:bundle=[0,2]",
+    });
+  });
+
   test("classifies a source timeout as an invalid oracle before inspecting the bundle", () => {
     expect(classifyVerdict(timeout(), error({ name: "Error", message: "bundle failed" }))).toEqual({
       kind: "invalid-source",

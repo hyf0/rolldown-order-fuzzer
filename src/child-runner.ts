@@ -26,6 +26,7 @@ const harnessExecutionErrors = new WeakSet<object>();
 
 export async function runExecutionManifest(manifestPath: string): Promise<ExecutionOutcome> {
   const events: ExecutionEvent[] = [];
+  const operationBoundaries: number[] = [];
   const dynamicImports: Record<string, () => Promise<unknown>> = Object.create(null);
   const orderGlobal = globalThis as typeof globalThis & OrderRuntimeGlobal;
   orderGlobal.__orderEvents = events;
@@ -33,7 +34,11 @@ export async function runExecutionManifest(manifestPath: string): Promise<Execut
     if (events.length >= MAX_EXECUTION_EVENTS) {
       throw new Error(`Execution event limit exceeded: maximum ${MAX_EXECUTION_EVENTS}`);
     }
-    events.push(collectExecutionEvent(event));
+    try {
+      events.push(collectExecutionEvent(event));
+    } catch (error) {
+      throw harnessExecutionError(error instanceof Error ? error.message : String(error));
+    }
   };
   orderGlobal.__orderDynamicImports = dynamicImports;
 
@@ -42,20 +47,22 @@ export async function runExecutionManifest(manifestPath: string): Promise<Execut
     manifest = parseExecutionManifest(JSON.parse(await readFile(manifestPath, "utf8")) as unknown);
     validateExecutionManifest(manifest);
   } catch (error) {
-    return executionFailure("harness-error", events, error, manifestPath);
+    return executionFailure("harness-error", events, operationBoundaries, error, manifestPath);
   }
 
   try {
-    await executeSchedule(manifest, manifestPath, dynamicImports);
+    await executeSchedule(manifest, manifestPath, dynamicImports, events, operationBoundaries);
     return {
       version: EXECUTION_PROTOCOL_VERSION,
       status: "ok",
       events,
+      operationBoundaries,
     };
   } catch (error) {
     return executionFailure(
       isHarnessExecutionError(error) ? "harness-error" : "error",
       events,
+      operationBoundaries,
       error,
       manifestPath,
     );
@@ -93,12 +100,15 @@ async function executeSchedule(
   manifest: ExecutionManifest,
   manifestPath: string,
   dynamicImports: Record<string, () => Promise<unknown>>,
+  events: readonly ExecutionEvent[],
+  operationBoundaries: number[],
 ): Promise<void> {
   const manifestDirectory = dirname(manifestPath);
   const entries = new Map(manifest.entries.map((entry) => [entry.name, entry]));
   const requireFromManifest = createRequire(pathToFileURL(manifestPath));
 
   for (const operation of manifest.operations) {
+    operationBoundaries.push(events.length);
     if (operation.kind === "trigger-dynamic-import") {
       const trigger = dynamicImports[operation.registration];
       if (trigger === undefined) {
@@ -144,6 +154,7 @@ function isHarnessExecutionError(error: unknown): boolean {
 async function executionFailure(
   status: "error" | "harness-error",
   events: readonly ExecutionEvent[],
+  operationBoundaries: readonly number[],
   error: unknown,
   manifestPath: string,
 ): Promise<ExecutionOutcome> {
@@ -151,6 +162,7 @@ async function executionFailure(
     version: EXECUTION_PROTOCOL_VERSION,
     status,
     events,
+    operationBoundaries,
     error: await normalizeError(error, dirname(manifestPath)),
   };
 }

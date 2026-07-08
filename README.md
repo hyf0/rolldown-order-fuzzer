@@ -1,6 +1,6 @@
 # rolldown-order-fuzzer
 
-This repository contains a strongly typed TypeScript differential fuzzer for Rolldown execution-order correctness. It renders a generated mixed ESM/CommonJS program and executes the source in a fresh Node process first. A source timeout or harness error stops the case before Rolldown; otherwise the fuzzer builds with Rolldown, executes the bundle in another fresh process, and compares the structured outcomes.
+This repository contains a strongly typed TypeScript differential fuzzer for Rolldown execution-order correctness. It renders a generated mixed ESM/CommonJS program and executes the source in a fresh Node process first. A source timeout or harness error stops the case before Rolldown; otherwise the fuzzer builds with Rolldown, executes the bundle in another fresh process, and compares the structured outcomes, including schedule operation boundaries.
 
 ## Setup
 
@@ -46,7 +46,7 @@ Each Rolldown build runs in a dedicated Node child process whose working directo
 
 Both sides structurally validate the versioned child protocol before using it, including absolute paths, manual groups, output metadata, and error fields. The child inherits only safe Node execution arguments needed for TypeScript/loaders; inspector and eval flags are not forwarded.
 
-A campaign pins the first case's observed Node, package, lockfile, and native-binding identity. It aborts if that identity changes between cases.
+A campaign records the first case's Node, package, lockfile, and native-binding hashes. The adapter verifies the identity before and after every build, and the campaign aborts if it changes between cases.
 
 Every emitted chunk and asset filename must be a canonical forward-slash relative path confined to the bundle directory; absolute paths, drive/UNC paths, NULs, backslashes, and dot segments are rejected before manifest mapping. Bundle manifest mapping considers only output chunks explicitly marked as entries.
 

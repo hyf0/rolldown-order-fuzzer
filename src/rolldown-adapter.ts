@@ -16,6 +16,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import type { ProgramModel, ScheduleOperation } from "./model.ts";
 import {
@@ -210,6 +211,17 @@ export async function withRolldownBuild<T>(
     );
     if (built.status === "failed") {
       return await reportFailure(built.failure);
+    }
+    const finalRuntimeIdentity = await inspectRolldownRuntimeIdentity(packageSpecifier);
+    if (!isDeepStrictEqual(runtimeIdentity, finalRuntimeIdentity)) {
+      return await reportFailure(
+        failure(
+          "harness-error",
+          "build",
+          packageSpecifier,
+          new Error("Rolldown runtime identity changed during build"),
+        ),
+      );
     }
 
     try {

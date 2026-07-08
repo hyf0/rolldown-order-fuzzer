@@ -55,6 +55,7 @@ describe("executeManifest", () => {
             value: "ready",
           },
         ],
+        operationBoundaries: [0],
       });
     });
   });
@@ -173,6 +174,7 @@ describe("executeManifest", () => {
           version: 1,
           status: "error",
           events: [],
+          operationBoundaries: [0],
           error: {
             name: "TypeError",
             message: "<root>/entry.mjs",
@@ -196,6 +198,30 @@ describe("executeManifest", () => {
         message: "<root>",
       },
     });
+  });
+
+  test("classifies invalid event payloads as harness errors", async () => {
+    const manifest = {
+      version: 1,
+      entries: [{ name: "main", path: "entry.mjs", format: "esm" }],
+      operations: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ExecutionManifest;
+
+    await withProgramFiles(
+      {
+        "entry.mjs":
+          'globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: {} });\n',
+      },
+      manifest,
+      async (manifestPath) => {
+        await expect(executeManifest(manifestPath)).resolves.toMatchObject({
+          status: "harness-error",
+          error: {
+            message: "Execution event value must be a primitive JSON value",
+          },
+        });
+      },
+    );
   });
 
   test("normalizes backslash temporary-root paths in child errors", async () => {
@@ -244,6 +270,7 @@ describe("executeManifest", () => {
           version: 1,
           status: "harness-error",
           events: [],
+          operationBoundaries: [],
           error: {
             name: "Error",
             message: "Unsupported execution manifest version 2; expected 1",
@@ -342,6 +369,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0, 0],
       error: {
         name: "Error",
         message: 'Missing dynamic import registration "load"',
@@ -401,6 +429,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0],
       error: {
         name: "NonError",
         message: "1n",
@@ -412,6 +441,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0],
       error: {
         name: "NonError",
         message: "[object Object]",
@@ -433,6 +463,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0],
       error: {
         name: "Error",
         message: "<unreadable error message>",
@@ -451,6 +482,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0],
       error: {
         name: "NonError",
         message: "{}",
@@ -483,6 +515,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0, 0],
       error: {
         name: "StatefulError",
         message: "stateful message",
@@ -505,6 +538,7 @@ describe("executeManifest", () => {
       version: 1,
       status: "error",
       events: [],
+      operationBoundaries: [0, 0],
       error: {
         name: "Error",
         message: "<unreadable error message>",

@@ -30,6 +30,7 @@ export interface NormalizedError {
 interface ExecutionOutcomeBase {
   readonly version: typeof EXECUTION_PROTOCOL_VERSION;
   readonly events: readonly ExecutionEvent[];
+  readonly operationBoundaries?: readonly number[];
 }
 
 export interface SuccessfulExecutionOutcome extends ExecutionOutcomeBase {
@@ -78,18 +79,26 @@ export function parseExecutionOutcome(value: unknown): ExecutionOutcome {
   requireVersion(outcome.version, "execution outcome");
   const status = requireString(outcome.status, "execution outcome status");
   const events = requireArray(outcome.events, "execution outcome events").map(parseExecutionEvent);
+  const operationBoundaries =
+    outcome.operationBoundaries === undefined
+      ? undefined
+      : requireArray(outcome.operationBoundaries, "execution outcome operationBoundaries").map(
+          (boundary) => requireNonNegativeInteger(boundary, "execution operation boundary"),
+        );
+  const boundaryData = operationBoundaries === undefined ? {} : { operationBoundaries };
 
   if (status === "ok") {
-    return { version: EXECUTION_PROTOCOL_VERSION, status, events };
+    return { version: EXECUTION_PROTOCOL_VERSION, status, events, ...boundaryData };
   }
   if (status === "timeout") {
-    return { version: EXECUTION_PROTOCOL_VERSION, status, events };
+    return { version: EXECUTION_PROTOCOL_VERSION, status, events, ...boundaryData };
   }
   if (status === "error" || status === "harness-error") {
     return {
       version: EXECUTION_PROTOCOL_VERSION,
       status,
       events,
+      ...boundaryData,
       error: parseNormalizedError(outcome.error),
     };
   }
@@ -170,6 +179,13 @@ function requireEventValue(value: unknown): EventValue {
     return value;
   }
   throw new Error("Execution event value must be a primitive JSON value");
+}
+
+function requireNonNegativeInteger(value: unknown, description: string): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) {
+    throw new Error(`${description} must be a non-negative safe integer`);
+  }
+  return value as number;
 }
 
 function requireVersion(value: unknown, description: string): void {

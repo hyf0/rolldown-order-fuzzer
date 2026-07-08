@@ -22,6 +22,7 @@ export type MismatchReason =
   | "source-crash-suppressed"
   | "error-mismatch"
   | "timeout-mismatch"
+  | "operation-boundary-mismatch"
   | "events-reordered"
   | "events-missing"
   | "events-extra"
@@ -76,6 +77,10 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
         `error-mismatch:source=${serializeError(source.error)}:bundle=${serializeError(bundle.error)}`,
       );
     }
+    const boundaryVerdict = compareOperationBoundaries(source, bundle);
+    if (boundaryVerdict !== undefined) {
+      return boundaryVerdict;
+    }
     const eventVerdict = compareEvents(source.events, bundle.events);
     if (eventVerdict.kind === "pass") {
       return eventVerdict;
@@ -93,7 +98,29 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
     return mismatch("bundle-only-crash", `bundle-only-crash:${serializeError(bundle.error)}`);
   }
 
+  const boundaryVerdict = compareOperationBoundaries(source, bundle);
+  if (boundaryVerdict !== undefined) {
+    return boundaryVerdict;
+  }
   return compareEvents(source.events, bundle.events);
+}
+
+function compareOperationBoundaries(
+  source: ExecutionOutcome,
+  bundle: ExecutionOutcome,
+): MismatchVerdict | undefined {
+  const sourceBoundaries = source.operationBoundaries ?? [];
+  const bundleBoundaries = bundle.operationBoundaries ?? [];
+  if (
+    sourceBoundaries.length === bundleBoundaries.length &&
+    sourceBoundaries.every((boundary, index) => boundary === bundleBoundaries[index])
+  ) {
+    return undefined;
+  }
+  return mismatch(
+    "operation-boundary-mismatch",
+    `operation-boundary-mismatch:source=${JSON.stringify(sourceBoundaries)}:bundle=${JSON.stringify(bundleBoundaries)}`,
+  );
 }
 
 function compareEvents(

@@ -261,6 +261,7 @@ describe("renderProgram", () => {
           { version: 1, module: "cjs-entry", phase: "evaluate", value: null },
           { version: 1, module: "shared-cjs", phase: "evaluate", value: "once" },
         ],
+        operationBoundaries: [0, 2, 3],
       });
     });
   });
@@ -321,6 +322,7 @@ describe("renderProgram", () => {
           },
           { version: 1, module: "lazy", phase: "evaluate", value: 3 },
         ],
+        operationBoundaries: [0, 1],
       });
     });
   });

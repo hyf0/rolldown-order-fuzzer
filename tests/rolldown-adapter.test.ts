@@ -323,6 +323,58 @@ describe("withRolldownBuild", () => {
     }
   });
 
+  test("rejects a package that changes during its build", async () => {
+    const program = singleEntryProgram();
+
+    await withTemporaryModule(
+      [
+        'import { appendFile, mkdir, writeFile } from "node:fs/promises";',
+        'import { dirname, join } from "node:path";',
+        'import { fileURLToPath } from "node:url";',
+        "",
+        "export async function rolldown(options) {",
+        '  await appendFile(fileURLToPath(import.meta.url), "\\n// mutated");',
+        "  return {",
+        "    async write(outputOptions) {",
+        '      const fileName = "entries/__entry_0000.js";',
+        "      await mkdir(dirname(join(outputOptions.dir, fileName)), { recursive: true });",
+        '      await writeFile(join(outputOptions.dir, fileName), "export {};\\n");',
+        "      return {",
+        "        output: [{",
+        '          type: "chunk",',
+        "          fileName,",
+        '          name: "__entry_0000",',
+        "          isEntry: true,",
+        "          facadeModuleId: Object.values(options.input)[0],",
+        "        }],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (): Promise<never> => {
+            throw new Error("build callback must not run");
+          },
+          { packageSpecifier },
+        );
+
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: {
+            message: "Rolldown runtime identity changed during build",
+          },
+        });
+      },
+    );
+  });
+
   test("classifies output consumer failures before cleaning build artifacts", async () => {
     const program = singleEntryProgram();
     let temporaryDirectory = "";

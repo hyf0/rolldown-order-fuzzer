@@ -59,7 +59,7 @@ interface ExecutionOutcome {
 }
 ```
 
-The source and bundle paths must use the same child runner and schedule interpreter.
+The source and bundle paths must use the same child runner and schedule interpreter. Outcomes record the event count at the start of each schedule operation so eager execution cannot hide behind the same final flat event list.
 Spawn failures, abnormal runner exits, and invalid/missing result files are harness errors, not program errors. A verdict must never treat matching harness failures as semantic agreement.
 
 ### Rolldown adapter
@@ -109,7 +109,7 @@ The parent and child strictly validate their versioned protocol. Output filename
 
 Every build has a bounded timeout. Timeout handling terminates the child process tree with TERM followed by KILL and a bounded final-close grace, so a package loader or helper subprocess cannot stall a campaign indefinitely.
 
-The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 6 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity. The differential source-versus-bundle execution result is the sole semantic oracle.
+The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 7 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity. The adapter compares that identity before and after each build. The differential source-versus-bundle execution result is the sole semantic oracle.
 
 ## Regression policy
 

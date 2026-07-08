@@ -158,12 +158,18 @@ function assertTemplateGraph(template: MixedTemplateName, program: ProgramModel)
   }
 
   if (template === "dynamic-entry-cjs-carrier") {
+    expect(program.entries.length).toBeGreaterThanOrEqual(2);
     const dynamicRegistrations = new Set(
       program.modules.flatMap((module) =>
         module.dependencies
           .filter((dependency) => dependency.kind === "esm-dynamic-import")
           .map((dependency) => dependency.registration),
       ),
+    );
+    const dynamicTargets = program.modules.flatMap((module) =>
+      module.dependencies
+        .filter((dependency) => dependency.kind === "esm-dynamic-import")
+        .map((dependency) => dependency.target),
     );
     expect(dynamicRegistrations.size).toBeGreaterThan(0);
     expect(
@@ -173,7 +179,28 @@ function assertTemplateGraph(template: MixedTemplateName, program: ProgramModel)
           dynamicRegistrations.has(operation.registration),
       ),
     ).toBe(true);
-    expect(esmToCjsEdges(program, modulesById).length).toBeGreaterThan(0);
+    const carrierIds = new Set(
+      program.modules
+        .filter(
+          (module) =>
+            module.format === "esm" &&
+            module.dependencies.some(
+              (dependency) => modulesById.get(dependency.target)?.format === "cjs",
+            ),
+        )
+        .map((module) => module.id),
+    );
+    expect(carrierIds.size).toBeGreaterThan(0);
+    expect(
+      dynamicTargets.some((target) =>
+        [...synchronouslyReachable(target, modulesById)].some((id) => carrierIds.has(id)),
+      ),
+    ).toBe(true);
+    expect(
+      program.entries.some((entry) =>
+        [...synchronouslyReachable(entry.moduleId, modulesById)].some((id) => carrierIds.has(id)),
+      ),
+    ).toBe(true);
     return;
   }
 

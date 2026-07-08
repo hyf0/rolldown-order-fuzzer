@@ -293,11 +293,19 @@ function buildDynamicEntryCjsCarrier(rng: SeededRng, size: number): TemplateResu
     ],
     events("entry", rng, 1),
   );
+  const carrierEntry = esmModule(
+    "carrier-entry",
+    [{ kind: "esm-side-effect-import", target: carrier.id }],
+    events("carrier-entry", rng, 1),
+  );
 
   return {
     program: {
-      modules: [entry, dynamicEntry, ...earlyModules, carrier, ...cjsModules],
-      entries: [{ name: "main", moduleId: entry.id }],
+      modules: [entry, carrierEntry, dynamicEntry, ...earlyModules, carrier, ...cjsModules],
+      entries: [
+        { name: "main", moduleId: entry.id },
+        { name: "carrier", moduleId: carrierEntry.id },
+      ],
       schedule: [
         { kind: "import-entry", entry: "main" },
         { kind: "trigger-dynamic-import", registration: "load-dynamic-entry" },
