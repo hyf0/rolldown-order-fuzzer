@@ -32,13 +32,12 @@
 - Add deterministic seed tests and mechanism coverage tags.
 - Update `src/main.ts` into a small CLI supporting seed, case count, Rolldown package specifier, failure directory, and stop/continue behavior.
 
-## Deliverable 6: Rolldown debug integration
+## Deliverable 6: Isolated Rolldown builds
 
-- Part A: add the version-1 machine-readable `StrictExecutionOrderPlanReady` action in Rolldown.
-- Part B: allocate a collision-free session ID from a bounded deterministic process sequence, collect the action through one unique devtools session per build, require new-directory plus source-metadata ownership for requested and legacy IDs, canonicalize schema data and module IDs, store the deterministic action or `null` beside source/bundle outcomes, and clean only the uniquely owned session directory.
-- Treat malformed, unsupported-version, and duplicate matching actions as harness errors while allowing older packages with no action.
-- Serialize campaigns around the process-wide Rolldown trace environment, enable it once per traced campaign, and provide `--no-order-trace` as an opt-out.
-- Keep semantic verdict independent from debug data and report the selected wrap count only as diagnostic output.
+- Run each Rolldown build in a dedicated child process with a versioned request/response protocol.
+- Validate input options, manual chunk groups, output metadata, and output path confinement before the parent executes generated files.
+- Apply a bounded timeout and terminate the whole process tree on hangs.
+- Keep the adapter independent from Rolldown devtools and internal execution-plan data.
 
 ## Validation
 

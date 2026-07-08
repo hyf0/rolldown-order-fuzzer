@@ -18,7 +18,6 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { ProgramModel, ScheduleOperation } from "./model.ts";
-import type { StrictExecutionOrderPlanReady } from "./order-trace.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -26,12 +25,12 @@ import {
 } from "./protocol.ts";
 import type { RenderedProgram } from "./render.ts";
 import {
-  parseTraceChildResponse,
-  TRACE_CHILD_PROTOCOL_VERSION,
-  type TraceChildRequest,
-  type TraceChildResponse,
-  type TraceChildOutputFile,
-} from "./rolldown-trace-child.ts";
+  parseBuildChildResponse,
+  BUILD_CHILD_PROTOCOL_VERSION,
+  type BuildChildRequest,
+  type BuildChildResponse,
+  type BuildChildOutputFile,
+} from "./rolldown-build-child.ts";
 
 const BUNDLE_PACKAGE_JSON = '{\n  "type": "module"\n}\n';
 const COMPACT_PACKAGE_MAX_FILES = 512;
@@ -47,10 +46,10 @@ const IGNORED_PACKAGE_DIRECTORIES = new Set([
   "coverage",
 ]);
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
-const TRACE_CHILD_PATH = fileURLToPath(new URL("./rolldown-trace-child.ts", import.meta.url));
-const DEFAULT_TRACE_CHILD_TIMEOUT_MS = 60_000;
-const TRACE_CHILD_TERMINATION_GRACE_MS = 250;
-const TRACE_CHILD_FINAL_CLOSE_GRACE_MS = 250;
+const BUILD_CHILD_PATH = fileURLToPath(new URL("./rolldown-build-child.ts", import.meta.url));
+const DEFAULT_BUILD_CHILD_TIMEOUT_MS = 60_000;
+const BUILD_CHILD_TERMINATION_GRACE_MS = 250;
+const BUILD_CHILD_FINAL_CLOSE_GRACE_MS = 250;
 
 export const ROLLDOWN_BUILD_OPTIONS = {
   preserveEntrySignatures: "allow-extension",
@@ -65,8 +64,7 @@ export const ROLLDOWN_BUILD_OPTIONS = {
 
 export interface RolldownAdapterOptions {
   readonly packageSpecifier?: string;
-  readonly collectOrderTrace?: boolean;
-  readonly traceChildTimeoutMs?: number;
+  readonly buildChildTimeoutMs?: number;
   readonly onFailureArtifacts?: (
     failure: FailedRolldownAdapterResult,
     artifacts: RolldownFailureArtifacts,
@@ -80,7 +78,6 @@ export interface RolldownFailureArtifacts {
   readonly sourceManifestPath: string;
   readonly bundleManifestPath: string;
   readonly manifest?: ExecutionManifest;
-  readonly orderTrace: StrictExecutionOrderPlanReady | null;
   readonly runtimeIdentity: ObservedRuntimeIdentity;
 }
 
@@ -92,7 +89,6 @@ export interface RolldownBuildArtifacts {
   readonly bundleManifestPath: string;
   readonly manifest: ExecutionManifest;
   readonly outputFiles: readonly string[];
-  readonly orderTrace: StrictExecutionOrderPlanReady | null;
   readonly runtimeIdentity: ObservedRuntimeIdentity;
 }
 
@@ -140,12 +136,7 @@ export interface SuccessfulRolldownAdapterResult<T> {
 
 export interface FailedRolldownAdapterResult {
   readonly status: "harness-error" | "build-error";
-  readonly stage:
-    | "materialize-source"
-    | "load-package"
-    | "build"
-    | "collect-order-trace"
-    | "write-manifest";
+  readonly stage: "materialize-source" | "load-package" | "build" | "write-manifest";
   readonly packageSpecifier: string;
   readonly error: NormalizedError;
 }
@@ -162,10 +153,9 @@ export async function withRolldownBuild<T>(
 ): Promise<RolldownAdapterResult<T>> {
   const packageSpecifier = options.packageSpecifier ?? process.env.ROLLDOWN_PACKAGE ?? "rolldown";
   const runtimeIdentity = await inspectRolldownRuntimeIdentity(packageSpecifier);
-  const collectOrderTrace = options.collectOrderTrace ?? true;
-  const traceChildTimeoutMs = options.traceChildTimeoutMs ?? DEFAULT_TRACE_CHILD_TIMEOUT_MS;
-  if (!Number.isFinite(traceChildTimeoutMs) || traceChildTimeoutMs <= 0) {
-    throw new Error(`traceChildTimeoutMs must be positive, received ${traceChildTimeoutMs}`);
+  const buildChildTimeoutMs = options.buildChildTimeoutMs ?? DEFAULT_BUILD_CHILD_TIMEOUT_MS;
+  if (!Number.isFinite(buildChildTimeoutMs) || buildChildTimeoutMs <= 0) {
+    throw new Error(`buildChildTimeoutMs must be positive, received ${buildChildTimeoutMs}`);
   }
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "rolldown-order-fuzzer-"));
   const sourceDirectory = join(temporaryDirectory, "source");
@@ -175,7 +165,6 @@ export async function withRolldownBuild<T>(
   const entryInputNames = createEntryInputNames(program);
   let canonicalSourceDirectory: string;
   let manifest: ExecutionManifest | undefined;
-  let orderTrace: StrictExecutionOrderPlanReady | null = null;
 
   const reportFailure = async (
     failureResult: FailedRolldownAdapterResult,
@@ -186,7 +175,6 @@ export async function withRolldownBuild<T>(
       bundleDirectory,
       sourceManifestPath,
       bundleManifestPath,
-      orderTrace,
       runtimeIdentity,
       ...(manifest === undefined ? {} : { manifest }),
     });
@@ -205,7 +193,7 @@ export async function withRolldownBuild<T>(
       );
     }
 
-    const built = await buildWithTraceChild(
+    const built = await buildWithChild(
       program,
       rendered,
       entryInputNames,
@@ -213,10 +201,8 @@ export async function withRolldownBuild<T>(
       bundleDirectory,
       temporaryDirectory,
       packageSpecifier,
-      collectOrderTrace,
-      traceChildTimeoutMs,
+      buildChildTimeoutMs,
     );
-    orderTrace = built.orderTrace;
     if (built.status === "failed") {
       return await reportFailure(built.failure);
     }
@@ -251,7 +237,6 @@ export async function withRolldownBuild<T>(
         bundleManifestPath,
         manifest,
         outputFiles: built.output.map((output) => output.fileName).sort(),
-        orderTrace,
         runtimeIdentity,
       }),
     };
@@ -628,14 +613,12 @@ async function inspectFuzzerLockfile(): Promise<{
 
 interface BuiltRolldown {
   readonly status: "ok";
-  readonly output: readonly TraceChildOutputFile[];
-  readonly orderTrace: StrictExecutionOrderPlanReady | null;
+  readonly output: readonly BuildChildOutputFile[];
 }
 
 interface FailedRolldownBuild {
   readonly status: "failed";
   readonly failure: FailedRolldownAdapterResult;
-  readonly orderTrace: StrictExecutionOrderPlanReady | null;
 }
 
 async function materializeRenderedProgram(
@@ -650,7 +633,7 @@ async function materializeRenderedProgram(
   }
 }
 
-async function buildWithTraceChild(
+async function buildWithChild(
   program: ProgramModel,
   rendered: RenderedProgram,
   entryInputNames: ReadonlyMap<string, string>,
@@ -658,14 +641,12 @@ async function buildWithTraceChild(
   bundleDirectory: string,
   temporaryDirectory: string,
   packageSpecifier: string,
-  collectOrderTrace: boolean,
   timeoutMs: number,
 ): Promise<BuiltRolldown | FailedRolldownBuild> {
-  const requestPath = join(temporaryDirectory, "trace-request.json");
-  const responsePath = join(temporaryDirectory, "trace-response.json");
-  const request: TraceChildRequest = {
-    version: TRACE_CHILD_PROTOCOL_VERSION,
-    collectOrderTrace,
+  const requestPath = join(temporaryDirectory, "build-request.json");
+  const responsePath = join(temporaryDirectory, "build-response.json");
+  const request: BuildChildRequest = {
+    version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier,
     input: Object.fromEntries(
       program.entries.map((entry) => [
@@ -674,9 +655,7 @@ async function buildWithTraceChild(
       ]),
     ),
     preserveEntrySignatures: ROLLDOWN_BUILD_OPTIONS.preserveEntrySignatures,
-    sourceDirectory,
     bundleDirectory,
-    modulePaths: [...rendered.modulePaths],
     manualChunkGroups: (program.manualChunkGroups ?? []).map((group) => ({
       name: group.name,
       modulePaths: group.moduleIds.map((moduleId) =>
@@ -695,7 +674,7 @@ async function buildWithTraceChild(
   };
   await writeFile(requestPath, `${JSON.stringify(request)}\n`);
 
-  const childResult = await runTraceChildProcess(
+  const childResult = await runBuildChildProcess(
     temporaryDirectory,
     requestPath,
     responsePath,
@@ -705,7 +684,6 @@ async function buildWithTraceChild(
     return {
       status: "failed",
       failure: failure("harness-error", "build", packageSpecifier, childResult.error),
-      orderTrace: null,
     };
   }
   if (childResult.status === "timeout") {
@@ -715,9 +693,8 @@ async function buildWithTraceChild(
         "harness-error",
         "build",
         packageSpecifier,
-        new Error(`Traced build child timed out after ${childResult.timeoutMs}ms`),
+        new Error(`Build child timed out after ${childResult.timeoutMs}ms`),
       ),
-      orderTrace: null,
     };
   }
   if (childResult.code !== 0 || childResult.signal !== null) {
@@ -729,17 +706,16 @@ async function buildWithTraceChild(
         packageSpecifier,
         new Error(
           childResult.signal === null
-            ? `Traced build child exited with code ${String(childResult.code)}`
-            : `Traced build child exited with signal ${childResult.signal}`,
+            ? `Build child exited with code ${String(childResult.code)}`
+            : `Build child exited with signal ${childResult.signal}`,
         ),
       ),
-      orderTrace: null,
     };
   }
 
-  let response: TraceChildResponse;
+  let response: BuildChildResponse;
   try {
-    response = parseTraceChildResponse(
+    response = parseBuildChildResponse(
       JSON.parse(await readFile(responsePath, "utf8")) as unknown,
       bundleDirectory,
     );
@@ -747,19 +723,17 @@ async function buildWithTraceChild(
     return {
       status: "failed",
       failure: failure("harness-error", "build", packageSpecifier, error),
-      orderTrace: null,
     };
   }
-  if (response.version !== TRACE_CHILD_PROTOCOL_VERSION) {
+  if (response.version !== BUILD_CHILD_PROTOCOL_VERSION) {
     return {
       status: "failed",
       failure: failure(
         "harness-error",
         "build",
         packageSpecifier,
-        new Error(`Unsupported traced build child version ${String(response.version)}`),
+        new Error(`Unsupported build child version ${String(response.version)}`),
       ),
-      orderTrace: null,
     };
   }
   if (response.status === "failure") {
@@ -771,17 +745,15 @@ async function buildWithTraceChild(
         packageSpecifier,
         error: response.error,
       },
-      orderTrace: response.orderTrace,
     };
   }
   return {
     status: "ok",
     output: response.outputFiles,
-    orderTrace: response.orderTrace,
   };
 }
 
-export type TraceChildProcessResult =
+export type BuildChildProcessResult =
   | { readonly status: "spawn-error"; readonly error: Error }
   | { readonly status: "timeout"; readonly timeoutMs: number }
   | {
@@ -790,23 +762,23 @@ export type TraceChildProcessResult =
       readonly signal: NodeJS.Signals | null;
     };
 
-export type TraceChildProcessLike = Pick<ChildProcess, "pid" | "once" | "off" | "kill">;
+export type BuildChildProcessLike = Pick<ChildProcess, "pid" | "once" | "off" | "kill">;
 
-export interface TraceChildWaitOptions {
+export interface BuildChildWaitOptions {
   readonly terminationGraceMs?: number;
   readonly finalCloseGraceMs?: number;
-  readonly terminate?: (child: TraceChildProcessLike, force: boolean) => void;
+  readonly terminate?: (child: BuildChildProcessLike, force: boolean) => void;
 }
 
-async function runTraceChildProcess(
+async function runBuildChildProcess(
   cwd: string,
   requestPath: string,
   responsePath: string,
   timeoutMs: number,
-): Promise<TraceChildProcessResult> {
+): Promise<BuildChildProcessResult> {
   const child = spawn(
     process.execPath,
-    [...traceChildExecArgv(process.execArgv), TRACE_CHILD_PATH, requestPath, responsePath],
+    [...buildChildExecArgv(process.execArgv), BUILD_CHILD_PATH, requestPath, responsePath],
     {
       cwd,
       detached: process.platform !== "win32",
@@ -814,16 +786,16 @@ async function runTraceChildProcess(
       windowsHide: true,
     },
   );
-  return waitForTraceChildProcess(child, timeoutMs);
+  return waitForBuildChildProcess(child, timeoutMs);
 }
 
-export async function waitForTraceChildProcess(
-  child: TraceChildProcessLike,
+export async function waitForBuildChildProcess(
+  child: BuildChildProcessLike,
   timeoutMs: number,
-  options: TraceChildWaitOptions = {},
-): Promise<TraceChildProcessResult> {
-  const terminationGraceMs = options.terminationGraceMs ?? TRACE_CHILD_TERMINATION_GRACE_MS;
-  const finalCloseGraceMs = options.finalCloseGraceMs ?? TRACE_CHILD_FINAL_CLOSE_GRACE_MS;
+  options: BuildChildWaitOptions = {},
+): Promise<BuildChildProcessResult> {
+  const terminationGraceMs = options.terminationGraceMs ?? BUILD_CHILD_TERMINATION_GRACE_MS;
+  const finalCloseGraceMs = options.finalCloseGraceMs ?? BUILD_CHILD_FINAL_CLOSE_GRACE_MS;
   const terminate = options.terminate ?? terminateChildProcessTree;
 
   return new Promise((resolveResult) => {
@@ -847,7 +819,7 @@ export async function waitForTraceChildProcess(
       child.off("error", onError);
       child.off("close", onClose);
     };
-    const settle = (result: TraceChildProcessResult) => {
+    const settle = (result: BuildChildProcessResult) => {
       if (settled) {
         return;
       }
@@ -894,7 +866,7 @@ export async function waitForTraceChildProcess(
   });
 }
 
-function terminateChildProcessTree(child: TraceChildProcessLike, force: boolean): void {
+function terminateChildProcessTree(child: BuildChildProcessLike, force: boolean): void {
   if (child.pid === undefined) {
     return;
   }
@@ -922,7 +894,7 @@ function terminateChildProcessTree(child: TraceChildProcessLike, force: boolean)
   }
 }
 
-export function traceChildExecArgv(execArgv: readonly string[]): readonly string[] {
+export function buildChildExecArgv(execArgv: readonly string[]): readonly string[] {
   const result: string[] = [];
   const flagsWithValues = new Set([
     "--conditions",
@@ -977,14 +949,14 @@ export function traceChildExecArgv(execArgv: readonly string[]): readonly string
   return result;
 }
 
-type OutputChunkMetadata = TraceChildOutputFile & {
+type OutputChunkMetadata = BuildChildOutputFile & {
   readonly type: "chunk";
   readonly name: string;
   readonly isEntry: true;
   readonly facadeModuleId: string | null;
 };
 
-function isOutputChunkMetadata(output: TraceChildOutputFile): output is OutputChunkMetadata {
+function isOutputChunkMetadata(output: BuildChildOutputFile): output is OutputChunkMetadata {
   return (
     output.type === "chunk" &&
     typeof output.name === "string" &&
@@ -998,7 +970,7 @@ function createBundleManifest(
   rendered: RenderedProgram,
   entryInputNames: ReadonlyMap<string, string>,
   sourceDirectory: string,
-  output: readonly TraceChildOutputFile[],
+  output: readonly BuildChildOutputFile[],
 ): ExecutionManifest {
   const entryChunks = output.filter(isOutputChunkMetadata);
   const unusedChunks = new Set(entryChunks);

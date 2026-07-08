@@ -170,7 +170,7 @@ function diffEventsWithLcs(
   source: readonly ExecutionEvent[],
   bundle: readonly ExecutionEvent[],
 ): EventDiff {
-  // The child collector caps real traces at 512 events, so this exact table is at most
+  // The child runner caps executions at 512 events, so this exact table is at most
   // 513^2 cells and its LCS lengths fit safely in Uint16Array.
   const columnCount = bundle.length + 1;
   const lengths = new Uint16Array((source.length + 1) * columnCount);

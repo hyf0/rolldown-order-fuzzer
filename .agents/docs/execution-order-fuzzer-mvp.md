@@ -99,25 +99,15 @@ Generation is deterministic from seed and size. The first mixed campaign covers:
 
 Random generation starts after fixed scenarios pass through the complete pipeline.
 
-## Rolldown debug contract
+## Rolldown build contract
 
-Trace collection is enabled by default and can be disabled with `--no-order-trace`. Campaigns acquire one module-level asynchronous lock around the process-wide environment state, so traced and opt-out campaigns cannot overlap while `ROLLDOWN_STRICT_ORDER_TRACE` is temporarily set. A traced campaign sets the variable once rather than changing it around each build.
+Each build runs in a dedicated Node child process whose working directory is the adapter's unique temporary directory. The parent passes absolute source and bundle paths plus serializable build options; the child reconstructs manual chunk predicates, imports the configured Rolldown package, runs the build, waits for `bundle.close()`, and returns serializable output metadata.
 
-Each traced build runs in a dedicated Node child process whose OS working directory is the adapter's unique temporary directory. The parent passes absolute source and bundle paths plus serializable build options; the child reconstructs manual chunk predicates, imports the configured Rolldown package, runs the build, and waits for `bundle.close()`.
+The parent and child strictly validate their versioned protocol. Output filenames must be canonical relative paths confined to the bundle directory. The child inherits only safe Node execution arguments required for TypeScript or loaders; inspector, eval, and print flags are discarded.
 
-The child examines `<temporary-directory>/node_modules/.rolldown/` after close. A session matches only when its `SessionMeta.inputs` belong to the build's canonical source directory. The requested session is preferred when present; otherwise exactly one matching legacy-generated or fixed session is accepted.
+Every build has a bounded timeout. Timeout handling terminates the child process tree with TERM followed by KILL and a bounded final-close grace, so a package loader or helper subprocess cannot stall a campaign indefinitely.
 
-The isolated cwd contains automatic `sid_*` sessions from Rolldown 1.1.4 and fixed names such as `unknown-session` without touching repository state. Zero or ambiguous matches produce `orderTrace: null`; malformed matching logs, unsupported action versions, and duplicate matching actions are harness errors. The parent never changes its cwd, and every child session disappears when the adapter removes the build temporary directory.
-
-The collector accepts version 1 of `StrictExecutionOrderPlanReady` and strictly validates the required shapes for:
-
-- root obligations and predicted order
-- selected order-wrap modules and reasons
-- included modules with original/final wrap kind and chunk mappings
-- rendered static and dynamic chunk edges, with every chunk ID and reference constrained to unsigned 32-bit values
-- direct and transitive init obligations, including await and TLA facts
-
-The parser constructs a new versioned schema object and discards timestamps, session/build IDs, and unknown transport or nested metadata. The adapter maps canonical rendered source paths back to `ProgramModel` module IDs, rewrites other temporary source-root paths as `<source>/relative`, and preserves stable virtual/runtime IDs. Failure artifacts therefore contain deterministic `order-trace.json` data or `null`, and result lines report the selected plan-module count when an action is present. This data explains failures and reports over-wrapping; it does not affect the semantic verdict.
+The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 6 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity. The differential source-versus-bundle execution result is the sole semantic oracle.
 
 ## Regression policy
 

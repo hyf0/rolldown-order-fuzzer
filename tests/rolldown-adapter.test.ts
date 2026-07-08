@@ -23,21 +23,21 @@ import { generateCase } from "../src/generate.ts";
 import type { ProgramModel } from "../src/model.ts";
 import {
   inspectRolldownRuntimeIdentity,
-  traceChildExecArgv,
-  waitForTraceChildProcess,
+  buildChildExecArgv,
+  waitForBuildChildProcess,
   withRolldownBuild,
   type RolldownAdapterResult,
   type RolldownBuildArtifacts,
-  type TraceChildProcessLike,
+  type BuildChildProcessLike,
 } from "../src/rolldown-adapter.ts";
 import { renderProgram } from "../src/render.ts";
 import {
-  parseTraceChildRequest,
-  parseTraceChildResponse,
-  runTraceChildFromUnknown,
-  TRACE_CHILD_PROTOCOL_VERSION,
-  type TraceChildRequest,
-} from "../src/rolldown-trace-child.ts";
+  parseBuildChildRequest,
+  parseBuildChildResponse,
+  runBuildChildFromUnknown,
+  BUILD_CHILD_PROTOCOL_VERSION,
+  type BuildChildRequest,
+} from "../src/rolldown-build-child.ts";
 import { classifyVerdict } from "../src/verdict.ts";
 
 describe("withRolldownBuild", () => {
@@ -270,22 +270,17 @@ describe("withRolldownBuild", () => {
       expect(rendered.files).toHaveLength(generated.program.modules.length + 1);
       expect(rendered.files.some((file) => file.path === "runtime.cjs")).toBe(false);
 
-      const result = await withRolldownBuild(
-        generated.program,
-        rendered,
-        async (artifacts) => {
-          const [sourceOutcome, bundleOutcome, materializedSourceFiles] = await Promise.all([
-            executeManifest(artifacts.sourceManifestPath),
-            executeManifest(artifacts.bundleManifestPath),
-            readdir(artifacts.sourceDirectory),
-          ]);
-          return {
-            verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-            materializedSourceFiles: materializedSourceFiles.sort(),
-          };
-        },
-        { collectOrderTrace: false },
-      );
+      const result = await withRolldownBuild(generated.program, rendered, async (artifacts) => {
+        const [sourceOutcome, bundleOutcome, materializedSourceFiles] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+          readdir(artifacts.sourceDirectory),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          materializedSourceFiles: materializedSourceFiles.sort(),
+        };
+      });
 
       expect(successValue(result)).toEqual({
         verdict: { kind: "pass", signature: "pass" },
@@ -372,7 +367,6 @@ describe("withRolldownBuild", () => {
           },
           {
             packageSpecifier,
-            collectOrderTrace: false,
             onFailureArtifacts: async (_failure, artifacts) => {
               temporaryDirectory = artifacts.temporaryDirectory;
               closeMarker = JSON.parse(
@@ -644,112 +638,18 @@ describe("withRolldownBuild", () => {
     expect(entryPaths.every((path) => first.outputFiles.includes(path))).toBe(true);
   });
 
-  test("collects the strict execution order action after close and cleans its session", async () => {
-    const program = singleEntryProgram();
-    let temporaryDirectory = "";
-
-    await withTemporaryModule(
-      fakeRolldownModule([orderTraceAction()]),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (artifacts) => {
-            temporaryDirectory = artifacts.temporaryDirectory;
-            const sessions = await sessionDirectoryNames(
-              join(temporaryDirectory, "node_modules", ".rolldown"),
-            );
-            expect(sessions).toHaveLength(1);
-            return artifacts.orderTrace;
-          },
-          { packageSpecifier },
-        );
-
-        expect(successValue(result)).toEqual(orderTraceAction());
-      },
-    );
-
-    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("isolates a producer that appends to a fixed pre-existing session", async () => {
-    const program = singleEntryProgram();
-    const repositoryCwd = process.cwd();
-    const sentinelDirectory = join(repositoryCwd, "node_modules", ".rolldown", "unknown-session");
-    const sentinelExisted = await access(sentinelDirectory)
-      .then(() => true)
-      .catch(() => false);
-    const sentinelMeta = await readFile(join(sentinelDirectory, "meta.json"), "utf8").catch(
-      () => '{"sentinel":"meta"}\n',
-    );
-    const sentinelLogs = await readFile(join(sentinelDirectory, "logs.json"), "utf8").catch(
-      () => '{"sentinel":"logs"}\n',
-    );
-    let temporaryDirectory = "";
-
-    if (!sentinelExisted) {
-      await mkdir(sentinelDirectory, { recursive: true });
-      await Promise.all([
-        writeFile(join(sentinelDirectory, "meta.json"), sentinelMeta),
-        writeFile(join(sentinelDirectory, "logs.json"), sentinelLogs),
-      ]);
-    }
-
-    try {
-      await withTemporaryModule(fakeFixedSessionRolldownModule(), async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (artifacts) => {
-            temporaryDirectory = artifacts.temporaryDirectory;
-            return artifacts.orderTrace;
-          },
-          { packageSpecifier },
-        );
-
-        expect(successValue(result)).toMatchObject({
-          action: "StrictExecutionOrderPlanReady",
-          version: 1,
-          roots: [{ root_module_id: "entry" }],
-          plan_modules: [{ module_id: "entry" }],
-        });
-      });
-
-      expect(process.cwd()).toBe(repositoryCwd);
-      await expect(readFile(join(sentinelDirectory, "meta.json"), "utf8")).resolves.toBe(
-        sentinelMeta,
-      );
-      await expect(readFile(join(sentinelDirectory, "logs.json"), "utf8")).resolves.toBe(
-        sentinelLogs,
-      );
-      await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-    } finally {
-      if (sentinelExisted) {
-        await Promise.all([
-          writeFile(join(sentinelDirectory, "meta.json"), sentinelMeta),
-          writeFile(join(sentinelDirectory, "logs.json"), sentinelLogs),
-        ]);
-      } else {
-        await rm(sentinelDirectory, { recursive: true, force: true });
-      }
-    }
-  });
-
-  test("validates traced child requests before loading Rolldown", async () => {
-    const valid = validTraceChildRequest();
-    expect(parseTraceChildRequest(valid)).toEqual(valid);
+  test("validates build child requests before loading Rolldown", async () => {
+    const valid = validBuildChildRequest();
+    expect(parseBuildChildRequest(valid)).toEqual(valid);
 
     const invalid = [
       null,
       {},
       { ...valid, version: 2 },
-      { ...valid, collectOrderTrace: "yes" },
       { ...valid, packageSpecifier: "" },
       { ...valid, input: [] },
       { ...valid, input: { main: 1 } },
-      { ...valid, sourceDirectory: "relative/source" },
       { ...valid, bundleDirectory: "relative/bundle" },
-      { ...valid, modulePaths: [["entry"]] },
       {
         ...valid,
         manualChunkGroups: [{ name: "shared", modulePaths: ["relative/module.mjs"] }],
@@ -758,10 +658,10 @@ describe("withRolldownBuild", () => {
       { ...valid, output: { ...valid.output, strictExecutionOrder: false } },
     ];
     for (const value of invalid) {
-      expect(() => parseTraceChildRequest(value)).toThrow(TypeError);
+      expect(() => parseBuildChildRequest(value)).toThrow(TypeError);
     }
 
-    await expect(runTraceChildFromUnknown({ ...valid, version: 2 })).resolves.toMatchObject({
+    await expect(runBuildChildFromUnknown({ ...valid, version: 2 })).resolves.toMatchObject({
       status: "failure",
       failureStatus: "harness-error",
       stage: "build",
@@ -769,9 +669,9 @@ describe("withRolldownBuild", () => {
     });
   });
 
-  test("validates traced child responses before parent manifest mapping", () => {
+  test("validates build child responses before parent manifest mapping", () => {
     const valid = {
-      version: TRACE_CHILD_PROTOCOL_VERSION,
+      version: BUILD_CHILD_PROTOCOL_VERSION,
       status: "ok",
       outputFiles: [
         { type: "asset", fileName: "assets/nested/asset.txt" },
@@ -783,9 +683,8 @@ describe("withRolldownBuild", () => {
           facadeModuleId: null,
         },
       ],
-      orderTrace: null,
     } as const;
-    expect(parseTraceChildResponse(valid, "/tmp/bundle")).toEqual(valid);
+    expect(parseBuildChildResponse(valid, "/tmp/bundle")).toEqual(valid);
 
     const invalid = [
       null,
@@ -824,26 +723,23 @@ describe("withRolldownBuild", () => {
       { ...valid, outputFiles: [{ type: "asset", fileName: "./escape.txt" }] },
       { ...valid, outputFiles: [{ type: "asset", fileName: "assets\\..\\escape.txt" }] },
       { ...valid, outputFiles: [{ type: "asset", fileName: "assets/escape\u0000.txt" }] },
-      { ...valid, orderTrace: {} },
       {
-        version: TRACE_CHILD_PROTOCOL_VERSION,
+        version: BUILD_CHILD_PROTOCOL_VERSION,
         status: "failure",
         failureStatus: "harness-error",
         stage: "build",
         error: { name: 1, message: "bad" },
-        orderTrace: null,
       },
       {
-        version: TRACE_CHILD_PROTOCOL_VERSION,
+        version: BUILD_CHILD_PROTOCOL_VERSION,
         status: "failure",
         failureStatus: "unknown",
         stage: "build",
         error: { name: "Error", message: "bad" },
-        orderTrace: null,
       },
     ];
     for (const value of invalid) {
-      expect(() => parseTraceChildResponse(value, "/tmp/bundle")).toThrow(TypeError);
+      expect(() => parseBuildChildResponse(value, "/tmp/bundle")).toThrow(TypeError);
     }
   });
 
@@ -904,56 +800,10 @@ describe("withRolldownBuild", () => {
     expect(callbackRan).toBe(false);
   });
 
-  test("rejects escaped output when trace collection is disabled", async () => {
-    const program = singleEntryProgram();
-    let callbackRan = false;
-
-    await withTemporaryModule(
-      [
-        "export async function rolldown(options) {",
-        "  return {",
-        "    async write() {",
-        "      return {",
-        "        output: [{",
-        '          type: "chunk",',
-        '          fileName: "../source/module-0000.mjs",',
-        '          name: "__entry_0000",',
-        "          isEntry: true,",
-        "          facadeModuleId: Object.values(options.input)[0],",
-        "        }],",
-        "      };",
-        "    },",
-        "    async close() {},",
-        "  };",
-        "}",
-        "",
-      ].join("\n"),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (): Promise<never> => {
-            callbackRan = true;
-            throw new Error("escaped opt-out callback must not run");
-          },
-          { packageSpecifier, collectOrderTrace: false },
-        );
-
-        expect(result).toMatchObject({
-          status: "harness-error",
-          stage: "build",
-          error: { name: "TypeError" },
-        });
-      },
-    );
-
-    expect(callbackRan).toBe(false);
-  });
-
   test("forwards safe TypeScript execArgv without inspector conflicts", () => {
     expect(
-      traceChildExecArgv([
-        "--conditions=trace-child",
+      buildChildExecArgv([
+        "--conditions=build-child",
         "--import",
         "/tmp/register.mjs",
         "--inspect=127.0.0.1:9229",
@@ -961,7 +811,7 @@ describe("withRolldownBuild", () => {
         "--eval",
         "process.exit()",
       ]),
-    ).toEqual(["--conditions=trace-child", "--import", "/tmp/register.mjs"]);
+    ).toEqual(["--conditions=build-child", "--import", "/tmp/register.mjs"]);
   });
 
   test("hashes an absolute native override despite ambiguous binding loaders", async () => {
@@ -1017,7 +867,7 @@ describe("withRolldownBuild", () => {
     }
   });
 
-  test("times out and cleans a stalled traced build child", async () => {
+  test("times out and cleans a stalled build child", async () => {
     const program = singleEntryProgram();
     let callbackRan = false;
     let temporaryDirectory = "";
@@ -1053,7 +903,7 @@ describe("withRolldownBuild", () => {
           },
           {
             packageSpecifier,
-            traceChildTimeoutMs: 25,
+            buildChildTimeoutMs: 25,
             onFailureArtifacts: (_failure, artifacts) => {
               temporaryDirectory = artifacts.temporaryDirectory;
             },
@@ -1065,7 +915,7 @@ describe("withRolldownBuild", () => {
           stage: "build",
           error: {
             name: "Error",
-            message: "Traced build child timed out after 25ms",
+            message: "Build child timed out after 25ms",
           },
         });
       },
@@ -1075,96 +925,40 @@ describe("withRolldownBuild", () => {
     await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  test("times out a stalled child when trace collection is disabled", async () => {
-    const program = singleEntryProgram();
-    let callbackRan = false;
-
-    await withTemporaryModule(
-      [
-        "await new Promise((resolve) => setTimeout(resolve, 200));",
-        "export async function rolldown(options) {",
-        "  return {",
-        "    async write() {",
-        "      return {",
-        "        output: [{",
-        '          type: "chunk",',
-        '          fileName: "entries/__entry_0000.js",',
-        '          name: "__entry_0000",',
-        "          isEntry: true,",
-        "          facadeModuleId: Object.values(options.input)[0],",
-        "        }],",
-        "      };",
-        "    },",
-        "    async close() {},",
-        "  };",
-        "}",
-        "",
-      ].join("\n"),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (): Promise<never> => {
-            callbackRan = true;
-            throw new Error("timed out opt-out callback must not run");
-          },
-          {
-            packageSpecifier,
-            collectOrderTrace: false,
-            traceChildTimeoutMs: 25,
-          },
-        );
-
-        expect(result).toMatchObject({
-          status: "harness-error",
-          stage: "build",
-          error: {
-            message: "Traced build child timed out after 25ms",
-          },
-        });
-      },
-    );
-
-    expect(callbackRan).toBe(false);
-  });
-
-  test("terminates helper subprocesses for traced and opt-out timeouts", async () => {
-    for (const collectOrderTrace of [true, false]) {
-      await withTemporaryModule(fakeHangingHelperRolldownModule(), async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          singleEntryProgram(),
-          renderProgram(singleEntryProgram()),
-          async (): Promise<never> => {
-            throw new Error("timed out helper callback must not run");
-          },
-          {
-            packageSpecifier,
-            collectOrderTrace,
-            traceChildTimeoutMs: 1_000,
-          },
-        );
-        expect(result).toMatchObject({
-          status: "harness-error",
-          stage: "build",
-          error: {
-            message: "Traced build child timed out after 1000ms",
-          },
-        });
-
-        const pidPath = join(dirname(fileURLToPath(packageSpecifier)), "helper-pids.json");
-        const pids = JSON.parse(await readFile(pidPath, "utf8")) as {
-          readonly childPid: number;
-          readonly helperPid: number;
-        };
-        try {
-          expect(await waitForProcessExit(pids.childPid, 2_000)).toBe(true);
-          expect(await waitForProcessExit(pids.helperPid, 2_000)).toBe(true);
-        } finally {
-          killProcessIfAlive(pids.helperPid);
-          await waitForProcessExit(pids.helperPid, 2_000);
-        }
+  test("terminates helper subprocesses when a build times out", async () => {
+    await withTemporaryModule(fakeHangingHelperRolldownModule(), async (packageSpecifier) => {
+      const result = await withRolldownBuild(
+        singleEntryProgram(),
+        renderProgram(singleEntryProgram()),
+        async (): Promise<never> => {
+          throw new Error("timed out helper callback must not run");
+        },
+        {
+          packageSpecifier,
+          buildChildTimeoutMs: 1_000,
+        },
+      );
+      expect(result).toMatchObject({
+        status: "harness-error",
+        stage: "build",
+        error: {
+          message: "Build child timed out after 1000ms",
+        },
       });
-    }
+
+      const pidPath = join(dirname(fileURLToPath(packageSpecifier)), "helper-pids.json");
+      const pids = JSON.parse(await readFile(pidPath, "utf8")) as {
+        readonly childPid: number;
+        readonly helperPid: number;
+      };
+      try {
+        expect(await waitForProcessExit(pids.childPid, 2_000)).toBe(true);
+        expect(await waitForProcessExit(pids.helperPid, 2_000)).toBe(true);
+      } finally {
+        killProcessIfAlive(pids.helperPid);
+        await waitForProcessExit(pids.helperPid, 2_000);
+      }
+    });
   }, 15_000);
 
   test("settles a timeout when the child never emits close", async () => {
@@ -1178,7 +972,7 @@ describe("withRolldownBuild", () => {
     };
     const startedAt = Date.now();
 
-    const result = await waitForTraceChildProcess(child as unknown as TraceChildProcessLike, 10, {
+    const result = await waitForBuildChildProcess(child as unknown as BuildChildProcessLike, 10, {
       terminationGraceMs: 10,
       finalCloseGraceMs: 10,
       terminate: (_child, force) => {
@@ -1192,301 +986,6 @@ describe("withRolldownBuild", () => {
     expect(emitter.listenerCount("error")).toBe(0);
     expect(emitter.listenerCount("close")).toBe(0);
     emitter.emit("close", 0, null);
-  });
-
-  test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {
-    const program = singleEntryProgram();
-    const rendered = renderProgram(program);
-
-    await withTemporaryModule(fakeCanonicalTraceRolldownModule(), async (packageSpecifier) => {
-      const build = () =>
-        withRolldownBuild(program, rendered, async (artifacts) => artifacts.orderTrace, {
-          packageSpecifier,
-        });
-      const first = successValue(await build());
-      const second = successValue(await build());
-      const expected = {
-        action: "StrictExecutionOrderPlanReady",
-        version: 1,
-        roots: [
-          {
-            root_module_id: "entry",
-            expected_order: ["<source>/unmapped.js", "entry", "rolldown:runtime"],
-            predicted_pre_wrap_order: ["entry", "<source>/unmapped.js"],
-            at_risk_modules: ["entry"],
-          },
-        ],
-        plan_modules: [{ module_id: "entry", reasons: ["direct-violation"] }],
-        included_modules: [
-          {
-            module_id: "entry",
-            interop_wrap_kind: "none",
-            order_wrapped: true,
-            wrapper_origin: "execution-order",
-            entry_trigger: "order-init",
-            final_chunk_id: 1,
-            entry_chunk_id: 1,
-            wrapper_included: true,
-            tla_tainted: false,
-          },
-        ],
-        rendered_chunks: [
-          {
-            chunk_id: 1,
-            module_ids: ["entry", "<source>/unmapped.js", "rolldown:runtime"],
-            static_chunk_imports: [],
-            dynamic_chunk_imports: [],
-          },
-        ],
-        init_obligations: [
-          {
-            kind: "direct-import",
-            importer_id: "entry",
-            importee_id: "<source>/unmapped.js",
-            awaited: false,
-            importer_tla_tainted: false,
-            importee_tla_tainted: false,
-          },
-        ],
-      };
-
-      expect(first).toEqual(expected);
-      expect(second).toEqual(expected);
-      expect(JSON.stringify(first)).toBe(JSON.stringify(second));
-    });
-  });
-
-  test("returns a null trace when the devtools log has no matching action", async () => {
-    const program = singleEntryProgram();
-
-    await withTemporaryModule(
-      fakeRolldownModule([{ action: "BuildEnd", build_id: "build-1" }]),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (artifacts) => artifacts.orderTrace,
-          { packageSpecifier },
-        );
-
-        expect(successValue(result)).toBeNull();
-      },
-    );
-  });
-
-  test("reports malformed matching actions as harness errors and cleans the session", async () => {
-    const program = singleEntryProgram();
-    let temporaryDirectory = "";
-
-    await withTemporaryModule(
-      fakeRolldownModule([{ ...orderTraceAction(), version: 3 }]),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (): Promise<never> => {
-            throw new Error("build callback must not run");
-          },
-          {
-            packageSpecifier,
-            onFailureArtifacts: (_failure, artifacts) => {
-              temporaryDirectory = artifacts.temporaryDirectory;
-            },
-          },
-        );
-
-        expect(result).toMatchObject({
-          status: "harness-error",
-          stage: "collect-order-trace",
-          error: {
-            name: "TypeError",
-            message: "Unsupported StrictExecutionOrderPlanReady version: 3",
-          },
-        });
-      },
-    );
-
-    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("assigns unique devtools sessions to concurrent builds", async () => {
-    const program = singleEntryProgram();
-    const rendered = renderProgram(program);
-
-    await withTemporaryModule(fakeRolldownModule([]), async (packageSpecifier) => {
-      const results = await Promise.all([
-        withRolldownBuild(
-          program,
-          rendered,
-          async (artifacts) => ({
-            temporaryDirectory: artifacts.temporaryDirectory,
-            sessions: await sessionDirectoryNames(
-              join(artifacts.temporaryDirectory, "node_modules", ".rolldown"),
-            ),
-            trace: artifacts.orderTrace,
-          }),
-          { packageSpecifier },
-        ),
-        withRolldownBuild(
-          program,
-          rendered,
-          async (artifacts) => ({
-            temporaryDirectory: artifacts.temporaryDirectory,
-            sessions: await sessionDirectoryNames(
-              join(artifacts.temporaryDirectory, "node_modules", ".rolldown"),
-            ),
-            trace: artifacts.orderTrace,
-          }),
-          { packageSpecifier },
-        ),
-      ]);
-
-      const values = results.map(successValue);
-      expect(values.map((value) => value.trace)).toEqual([null, null]);
-      expect(values.every((value) => value.sessions.length === 1)).toBe(true);
-      expect(new Set(values.flatMap((value) => value.sessions)).size).toBe(2);
-      await Promise.all(
-        values.map((value) =>
-          expect(access(value.temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" }),
-        ),
-      );
-    });
-  });
-
-  test("discovers and cleans a legacy session while leaving unrelated sessions untouched", async () => {
-    const program = singleEntryProgram();
-    let temporaryDirectory = "";
-
-    await withTemporaryModule(
-      fakeLegacyRolldownModule(`${JSON.stringify(orderTraceAction())}\n`, 1, true),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (artifacts) => {
-            temporaryDirectory = artifacts.temporaryDirectory;
-            expect(
-              await sessionDirectoryNames(join(temporaryDirectory, "node_modules", ".rolldown")),
-            ).toHaveLength(2);
-            return artifacts.orderTrace;
-          },
-          { packageSpecifier },
-        );
-
-        expect(successValue(result)).toEqual(orderTraceAction());
-      },
-    );
-
-    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("cleans a matched legacy session when it contains no strict-order action", async () => {
-    const program = singleEntryProgram();
-    let temporaryDirectory = "";
-
-    await withTemporaryModule(
-      fakeLegacyRolldownModule(`${JSON.stringify({ action: "BuildEnd" })}\n`),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (artifacts) => {
-            temporaryDirectory = artifacts.temporaryDirectory;
-            return artifacts.orderTrace;
-          },
-          { packageSpecifier },
-        );
-
-        expect(successValue(result)).toBeNull();
-      },
-    );
-
-    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("leaves ambiguous matching legacy sessions untouched and returns a null trace", async () => {
-    const program = singleEntryProgram();
-    let temporaryDirectory = "";
-
-    await withTemporaryModule(
-      fakeLegacyRolldownModule(`${JSON.stringify(orderTraceAction())}\n`, 2),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (artifacts) => {
-            temporaryDirectory = artifacts.temporaryDirectory;
-            expect(
-              await sessionDirectoryNames(join(temporaryDirectory, "node_modules", ".rolldown")),
-            ).toHaveLength(2);
-            return artifacts.orderTrace;
-          },
-          { packageSpecifier },
-        );
-
-        expect(successValue(result)).toBeNull();
-      },
-    );
-
-    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("reports malformed logs from a matched legacy session and still cleans it", async () => {
-    const program = singleEntryProgram();
-    let temporaryDirectory = "";
-
-    await withTemporaryModule(
-      fakeLegacyRolldownModule("{not-json}\n"),
-      async (packageSpecifier) => {
-        const result = await withRolldownBuild(
-          program,
-          renderProgram(program),
-          async (): Promise<never> => {
-            throw new Error("build callback must not run");
-          },
-          {
-            packageSpecifier,
-            onFailureArtifacts: (_failure, artifacts) => {
-              temporaryDirectory = artifacts.temporaryDirectory;
-            },
-          },
-        );
-
-        expect(result).toMatchObject({
-          status: "harness-error",
-          stage: "collect-order-trace",
-          error: {
-            name: "TypeError",
-          },
-        });
-      },
-    );
-
-    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
-  });
-
-  test("cleans the installed package session when it uses a legacy generated ID", async () => {
-    const program = singleEntryProgram();
-    const devtoolsRoot = join(process.cwd(), "node_modules", ".rolldown");
-    const before = new Set(await sessionDirectoryNames(devtoolsRoot));
-    let canonicalSourceDirectory = "";
-
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      canonicalSourceDirectory = await realpath(artifacts.sourceDirectory);
-      return artifacts.orderTrace;
-    });
-
-    expect(successValue(result)).toBeNull();
-    const added = (await sessionDirectoryNames(devtoolsRoot)).filter((name) => !before.has(name));
-    const leakedMatchingSessions: string[] = [];
-    for (const name of added) {
-      const directory = join(devtoolsRoot, name);
-      const meta = await readFile(join(directory, "meta.json"), "utf8").catch(() => "");
-      if (meta.includes(canonicalSourceDirectory)) {
-        leakedMatchingSessions.push(directory);
-      }
-    }
-    expect(leakedMatchingSessions).toEqual([]);
   });
 });
 
@@ -1539,122 +1038,6 @@ async function withTemporaryModule(
   }
 }
 
-function fakeRolldownModule(logs: readonly unknown[]): string {
-  const logContents = logs.map((log) => JSON.stringify(log)).join("\n");
-  return [
-    'import { mkdir, writeFile } from "node:fs/promises";',
-    'import { join } from "node:path";',
-    "",
-    "export async function rolldown(options) {",
-    "  const sessionId = options.devtools?.sessionId;",
-    '  if (typeof sessionId !== "string" || sessionId.length === 0) {',
-    '    throw new Error("missing devtools session id");',
-    "  }",
-    '  const sessionDirectory = join(process.cwd(), "node_modules/.rolldown", sessionId);',
-    "  globalThis.__rolldownAdapterSessionIds ??= [];",
-    "  globalThis.__rolldownAdapterSessionIds.push(sessionId);",
-    "  globalThis.__rolldownAdapterSessionDirectories ??= [];",
-    "  globalThis.__rolldownAdapterSessionDirectories.push(sessionDirectory);",
-    "  return {",
-    "    async write() {",
-    "      const facadeModuleId = Object.values(options.input)[0];",
-    "      return {",
-    "        output: [{",
-    '          type: "chunk",',
-    '          fileName: "entries/__entry_0000.js",',
-    '          name: "__entry_0000",',
-    "          isEntry: true,",
-    "          facadeModuleId,",
-    "        }],",
-    "      };",
-    "    },",
-    "    async close() {",
-    "      await mkdir(sessionDirectory, { recursive: true });",
-    "      const facadeModuleId = Object.values(options.input)[0];",
-    "      await writeFile(",
-    '        join(sessionDirectory, "meta.json"),',
-    "        `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'main', filename: facadeModuleId }] })}\\n`,",
-    "      );",
-    `      await writeFile(join(sessionDirectory, "logs.json"), ${JSON.stringify(
-      logContents.length === 0 ? "" : `${logContents}\n`,
-    )});`,
-    "    },",
-    "  };",
-    "}",
-    "",
-  ].join("\n");
-}
-
-function fakeFixedSessionRolldownModule(): string {
-  return [
-    'import { appendFile, mkdir } from "node:fs/promises";',
-    'import { join } from "node:path";',
-    "",
-    'const sessionDirectory = join(process.cwd(), "node_modules/.rolldown/unknown-session");',
-    "await mkdir(sessionDirectory, { recursive: true });",
-    "await appendFile(",
-    '  join(sessionDirectory, "meta.json"),',
-    "  `${JSON.stringify({ action: 'ProducerReady', cwd: process.cwd() })}\\n`,",
-    ");",
-    "await appendFile(",
-    '  join(sessionDirectory, "logs.json"),',
-    "  `${JSON.stringify({ action: 'BuildStart', cwd: process.cwd() })}\\n`,",
-    ");",
-    "",
-    "export async function rolldown(options) {",
-    "  const moduleId = Object.values(options.input)[0];",
-    "  return {",
-    "    async write() {",
-    "      return {",
-    "        output: [{",
-    '          type: "chunk",',
-    '          fileName: "entries/__entry_0000.js",',
-    '          name: "__entry_0000",',
-    "          isEntry: true,",
-    "          facadeModuleId: moduleId,",
-    "        }],",
-    "      };",
-    "    },",
-    "    async close() {",
-    "      const action = {",
-    '        action: "StrictExecutionOrderPlanReady",',
-    "        version: 1,",
-    "        roots: [{",
-    "          root_module_id: moduleId,",
-    "          expected_order: [moduleId],",
-    "          predicted_pre_wrap_order: [moduleId],",
-    "          at_risk_modules: [moduleId],",
-    "        }],",
-    "        plan_modules: [{ module_id: moduleId, reasons: ['direct-violation'] }],",
-    "        included_modules: [{",
-    "          module_id: moduleId,",
-    "          original_wrap_kind: 'none',",
-    "          final_wrap_kind: 'esm',",
-    "          final_chunk_id: 1,",
-    "          entry_chunk_id: 1,",
-    "          wrapper_included: true,",
-    "          tla_tainted: false,",
-    "        }],",
-    "        rendered_chunks: [{",
-    "          chunk_id: 1,",
-    "          module_ids: [moduleId],",
-    "          static_chunk_imports: [],",
-    "          dynamic_chunk_imports: [],",
-    "        }],",
-    "        init_obligations: [],",
-    "      };",
-    "      await appendFile(",
-    '        join(sessionDirectory, "meta.json"),',
-    "        `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'main', filename: moduleId }] })}\\n`,",
-    "      );",
-    "      await appendFile(join(sessionDirectory, 'logs.json'), `${JSON.stringify(action)}\\n`);",
-    "    },",
-    "  };",
-    "}",
-    "",
-  ].join("\n");
-}
-
 function fakeHangingHelperRolldownModule(): string {
   return [
     'import { spawn } from "node:child_process";',
@@ -1673,168 +1056,6 @@ function fakeHangingHelperRolldownModule(): string {
     "await new Promise(() => {});",
     "",
   ].join("\n");
-}
-
-function fakeCanonicalTraceRolldownModule(): string {
-  return [
-    'import { mkdir, writeFile } from "node:fs/promises";',
-    'import { dirname, join } from "node:path";',
-    "",
-    "export async function rolldown(options) {",
-    "  const sessionId = options.devtools?.sessionId;",
-    '  if (typeof sessionId !== "string" || sessionId.length === 0) {',
-    '    throw new Error("missing devtools session id");',
-    "  }",
-    "  const moduleId = Object.values(options.input)[0];",
-    "  const sourceRoot = dirname(moduleId);",
-    '  const unmappedId = join(sourceRoot, "unmapped.js");',
-    '  const virtualId = "rolldown:runtime";',
-    '  const sessionDirectory = join(process.cwd(), "node_modules/.rolldown", sessionId);',
-    "  return {",
-    "    async write() {",
-    "      return {",
-    "        output: [{",
-    '          type: "chunk",',
-    '          fileName: "entries/__entry_0000.js",',
-    '          name: "__entry_0000",',
-    "          isEntry: true,",
-    "          facadeModuleId: moduleId,",
-    "        }],",
-    "      };",
-    "    },",
-    "    async close() {",
-    "      const action = {",
-    '        action: "StrictExecutionOrderPlanReady",',
-    "        version: 1,",
-    "        timestamp: Date.now(),",
-    "        session_id: sessionId,",
-    "        build_id: `build-${sessionId}`,",
-    "        roots: [{",
-    "          root_module_id: moduleId,",
-    "          expected_order: [unmappedId, moduleId, virtualId],",
-    "          predicted_pre_wrap_order: [moduleId, unmappedId],",
-    "          at_risk_modules: [moduleId],",
-    '          transport_detail: "discard",',
-    "        }],",
-    "        plan_modules: [{ module_id: moduleId, reasons: ['direct-violation'] }],",
-    "        included_modules: [{",
-    "          module_id: moduleId,",
-    "          original_wrap_kind: 'none',",
-    "          final_wrap_kind: 'esm',",
-    "          final_chunk_id: 1,",
-    "          entry_chunk_id: 1,",
-    "          wrapper_included: true,",
-    "          tla_tainted: false,",
-    "        }],",
-    "        rendered_chunks: [{",
-    "          chunk_id: 1,",
-    "          module_ids: [moduleId, unmappedId, virtualId],",
-    "          static_chunk_imports: [],",
-    "          dynamic_chunk_imports: [],",
-    "        }],",
-    "        init_obligations: [{",
-    "          kind: 'direct-import',",
-    "          importer_id: moduleId,",
-    "          importee_id: unmappedId,",
-    "          awaited: false,",
-    "          importer_tla_tainted: false,",
-    "          importee_tla_tainted: false,",
-    "        }],",
-    "      };",
-    "      await mkdir(sessionDirectory, { recursive: true });",
-    "      await writeFile(",
-    '        join(sessionDirectory, "meta.json"),',
-    "        `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'main', filename: moduleId }] })}\\n`,",
-    "      );",
-    '      await writeFile(join(sessionDirectory, "logs.json"), `${JSON.stringify(action)}\\n`);',
-    "    },",
-    "  };",
-    "}",
-    "",
-  ].join("\n");
-}
-
-function fakeLegacyRolldownModule(
-  logContents: string,
-  matchingSessionCount = 1,
-  createUnrelatedSession = false,
-): string {
-  return [
-    'import { mkdir, writeFile } from "node:fs/promises";',
-    'import { join } from "node:path";',
-    "",
-    "export async function rolldown(options) {",
-    "  const requestedSessionId = options.devtools?.sessionId;",
-    '  if (typeof requestedSessionId !== "string" || requestedSessionId.length === 0) {',
-    '    throw new Error("missing devtools session id");',
-    "  }",
-    "  const facadeModuleId = Object.values(options.input)[0];",
-    "  const devtoolsRoot = join(process.cwd(), 'node_modules/.rolldown');",
-    "  const matchingDirectories = Array.from(",
-    `    { length: ${matchingSessionCount} },`,
-    "    (_, index) => join(devtoolsRoot, `legacy-${requestedSessionId}-${index}`),",
-    "  );",
-    "  const unrelatedDirectory = join(devtoolsRoot, `unrelated-${requestedSessionId}`);",
-    "  globalThis.__rolldownAdapterLegacySessionDirectories ??= [];",
-    "  globalThis.__rolldownAdapterLegacySessionDirectories.push(...matchingDirectories);",
-    ...(createUnrelatedSession
-      ? [
-          "  globalThis.__rolldownAdapterUnrelatedSessionDirectories ??= [];",
-          "  globalThis.__rolldownAdapterUnrelatedSessionDirectories.push(unrelatedDirectory);",
-        ]
-      : []),
-    "  return {",
-    "    async write() {",
-    "      return {",
-    "        output: [{",
-    '          type: "chunk",',
-    '          fileName: "entries/__entry_0000.js",',
-    '          name: "__entry_0000",',
-    "          isEntry: true,",
-    "          facadeModuleId,",
-    "        }],",
-    "      };",
-    "    },",
-    "    async close() {",
-    "      for (const directory of matchingDirectories) {",
-    "        await mkdir(directory, { recursive: true });",
-    "        await writeFile(",
-    "          join(directory, 'meta.json'),",
-    "          `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'main', filename: facadeModuleId }] })}\\n`,",
-    "        );",
-    `        await writeFile(join(directory, "logs.json"), ${JSON.stringify(logContents)});`,
-    "      }",
-    ...(createUnrelatedSession
-      ? [
-          "      await mkdir(unrelatedDirectory, { recursive: true });",
-          "      await writeFile(",
-          "        join(unrelatedDirectory, 'meta.json'),",
-          "        `${JSON.stringify({ action: 'SessionMeta', inputs: [{ name: 'other', filename: '/unrelated/source.js' }] })}\\n`,",
-          "      );",
-          `      await writeFile(join(unrelatedDirectory, "logs.json"), ${JSON.stringify(
-            `${JSON.stringify(orderTraceAction())}\n`,
-          )});`,
-        ]
-      : []),
-    "    },",
-    "  };",
-    "}",
-    "",
-  ].join("\n");
-}
-
-async function sessionDirectoryNames(root: string): Promise<string[]> {
-  try {
-    return (await readdir(root, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
-  } catch (error) {
-    if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-      return [];
-    }
-    throw error;
-  }
 }
 
 async function waitForProcessExit(pid: number, timeoutMs: number): Promise<boolean> {
@@ -1870,16 +1091,13 @@ function killProcessIfAlive(pid: number): void {
   }
 }
 
-function validTraceChildRequest(): TraceChildRequest {
+function validBuildChildRequest(): BuildChildRequest {
   return {
-    version: TRACE_CHILD_PROTOCOL_VERSION,
-    collectOrderTrace: true,
+    version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier: "rolldown",
     input: { main: "/tmp/source/entry.mjs" },
     preserveEntrySignatures: "allow-extension",
-    sourceDirectory: "/tmp/source",
     bundleDirectory: "/tmp/bundle",
-    modulePaths: [["entry", "entry.mjs"]],
     manualChunkGroups: [{ name: "shared", modulePaths: ["/tmp/source/shared.mjs"] }],
     output: {
       format: "esm",
@@ -1890,48 +1108,5 @@ function validTraceChildRequest(): TraceChildRequest {
       cleanDir: false,
       minify: false,
     },
-  };
-}
-
-function orderTraceAction() {
-  return {
-    action: "StrictExecutionOrderPlanReady",
-    version: 1,
-    roots: [
-      {
-        root_module_id: "/project/entry.js",
-        expected_order: ["/project/entry.js"],
-        predicted_pre_wrap_order: ["/project/entry.js"],
-        at_risk_modules: [],
-      },
-    ],
-    plan_modules: [
-      {
-        module_id: "/project/entry.js",
-        reasons: ["direct-violation"],
-      },
-    ],
-    included_modules: [
-      {
-        module_id: "/project/entry.js",
-        interop_wrap_kind: "none",
-        order_wrapped: true,
-        wrapper_origin: "execution-order",
-        entry_trigger: "order-init",
-        final_chunk_id: 1,
-        entry_chunk_id: 1,
-        wrapper_included: true,
-        tla_tainted: false,
-      },
-    ],
-    rendered_chunks: [
-      {
-        chunk_id: 1,
-        module_ids: ["/project/entry.js"],
-        static_chunk_imports: [],
-        dynamic_chunk_imports: [],
-      },
-    ],
-    init_obligations: [],
   };
 }

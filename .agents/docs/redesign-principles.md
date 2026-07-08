@@ -10,4 +10,4 @@ The verdict layer should separate source validity from bundle correctness. First
 
 The shrinking layer should use the same verdict and signature logic as the campaign runner. A minimized case that preserves only a broad failure class is not trustworthy enough for issue filing.
 
-Correctness green is not enough for strict execution order work. Over-wrapping can preserve order while failing the size goal. When the fuzzer is used to validate an on-demand wrapping design, it also needs a way to report the set of modules that were wrapped or otherwise forced into init scaffolding.
+The fuzzer judges `strictExecutionOrder` through observable source-versus-bundle behavior only. It does not consume Rolldown's internal wrapping, inclusion, or execution-plan state. Output-size and over-wrapping goals belong in separate Rolldown benchmarks and focused tests.

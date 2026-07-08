@@ -20,7 +20,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 
 import { generateCase, MIXED_TEMPLATE_NAMES, type GeneratedCase } from "../src/generate.ts";
-import { parseStrictExecutionOrderPlanReady } from "../src/order-trace.ts";
 import {
   classifyCampaignVerdict,
   DEFAULT_CASE_SIZE,
@@ -45,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 5", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(5);
+  test("uses artifact schema version 6", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(6);
   });
 
   test("parses the complete campaign option set", () => {
@@ -68,15 +67,10 @@ describe("parseCliArgs", () => {
       rolldownPackage: "file:///tmp/rolldown.mjs",
       outDir: "artifacts",
       continueOnFail: true,
-      collectOrderTrace: true,
     });
 
     expect(parseCliArgs(["--stop-on-fail"])).toMatchObject({
       continueOnFail: false,
-      collectOrderTrace: true,
-    });
-    expect(parseCliArgs(["--no-order-trace"])).toMatchObject({
-      collectOrderTrace: false,
     });
   });
 
@@ -118,140 +112,6 @@ test("reports the project as an MVP", () => {
 });
 
 describe("runCampaign", () => {
-  test("sets the strict-order trace environment once for the campaign and restores it", async () => {
-    const previous = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-    const observed: (string | undefined)[] = [];
-    delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-
-    try {
-      await runCampaign(campaignOptions({ cases: 2, continueOnFail: true }), {
-        executeCase: async (generated) => {
-          observed.push(process.env.ROLLDOWN_STRICT_ORDER_TRACE);
-          return passedCase(generated);
-        },
-        writeFailure: async () => {
-          throw new Error("passing cases must not write artifacts");
-        },
-        writeLine: () => {},
-      });
-
-      expect(observed).toEqual(["1", "1"]);
-      expect(process.env.ROLLDOWN_STRICT_ORDER_TRACE).toBeUndefined();
-    } finally {
-      if (previous === undefined) {
-        delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-      } else {
-        process.env.ROLLDOWN_STRICT_ORDER_TRACE = previous;
-      }
-    }
-  });
-
-  test("temporarily clears an inherited trace environment for opt-out campaigns", async () => {
-    const previous = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-    const observed: (string | undefined)[] = [];
-    process.env.ROLLDOWN_STRICT_ORDER_TRACE = "1";
-
-    try {
-      await runCampaign(campaignOptions({ collectOrderTrace: false }), {
-        executeCase: async (generated) => {
-          observed.push(process.env.ROLLDOWN_STRICT_ORDER_TRACE);
-          return passedCase(generated);
-        },
-        writeFailure: async () => {
-          throw new Error("passing cases must not write artifacts");
-        },
-        writeLine: () => {},
-      });
-
-      expect(observed).toEqual([undefined]);
-      expect(process.env.ROLLDOWN_STRICT_ORDER_TRACE).toBe("1");
-    } finally {
-      if (previous === undefined) {
-        delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-      } else {
-        process.env.ROLLDOWN_STRICT_ORDER_TRACE = previous;
-      }
-    }
-  });
-
-  test("serializes concurrent traced and opt-out campaigns around the process environment", async () => {
-    const previous = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-    const firstStarted = deferred();
-    const releaseFirst = deferred();
-    const observed: (string | undefined)[] = [];
-    let optOutStarted = false;
-    delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-
-    try {
-      const traced = runCampaign(campaignOptions(), {
-        executeCase: async (generated) => {
-          observed.push(process.env.ROLLDOWN_STRICT_ORDER_TRACE);
-          firstStarted.resolve();
-          await releaseFirst.promise;
-          return passedCase(generated);
-        },
-        writeFailure: async () => {
-          throw new Error("passing cases must not write artifacts");
-        },
-        writeLine: () => {},
-      });
-      await firstStarted.promise;
-
-      const optOut = runCampaign(campaignOptions({ collectOrderTrace: false }), {
-        executeCase: async (generated) => {
-          optOutStarted = true;
-          observed.push(process.env.ROLLDOWN_STRICT_ORDER_TRACE);
-          return passedCase(generated);
-        },
-        writeFailure: async () => {
-          throw new Error("passing cases must not write artifacts");
-        },
-        writeLine: () => {},
-      });
-
-      await delay(10);
-      expect(optOutStarted).toBe(false);
-      expect(process.env.ROLLDOWN_STRICT_ORDER_TRACE).toBe("1");
-
-      releaseFirst.resolve();
-      await Promise.all([traced, optOut]);
-
-      expect(observed).toEqual(["1", undefined]);
-      expect(process.env.ROLLDOWN_STRICT_ORDER_TRACE).toBeUndefined();
-    } finally {
-      releaseFirst.resolve();
-      if (previous === undefined) {
-        delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-      } else {
-        process.env.ROLLDOWN_STRICT_ORDER_TRACE = previous;
-      }
-    }
-  });
-
-  test("prints the selected wrap count without changing a passing verdict", async () => {
-    const generated = generateCase(100, DEFAULT_CASE_SIZE);
-    const lines: string[] = [];
-    const result = {
-      ...passedCase(generated),
-      orderTrace: orderTraceAction(),
-    } satisfies CampaignCaseResult;
-
-    const summary = await runCampaign(campaignOptions(), {
-      generate: () => generated,
-      executeCase: async () => result,
-      writeFailure: async () => {
-        throw new Error("passing cases must not write artifacts");
-      },
-      writeLine: (line) => {
-        lines.push(line);
-      },
-    });
-
-    expect(summary).toEqual({ casesRun: 1, passed: 1, failed: 0, exitCode: 0 });
-    expect(lines[0]).toContain("wraps=1");
-    expect(lines[0]).toContain("signature=pass");
-  });
-
   test("stops after the first failure by default", async () => {
     const seeds: number[] = [];
     const lines: string[] = [];
@@ -351,7 +211,6 @@ describe("runCampaign", () => {
         bundleOutcome,
         bundleManifest: null,
         bundleFiles: [],
-        orderTrace: null,
         runtimeIdentity: testRuntimeIdentity(),
         verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
       }),
@@ -435,7 +294,6 @@ describe("runCampaign", () => {
             bundleOutcome: structuredClone(sourceOutcome),
             bundleManifest: rendered.schedule,
             bundleFiles: [],
-            orderTrace: null,
           },
         };
       },
@@ -973,85 +831,6 @@ describe("runCampaign", () => {
 });
 
 describe("writeFailureArtifacts", () => {
-  test("writes identical canonical trace JSON for different transport metadata", async () => {
-    const firstDirectory = await mkdtemp(join(tmpdir(), "order-cli-canonical-trace-a-"));
-    const secondDirectory = await mkdtemp(join(tmpdir(), "order-cli-canonical-trace-b-"));
-    const generated = generateCase(7, DEFAULT_CASE_SIZE);
-    const firstTrace = parseStrictExecutionOrderPlanReady({
-      ...orderTraceAction(),
-      timestamp: 100,
-      session_id: "session-a",
-      build_id: "build-a",
-      transport_detail: "discard-a",
-    });
-    const secondTrace = parseStrictExecutionOrderPlanReady({
-      ...orderTraceAction(),
-      timestamp: 200,
-      session_id: "session-b",
-      build_id: "build-b",
-      transport_detail: "discard-b",
-    });
-    const firstResult = {
-      ...failedCase(generated),
-      options: campaignOptions({ seed: generated.seed, outDir: firstDirectory }),
-      orderTrace: firstTrace,
-    } satisfies CampaignCaseResult;
-    const secondResult = {
-      ...failedCase(generated),
-      options: campaignOptions({ seed: generated.seed, outDir: secondDirectory }),
-      orderTrace: secondTrace,
-    } satisfies CampaignCaseResult;
-
-    try {
-      const [firstArtifact, secondArtifact] = await Promise.all([
-        writeFailureArtifacts(firstResult, firstDirectory, 0),
-        writeFailureArtifacts(secondResult, secondDirectory, 0),
-      ]);
-      const [firstJson, secondJson] = await Promise.all([
-        readFile(join(firstArtifact, "order-trace.json"), "utf8"),
-        readFile(join(secondArtifact, "order-trace.json"), "utf8"),
-      ]);
-
-      expect(firstJson).toBe(secondJson);
-      expect(firstJson).toBe(`${JSON.stringify(firstTrace, null, 2)}\n`);
-    } finally {
-      await Promise.all([
-        rm(firstDirectory, { recursive: true, force: true }),
-        rm(secondDirectory, { recursive: true, force: true }),
-      ]);
-    }
-  });
-
-  test("writes the collected order trace and preserves the opt-out in replay metadata", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "order-cli-trace-artifact-"));
-    const generated = generateCase(7, DEFAULT_CASE_SIZE);
-    const result = {
-      ...failedCase(generated),
-      options: campaignOptions({
-        seed: generated.seed,
-        outDir: directory,
-        collectOrderTrace: false,
-      }),
-      orderTrace: orderTraceAction(),
-    } satisfies CampaignCaseResult;
-
-    try {
-      const artifactDirectory = await writeFailureArtifacts(result, directory, 0);
-
-      await expect(readJson(join(artifactDirectory, "order-trace.json"))).resolves.toEqual(
-        orderTraceAction(),
-      );
-      await expect(readJson(join(artifactDirectory, "replay.json"))).resolves.toMatchObject({
-        command: expect.arrayContaining(["--no-order-trace"]),
-        options: {
-          collectOrderTrace: false,
-        },
-      });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
   test("writes replay metadata, exact outcomes and signature, and rendered source files", async () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-artifacts-"));
     const generated = generateCase(7, DEFAULT_CASE_SIZE);
@@ -1165,7 +944,6 @@ describe("writeFailureArtifacts", () => {
           rolldownPackage: options.rolldownPackage,
           outDir: directory,
           continueOnFail: false,
-          collectOrderTrace: true,
         },
         runtimeIdentity: result.runtimeIdentity,
       });
@@ -1410,7 +1188,7 @@ describe("writeFailureArtifacts", () => {
     }
   });
 
-  test("binds artifact identity to observed outcomes, traces, and emitted bytes", () => {
+  test("binds artifact identity to observed outcomes and emitted bytes", () => {
     const directory = "/tmp/order-cli-observed-identities";
     const generated = generateCase(7, DEFAULT_CASE_SIZE);
     const base = {
@@ -1423,18 +1201,10 @@ describe("writeFailureArtifacts", () => {
       bundleOutcome: ok([event("bundle", 1)]),
       bundleManifest: renderProgram(generated.program).schedule,
       bundleFiles: [{ path: "entry.js", contents: Buffer.from("first\n") }],
-      orderTrace: orderTraceAction(),
     } as const satisfies CampaignCaseResult;
     const changedOutcome = {
       ...base,
       bundleOutcome: ok([event("bundle", 2)]),
-    } satisfies CampaignCaseResult;
-    const changedTrace = {
-      ...base,
-      orderTrace: {
-        ...orderTraceAction(),
-        plan_modules: [{ module_id: "/project/changed.js", reasons: ["direct-violation"] }],
-      },
     } satisfies CampaignCaseResult;
     const changedBytes = {
       ...base,
@@ -1461,16 +1231,11 @@ describe("writeFailureArtifacts", () => {
 
     expect(
       new Set(
-        [
-          base,
-          changedOutcome,
-          changedTrace,
-          changedBytes,
-          changedSource,
-          changedBundleManifest,
-        ].map((result) => failureArtifactPath(result, directory, 3)),
+        [base, changedOutcome, changedBytes, changedSource, changedBundleManifest].map((result) =>
+          failureArtifactPath(result, directory, 3),
+        ),
       ).size,
-    ).toBe(6);
+    ).toBe(5);
   });
 
   test("reports the current hashed artifact path from the campaign", async () => {
@@ -1511,7 +1276,6 @@ function campaignOptions(overrides: Partial<CampaignOptions> = {}): CampaignOpti
     rolldownPackage: "rolldown",
     outDir: "failures",
     continueOnFail: false,
-    collectOrderTrace: true,
     ...overrides,
   };
 }
@@ -1526,7 +1290,6 @@ function passedCase(generated: GeneratedCase): CampaignCaseResult {
     bundleOutcome: ok([]),
     bundleManifest: rendered.schedule,
     bundleFiles: [],
-    orderTrace: null,
     runtimeIdentity: testRuntimeIdentity(),
     verdict: { kind: "pass", signature: "pass" },
   };
@@ -1549,7 +1312,6 @@ function failedCase(generated: GeneratedCase): CampaignCaseResult {
     bundleOutcome,
     bundleManifest: null,
     bundleFiles: [],
-    orderTrace: null,
     runtimeIdentity: testRuntimeIdentity(),
     verdict,
   };
@@ -1603,53 +1365,4 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
-}
-
-function deferred(): {
-  readonly promise: Promise<void>;
-  readonly resolve: () => void;
-} {
-  let resolve!: () => void;
-  const promise = new Promise<void>((resolvePromise) => {
-    resolve = resolvePromise;
-  });
-  return { promise, resolve };
-}
-
-function orderTraceAction() {
-  return {
-    action: "StrictExecutionOrderPlanReady",
-    version: 1,
-    roots: [
-      {
-        root_module_id: "/project/entry.js",
-        expected_order: ["/project/entry.js"],
-        predicted_pre_wrap_order: ["/project/entry.js"],
-        at_risk_modules: [],
-      },
-    ],
-    plan_modules: [{ module_id: "/project/entry.js", reasons: ["direct-violation"] }],
-    included_modules: [
-      {
-        module_id: "/project/entry.js",
-        interop_wrap_kind: "none",
-        order_wrapped: true,
-        wrapper_origin: "execution-order",
-        entry_trigger: "order-init",
-        final_chunk_id: 1,
-        entry_chunk_id: 1,
-        wrapper_included: true,
-        tla_tainted: false,
-      },
-    ],
-    rendered_chunks: [
-      {
-        chunk_id: 1,
-        module_ids: ["/project/entry.js"],
-        static_chunk_imports: [],
-        dynamic_chunk_imports: [],
-      },
-    ],
-    init_obligations: [],
-  } as const;
 }
