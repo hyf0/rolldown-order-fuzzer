@@ -112,11 +112,20 @@ export interface ObservedRuntimeIdentity {
   readonly fuzzerLockfileSha256: string | null;
   readonly fuzzerSourceSha256: string | null;
   readonly fuzzerSourceFiles: readonly string[];
+  readonly childExecArgv: readonly string[];
+  readonly childExecArgvFiles: readonly ObservedRuntimeFileIdentity[];
+  readonly platformFingerprintSha256: string;
   readonly runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[];
   readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
   readonly napiRsForceWasi: string | null;
   readonly napiRsEnforceVersionCheck: string | null;
   readonly napiRsNativeLibrary: ObservedNativeLibraryOverrideIdentity;
+}
+
+export interface ObservedRuntimeFileIdentity {
+  readonly specifier: string;
+  readonly resolvedPath: string | null;
+  readonly sha256: string | null;
 }
 
 export interface ObservedNativeLibraryOverrideIdentity {
@@ -348,7 +357,12 @@ export async function inspectRolldownRuntimeIdentity(
   }
 
   const lockfile = await inspectFuzzerLockfile();
-  const fuzzerSource = await inspectFuzzerSource();
+  const fuzzerSource = await inspectFuzzerSourceIdentity();
+  const childExecArgv = buildChildExecArgv(process.execArgv);
+  const childExecArgvFiles = await inspectExecArgvFiles(childExecArgv);
+  const platformFingerprintSha256 = createHash("sha256")
+    .update(JSON.stringify(platformFingerprint()))
+    .digest("hex");
   const napiRsNativeLibrary = await inspectNativeLibraryOverride(runtimeBindingLoaderCandidates);
 
   return {
@@ -370,6 +384,9 @@ export async function inspectRolldownRuntimeIdentity(
     fuzzerLockfileSha256: lockfile.sha256,
     fuzzerSourceSha256: fuzzerSource.sha256,
     fuzzerSourceFiles: fuzzerSource.files,
+    childExecArgv,
+    childExecArgvFiles,
+    platformFingerprintSha256,
     runtimeDependencyPackages,
     optionalBindingPackages,
     napiRsForceWasi: process.env.NAPI_RS_FORCE_WASI ?? null,
@@ -769,7 +786,7 @@ async function inspectNearestLockfile(startDirectory: string): Promise<{
   }
 }
 
-async function inspectFuzzerSource(): Promise<{
+export async function inspectFuzzerSourceIdentity(): Promise<{
   readonly sha256: string | null;
   readonly files: readonly string[];
 }> {
@@ -783,6 +800,81 @@ async function inspectFuzzerSource(): Promise<{
   } catch {
     return { sha256: null, files: [] };
   }
+}
+
+async function inspectExecArgvFiles(
+  execArgv: readonly string[],
+): Promise<readonly ObservedRuntimeFileIdentity[]> {
+  const moduleFlags = new Set(["--import", "--require", "-r", "--loader", "--experimental-loader"]);
+  const specifiers: string[] = [];
+  for (let index = 0; index < execArgv.length; index += 1) {
+    const argument = execArgv[index];
+    if (argument === undefined) {
+      continue;
+    }
+    if (moduleFlags.has(argument)) {
+      const value = execArgv[index + 1];
+      if (value !== undefined) {
+        specifiers.push(value);
+        index += 1;
+      }
+      continue;
+    }
+    for (const prefix of ["--import=", "--require=", "--loader=", "--experimental-loader="]) {
+      if (argument.startsWith(prefix)) {
+        specifiers.push(argument.slice(prefix.length));
+        break;
+      }
+    }
+  }
+
+  return Promise.all(
+    [...new Set(specifiers)].sort().map(async (specifier) => {
+      try {
+        const resolvedUrl = import.meta.resolve(specifier);
+        const resolvedPath = await realpath(fileURLToPath(resolvedUrl));
+        return {
+          specifier,
+          resolvedPath,
+          sha256: createHash("sha256")
+            .update(await readFile(resolvedPath))
+            .digest("hex"),
+        };
+      } catch {
+        return { specifier, resolvedPath: null, sha256: null };
+      }
+    }),
+  );
+}
+
+function platformFingerprint(): unknown {
+  const report = process.report?.getReport() as
+    | {
+        readonly header?: {
+          readonly glibcVersionCompiler?: unknown;
+          readonly glibcVersionRuntime?: unknown;
+          readonly machine?: unknown;
+          readonly osName?: unknown;
+          readonly osRelease?: unknown;
+          readonly osVersion?: unknown;
+        };
+      }
+    | undefined;
+  const header = report?.header;
+  return {
+    config: process.config.variables,
+    report:
+      header === undefined
+        ? null
+        : {
+            glibcVersionCompiler: header.glibcVersionCompiler,
+            glibcVersionRuntime: header.glibcVersionRuntime,
+            machine: header.machine,
+            osName: header.osName,
+            osRelease: header.osRelease,
+            osVersion: header.osVersion,
+          },
+  };
 }
 
 interface BuiltRolldown {

@@ -26,6 +26,7 @@ import {
   executeGeneratedCase,
   FAILURE_ARTIFACT_SCHEMA_VERSION,
   failureArtifactPath,
+  LOADED_FUZZER_SOURCE_SHA256,
   parseCliArgs,
   runCampaign,
   writeFailureArtifacts,
@@ -44,12 +45,13 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 8", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(8);
+  test("uses artifact schema version 9", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(9);
   });
 
   test("parses the complete campaign option set", () => {
     const fuzzerHash = "a".repeat(64);
+    const runtimeHash = "b".repeat(64);
     expect(
       parseCliArgs([
         "--seed",
@@ -62,6 +64,8 @@ describe("parseCliArgs", () => {
         "artifacts",
         "--expected-fuzzer-sha256",
         fuzzerHash,
+        "--expected-runtime-sha256",
+        runtimeHash,
         "--continue-on-fail",
       ]),
     ).toEqual({
@@ -70,6 +74,7 @@ describe("parseCliArgs", () => {
       rolldownPackage: "file:///tmp/rolldown.mjs",
       outDir: "artifacts",
       expectedFuzzerSha256: fuzzerHash,
+      expectedRuntimeSha256: runtimeHash,
       continueOnFail: true,
     });
 
@@ -94,6 +99,9 @@ describe("parseCliArgs", () => {
     );
     expect(() => parseCliArgs(["--expected-fuzzer-sha256", "bad"])).toThrowError(
       "--expected-fuzzer-sha256 must be a SHA-256 hash",
+    );
+    expect(() => parseCliArgs(["--expected-runtime-sha256", "bad"])).toThrowError(
+      "--expected-runtime-sha256 must be a SHA-256 hash",
     );
     expect(() => parseCliArgs(["--continue-on-fail", "--stop-on-fail"])).toThrowError(
       "Choose only one of --continue-on-fail and --stop-on-fail",
@@ -226,6 +234,33 @@ describe("runCampaign", () => {
         writeLine: () => {},
       }),
     ).rejects.toThrowError("Fuzzer source hash does not match replay");
+  });
+
+  test("rejects fuzzer source changes after module load", async () => {
+    await expect(
+      runCampaign(campaignOptions(), {
+        executeCase: async (generated) => {
+          const result = passedCase(generated);
+          return {
+            ...result,
+            runtimeIdentity: {
+              ...result.runtimeIdentity,
+              fuzzerSourceSha256: "b".repeat(64),
+            },
+          };
+        },
+        writeLine: () => {},
+      }),
+    ).rejects.toThrowError("Fuzzer source changed after module load");
+  });
+
+  test("rejects a replay with a different runtime identity", async () => {
+    await expect(
+      runCampaign(campaignOptions({ expectedRuntimeSha256: "a".repeat(64) }), {
+        executeCase: async (generated) => passedCase(generated),
+        writeLine: () => {},
+      }),
+    ).rejects.toThrowError("Runtime identity hash does not match replay");
   });
 
   test("returns exit code 2 for classified harness failures", async () => {
@@ -522,6 +557,9 @@ describe("runCampaign", () => {
           .digest("hex"),
         fuzzerSourceSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
         fuzzerSourceFiles: expect.arrayContaining(["src/main.ts"]) as unknown as string[],
+        childExecArgv: expect.any(Array) as unknown as string[],
+        childExecArgvFiles: expect.any(Array) as unknown as never[],
+        platformFingerprintSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
         runtimeDependencyPackages: [],
         optionalBindingPackages: [],
         napiRsForceWasi: null,
@@ -1046,6 +1084,8 @@ describe("writeFailureArtifacts", () => {
           directory,
           "--expected-fuzzer-sha256",
           result.runtimeIdentity.fuzzerSourceSha256,
+          "--expected-runtime-sha256",
+          expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
           "--stop-on-fail",
         ],
         options: {
@@ -1055,6 +1095,7 @@ describe("writeFailureArtifacts", () => {
           rolldownPackage: options.rolldownPackage,
           outDir: directory,
           expectedFuzzerSha256: result.runtimeIdentity.fuzzerSourceSha256,
+          expectedRuntimeSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
           continueOnFail: false,
         },
         runtimeIdentity: result.runtimeIdentity,
@@ -1459,8 +1500,11 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     compilerLockfileSha256: null,
     fuzzerLockfilePath: null,
     fuzzerLockfileSha256: null,
-    fuzzerSourceSha256: "a".repeat(64),
+    fuzzerSourceSha256: LOADED_FUZZER_SOURCE_SHA256,
     fuzzerSourceFiles: ["src/main.ts"],
+    childExecArgv: [],
+    childExecArgvFiles: [],
+    platformFingerprintSha256: "c".repeat(64),
     runtimeDependencyPackages: [],
     optionalBindingPackages: [],
     napiRsForceWasi: null,

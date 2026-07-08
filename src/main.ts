@@ -16,6 +16,7 @@ import {
 import { renderProgram, type RenderedProgram } from "./render.ts";
 import {
   inspectRolldownRuntimeIdentity,
+  inspectFuzzerSourceIdentity,
   ROLLDOWN_BUILD_OPTIONS,
   withRolldownBuild,
   type FailedRolldownAdapterResult,
@@ -29,7 +30,9 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 8 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 9 as const;
+const LOADED_FUZZER_SOURCE = await inspectFuzzerSourceIdentity();
+export const LOADED_FUZZER_SOURCE_SHA256 = LOADED_FUZZER_SOURCE.sha256;
 
 export interface CampaignOptions {
   readonly seed: number;
@@ -37,6 +40,7 @@ export interface CampaignOptions {
   readonly rolldownPackage: string;
   readonly outDir: string;
   readonly expectedFuzzerSha256?: string;
+  readonly expectedRuntimeSha256?: string;
   readonly continueOnFail: boolean;
 }
 
@@ -137,7 +141,7 @@ const DEFAULT_OPTIONS: CampaignOptions = {
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--expected-fuzzer-sha256 HASH] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--expected-fuzzer-sha256 HASH] [--expected-runtime-sha256 HASH] [--continue-on-fail|--stop-on-fail]";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
@@ -145,6 +149,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
   let outDir = DEFAULT_OPTIONS.outDir;
   let expectedFuzzerSha256: string | undefined;
+  let expectedRuntimeSha256: string | undefined;
   let continueOnFail = DEFAULT_OPTIONS.continueOnFail;
   let sawContinue = false;
   let sawStop = false;
@@ -166,6 +171,9 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
         break;
       case "--expected-fuzzer-sha256":
         expectedFuzzerSha256 = parseSha256(readArgumentValue(argv, ++index, argument), argument);
+        break;
+      case "--expected-runtime-sha256":
+        expectedRuntimeSha256 = parseSha256(readArgumentValue(argv, ++index, argument), argument);
         break;
       case "--continue-on-fail":
         sawContinue = true;
@@ -191,6 +199,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
     rolldownPackage,
     outDir,
     ...(expectedFuzzerSha256 === undefined ? {} : { expectedFuzzerSha256 }),
+    ...(expectedRuntimeSha256 === undefined ? {} : { expectedRuntimeSha256 }),
     continueOnFail,
   };
 }
@@ -200,6 +209,12 @@ export async function runCampaign(
   overrides: Partial<CampaignDependencies> = {},
 ): Promise<CampaignSummary> {
   validateSeedRange(options.seed, options.cases);
+  if (
+    options.expectedFuzzerSha256 !== undefined &&
+    LOADED_FUZZER_SOURCE.sha256 !== options.expectedFuzzerSha256
+  ) {
+    throw new Error("Fuzzer source hash does not match replay");
+  }
   return await runCampaignCases(options, overrides);
 }
 
@@ -226,11 +241,15 @@ async function runCampaignCases(
     const seed = (options.seed + caseIndex) % UINT32_RANGE;
     const generated = dependencies.generate(seed, DEFAULT_CASE_SIZE);
     const result = await dependencies.executeCase(generated, options);
+    if (result.runtimeIdentity.fuzzerSourceSha256 !== LOADED_FUZZER_SOURCE.sha256) {
+      throw new Error("Fuzzer source changed after module load");
+    }
+    const currentRuntimeHash = runtimeIdentityHash(result.runtimeIdentity);
     if (
-      options.expectedFuzzerSha256 !== undefined &&
-      result.runtimeIdentity.fuzzerSourceSha256 !== options.expectedFuzzerSha256
+      options.expectedRuntimeSha256 !== undefined &&
+      currentRuntimeHash !== options.expectedRuntimeSha256
     ) {
-      throw new Error("Fuzzer source hash does not match replay");
+      throw new Error("Runtime identity hash does not match replay");
     }
     const currentRuntimeIdentity = canonicalJsonStringify(result.runtimeIdentity);
     if (runtimeIdentity === undefined) {
@@ -888,6 +907,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
   readonly runtimeIdentity: ObservedRuntimeIdentity;
 } {
   const expectedFuzzerSha256 = result.runtimeIdentity.fuzzerSourceSha256;
+  const expectedRuntimeSha256 = runtimeIdentityHash(result.runtimeIdentity);
   const options: CampaignOptions & { readonly size: number } = {
     seed: result.generated.seed,
     size: result.generated.size,
@@ -895,6 +915,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
     rolldownPackage: result.options.rolldownPackage,
     outDir: result.options.outDir,
     ...(expectedFuzzerSha256 === null ? {} : { expectedFuzzerSha256 }),
+    expectedRuntimeSha256,
     continueOnFail: false,
   };
   const command = [
@@ -914,6 +935,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
   if (expectedFuzzerSha256 !== null) {
     command.push("--expected-fuzzer-sha256", expectedFuzzerSha256);
   }
+  command.push("--expected-runtime-sha256", expectedRuntimeSha256);
   command.push("--stop-on-fail");
   return {
     command,
@@ -945,8 +967,12 @@ function formatCaseResult(
 function formatRuntimeIdentity(identity: ObservedRuntimeIdentity): string {
   const packageHash = identity.packageContentSha256 ?? identity.resolvedEntrySha256 ?? "unresolved";
   const nativeHash = identity.napiRsNativeLibrary.sha256 ?? "none";
-  const runtimeHash = createHash("sha256").update(canonicalJsonStringify(identity)).digest("hex");
+  const runtimeHash = runtimeIdentityHash(identity);
   return `identity node=${identity.processVersion}-${identity.platform}-${identity.arch} package=${packageHash} native=${nativeHash} runtime=${runtimeHash}`;
+}
+
+function runtimeIdentityHash(identity: ObservedRuntimeIdentity): string {
+  return createHash("sha256").update(canonicalJsonStringify(identity)).digest("hex");
 }
 
 function readArgumentValue(argv: readonly string[], index: number, argument: string): string {
