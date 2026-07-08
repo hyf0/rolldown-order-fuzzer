@@ -48,7 +48,7 @@ Each Rolldown build runs in a dedicated Node child process whose working directo
 
 Both sides structurally validate the versioned child protocol before using it, including absolute paths, manual groups, output metadata, and error fields. The child inherits only safe Node execution arguments needed for TypeScript/loaders; inspector and eval flags are not forwarded.
 
-A campaign records the first case's Node, package source/output, recursive runtime dependencies, compiler and fuzzer lockfiles, fuzzer source, child conditions/loaders, native-binding hashes, and platform/NAPI selection facts. The adapter verifies the identity before and after every build, and the campaign aborts if it changes between cases. Artifact replay commands require both the recorded fuzzer source hash and the full runtime identity hash.
+A campaign records the first case's Node, package source/output, recursive runtime dependencies, compiler and fuzzer lockfiles, fuzzer source, child conditions/loaders, `NODE_OPTIONS` hooks, native-binding hashes, platform/NAPI selection facts, and compiler thread settings. The adapter verifies the identity before and after every build, and the campaign aborts if it changes between cases. Artifact replay commands require both the recorded fuzzer source hash and the full runtime identity hash.
 
 Every emitted chunk and asset filename must be a canonical forward-slash relative path confined to the bundle directory; absolute paths, drive/UNC paths, NULs, backslashes, and dot segments are rejected before manifest mapping. Bundle manifest mapping considers only output chunks explicitly marked as entries.
 

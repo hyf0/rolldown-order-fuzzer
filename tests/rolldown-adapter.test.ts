@@ -490,14 +490,28 @@ describe("withRolldownBuild", () => {
   test("records NAPI binding-selection environment", async () => {
     const previousForceWasi = process.env.NAPI_RS_FORCE_WASI;
     const previousVersionCheck = process.env.NAPI_RS_ENFORCE_VERSION_CHECK;
+    const previousWorkerThreads = process.env.ROLLDOWN_WORKER_THREADS;
+    const previousBlockingThreads = process.env.ROLLDOWN_MAX_BLOCKING_THREADS;
+    const previousAsyncPool = process.env.NAPI_RS_ASYNC_WORK_POOL_SIZE;
+    const previousUvPool = process.env.UV_THREADPOOL_SIZE;
 
     try {
       process.env.NAPI_RS_FORCE_WASI = "true";
       process.env.NAPI_RS_ENFORCE_VERSION_CHECK = "error";
+      process.env.ROLLDOWN_WORKER_THREADS = "2";
+      process.env.ROLLDOWN_MAX_BLOCKING_THREADS = "3";
+      process.env.NAPI_RS_ASYNC_WORK_POOL_SIZE = "4";
+      process.env.UV_THREADPOOL_SIZE = "5";
       const identity = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
 
       expect(identity.napiRsForceWasi).toBe("true");
       expect(identity.napiRsEnforceVersionCheck).toBe("error");
+      expect(identity.threadEnvironment).toEqual({
+        NAPI_RS_ASYNC_WORK_POOL_SIZE: "4",
+        ROLLDOWN_MAX_BLOCKING_THREADS: "3",
+        ROLLDOWN_WORKER_THREADS: "2",
+        UV_THREADPOOL_SIZE: "5",
+      });
     } finally {
       if (previousForceWasi === undefined) {
         delete process.env.NAPI_RS_FORCE_WASI;
@@ -509,6 +523,31 @@ describe("withRolldownBuild", () => {
       } else {
         process.env.NAPI_RS_ENFORCE_VERSION_CHECK = previousVersionCheck;
       }
+      restoreEnvironment("ROLLDOWN_WORKER_THREADS", previousWorkerThreads);
+      restoreEnvironment("ROLLDOWN_MAX_BLOCKING_THREADS", previousBlockingThreads);
+      restoreEnvironment("NAPI_RS_ASYNC_WORK_POOL_SIZE", previousAsyncPool);
+      restoreEnvironment("UV_THREADPOOL_SIZE", previousUvPool);
+    }
+  });
+
+  test("hashes NODE_OPTIONS hook files", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-node-options-"));
+    const hookPath = join(directory, "hook.cjs");
+    const previousNodeOptions = process.env.NODE_OPTIONS;
+
+    try {
+      process.env.NODE_OPTIONS = `--require ${hookPath}`;
+      await writeFile(hookPath, "module.exports = 1;\n");
+      const first = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
+      await writeFile(hookPath, "module.exports = 2;\n");
+      const second = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
+
+      expect(first.nodeOptions).toBe(`--require ${hookPath}`);
+      expect(first.nodeOptionFiles).toHaveLength(1);
+      expect(first.nodeOptionFiles[0]?.sha256).not.toBe(second.nodeOptionFiles[0]?.sha256);
+    } finally {
+      restoreEnvironment("NODE_OPTIONS", previousNodeOptions);
+      await rm(directory, { recursive: true, force: true });
     }
   });
 
@@ -1352,6 +1391,14 @@ function successValue<T>(result: RolldownAdapterResult<T>): T {
     );
   }
   return result.value;
+}
+
+function restoreEnvironment(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
 }
 
 async function withTemporaryModule(

@@ -114,6 +114,9 @@ export interface ObservedRuntimeIdentity {
   readonly fuzzerSourceFiles: readonly string[];
   readonly childExecArgv: readonly string[];
   readonly childExecArgvFiles: readonly ObservedRuntimeFileIdentity[];
+  readonly nodeOptions: string | null;
+  readonly nodeOptionFiles: readonly ObservedRuntimeFileIdentity[];
+  readonly threadEnvironment: Readonly<Record<string, string | null>>;
   readonly platformFingerprintSha256: string;
   readonly runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[];
   readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
@@ -360,6 +363,18 @@ export async function inspectRolldownRuntimeIdentity(
   const fuzzerSource = await inspectFuzzerSourceIdentity();
   const childExecArgv = buildChildExecArgv(process.execArgv);
   const childExecArgvFiles = await inspectExecArgvFiles(childExecArgv);
+  const nodeOptions = process.env.NODE_OPTIONS ?? null;
+  const nodeOptionFiles = await inspectExecArgvFiles(
+    buildChildExecArgv(nodeOptions === null ? [] : splitNodeOptions(nodeOptions)),
+  );
+  const threadEnvironment = Object.fromEntries(
+    [
+      "NAPI_RS_ASYNC_WORK_POOL_SIZE",
+      "ROLLDOWN_MAX_BLOCKING_THREADS",
+      "ROLLDOWN_WORKER_THREADS",
+      "UV_THREADPOOL_SIZE",
+    ].map((name) => [name, process.env[name] ?? null]),
+  );
   const platformFingerprintSha256 = createHash("sha256")
     .update(JSON.stringify(platformFingerprint()))
     .digest("hex");
@@ -386,6 +401,9 @@ export async function inspectRolldownRuntimeIdentity(
     fuzzerSourceFiles: fuzzerSource.files,
     childExecArgv,
     childExecArgvFiles,
+    nodeOptions,
+    nodeOptionFiles,
+    threadEnvironment,
     platformFingerprintSha256,
     runtimeDependencyPackages,
     optionalBindingPackages,
@@ -844,6 +862,18 @@ async function inspectExecArgvFiles(
         return { specifier, resolvedPath: null, sha256: null };
       }
     }),
+  );
+}
+
+function splitNodeOptions(value: string): string[] {
+  return (
+    value
+      .match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)
+      ?.map((item) =>
+        (item.startsWith('"') && item.endsWith('"')) || (item.startsWith("'") && item.endsWith("'"))
+          ? item.slice(1, -1)
+          : item,
+      ) ?? []
   );
 }
 
