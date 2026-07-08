@@ -419,8 +419,36 @@ async function requireCompleteExistingArtifact(
   const invalid = new Error(
     `Existing failure artifact is incomplete or has a different identity: ${artifactDirectory}`,
   );
-  for (const file of createArtifactFiles(result, caseIndexFromIdentity(identity), identity)) {
+  const expectedFiles = createArtifactFiles(result, caseIndexFromIdentity(identity), identity);
+  const expectedFilePaths = expectedFiles.map((file) => file.path).sort();
+  const expectedDirectoryPaths = [
+    ...new Set(
+      expectedFilePaths.flatMap((path) => {
+        const directories: string[] = [];
+        let directory = dirname(path);
+        while (directory !== ".") {
+          directories.push(directory);
+          directory = dirname(directory);
+        }
+        return directories;
+      }),
+    ),
+  ].sort();
+  const actualTree = await inspectArtifactTree(artifactDirectory).catch(() => null);
+  if (
+    actualTree === null ||
+    actualTree.hasSymlink ||
+    actualTree.files.join("\0") !== expectedFilePaths.join("\0") ||
+    actualTree.directories.join("\0") !== expectedDirectoryPaths.join("\0")
+  ) {
+    throw invalid;
+  }
+
+  for (const file of expectedFiles) {
     try {
+      if (!(await lstat(join(artifactDirectory, file.path))).isFile()) {
+        throw invalid;
+      }
       const persisted = await readFile(join(artifactDirectory, file.path));
       if (!persisted.equals(Buffer.from(file.contents))) {
         throw invalid;
@@ -429,6 +457,42 @@ async function requireCompleteExistingArtifact(
       throw invalid;
     }
   }
+}
+
+async function inspectArtifactTree(root: string): Promise<{
+  readonly files: string[];
+  readonly directories: string[];
+  readonly hasSymlink: boolean;
+}> {
+  const files: string[] = [];
+  const directories: string[] = [];
+  const pending = [{ directory: root, relativePath: "" }];
+  let hasSymlink = false;
+  while (pending.length > 0) {
+    const current = pending.pop();
+    if (current === undefined) {
+      continue;
+    }
+    const entries = await readdir(current.directory, { withFileTypes: true });
+    for (const entry of entries) {
+      const relativePath =
+        current.relativePath.length === 0 ? entry.name : `${current.relativePath}/${entry.name}`;
+      if (entry.isSymbolicLink()) {
+        hasSymlink = true;
+      } else if (entry.isDirectory()) {
+        directories.push(relativePath);
+        pending.push({
+          directory: join(current.directory, entry.name),
+          relativePath,
+        });
+      } else if (entry.isFile()) {
+        files.push(relativePath);
+      }
+    }
+  }
+  files.sort();
+  directories.sort();
+  return { files, directories, hasSymlink };
 }
 
 function caseIndexFromIdentity(identity: FailureArtifactIdentity): number {

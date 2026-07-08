@@ -1246,6 +1246,32 @@ describe("writeFailureArtifacts", () => {
     }
   });
 
+  test("rejects unexpected files and symlink-backed files in an existing artifact", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-cli-artifact-shape-"));
+    const generated = generateCase(7, DEFAULT_CASE_SIZE);
+    const result = failedCase(generated);
+
+    try {
+      const artifactDirectory = await writeFailureArtifacts(result, directory, 3);
+      await writeFile(join(artifactDirectory, "unexpected.txt"), "unexpected\n");
+      await expect(writeFailureArtifacts(result, directory, 3)).rejects.toThrow(
+        "Existing failure artifact is incomplete or has a different identity",
+      );
+
+      await rm(join(artifactDirectory, "unexpected.txt"));
+      const signaturePath = join(artifactDirectory, "signature.txt");
+      const signatureTarget = join(directory, "signature-target.txt");
+      await writeFile(signatureTarget, `${result.verdict.signature}\n`);
+      await rm(signaturePath);
+      await symlink(signatureTarget, signaturePath);
+      await expect(writeFailureArtifacts(result, directory, 3)).rejects.toThrow(
+        "Existing failure artifact is incomplete or has a different identity",
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("records a deterministic null bundle manifest identity", async () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-null-manifest-"));
     const result = failedCase(generateCase(7, DEFAULT_CASE_SIZE));
