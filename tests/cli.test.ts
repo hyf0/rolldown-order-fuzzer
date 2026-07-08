@@ -45,8 +45,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 4", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(4);
+  test("uses artifact schema version 5", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(5);
   });
 
   test("parses the complete campaign option set", () => {
@@ -1632,8 +1632,10 @@ function orderTraceAction() {
     included_modules: [
       {
         module_id: "/project/entry.js",
-        original_wrap_kind: "none",
-        final_wrap_kind: "esm",
+        interop_wrap_kind: "none",
+        order_wrapped: true,
+        wrapper_origin: "execution-order",
+        entry_trigger: "order-init",
         final_chunk_id: 1,
         entry_chunk_id: 1,
         wrapper_included: true,

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   parseStrictExecutionOrderLogs,
   parseStrictExecutionOrderPlanReady,
+  reconstructStrictExecutionOrderEventGraph,
 } from "../src/order-trace.ts";
 
 describe("parseStrictExecutionOrderPlanReady", () => {
@@ -57,9 +58,9 @@ describe("parseStrictExecutionOrderPlanReady", () => {
     expect(() =>
       parseStrictExecutionOrderPlanReady({
         ...validAction(),
-        version: 2,
+        version: 3,
       }),
-    ).toThrowError("Unsupported StrictExecutionOrderPlanReady version: 2");
+    ).toThrowError("Unsupported StrictExecutionOrderPlanReady version: 3");
   });
 
   test("enforces unsigned 32-bit bounds for every chunk ID and reference", () => {
@@ -165,6 +166,7 @@ describe("parseStrictExecutionOrderPlanReady", () => {
           ...canonicalAction().included_modules[0],
           final_chunk_id: 0,
           entry_chunk_id: 0xffff_ffff,
+          entry_trigger: "order-init",
         },
       ],
       rendered_chunks: [
@@ -177,6 +179,23 @@ describe("parseStrictExecutionOrderPlanReady", () => {
       ],
     });
   });
+});
+
+test("reconstructs the final event graph", () => {
+  const graph = reconstructStrictExecutionOrderEventGraph(
+    parseStrictExecutionOrderPlanReady(canonicalAction()),
+  );
+
+  expect(graph.edges).toEqual(
+    expect.arrayContaining([
+      {
+        from: "module:/project/dependency.js",
+        to: "module:/project/main.js",
+        kind: "init",
+      },
+    ]),
+  );
+  expect(graph.nodes).toContain("chunk:1");
 });
 
 describe("parseStrictExecutionOrderLogs", () => {
@@ -273,8 +292,10 @@ function canonicalAction() {
     included_modules: [
       {
         module_id: "/project/dependency.js",
-        original_wrap_kind: "none",
-        final_wrap_kind: "esm",
+        interop_wrap_kind: "none",
+        order_wrapped: true,
+        wrapper_origin: "execution-order",
+        entry_trigger: "none",
         final_chunk_id: 1,
         entry_chunk_id: null,
         wrapper_included: true,

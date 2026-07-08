@@ -45,7 +45,7 @@ Each result line contains the case index, replay seed, template, coverage tags, 
 
 Trace collection serializes campaigns around the process-wide `ROLLDOWN_STRICT_ORDER_TRACE` setting and sets it once for each traced campaign. Each traced build then runs in a dedicated Node child process whose OS working directory is the adapter's unique temporary directory. Materialized source and bundle paths remain absolute, while any requested, legacy-generated, or fixed devtools session is confined to `<temporary-directory>/node_modules/.rolldown`.
 
-The child imports the configured Rolldown package, reconstructs serializable input/output options and manual chunk groups, runs `rolldown`, `bundle.write`, and `bundle.close`, then examines every isolated session whose `SessionMeta` inputs belong to the build source directory. It prefers the requested session when present, otherwise accepts one matching legacy or fixed session, canonicalizes the version-1 trace, and returns only serializable output metadata. Ambiguous or absent matches produce a null trace; malformed matching logs remain harness errors.
+The child imports the configured Rolldown package, reconstructs serializable input/output options and manual chunk groups, runs `rolldown`, `bundle.write`, and `bundle.close`, then examines every isolated session whose `SessionMeta` inputs belong to the build source directory. It prefers the requested session when present, otherwise accepts one matching legacy or fixed session, canonicalizes a version-1 or version-2 trace, and returns only serializable output metadata. Ambiguous or absent matches produce a null trace; malformed matching logs remain harness errors.
 
 Both sides structurally validate the versioned child protocol before using it, including absolute paths, manual groups, output metadata, error fields, and canonical trace shape. The child inherits only safe Node execution arguments needed for TypeScript/loaders; inspector and eval flags are not forwarded.
 
@@ -53,7 +53,7 @@ Every emitted chunk and asset filename must be a canonical forward-slash relativ
 
 The parent never changes its cwd and does not use parent `globalThis` instrumentation. All Rolldown builds run in the isolated child and share the same protocol validation, output confinement, timeout, cleanup, and error classification. When trace collection is disabled, the child omits devtools options and trace scanning. Any child has an explicit 60-second production timeout, followed by process-tree TERM/KILL shutdown and a deterministic harness error; POSIX uses an isolated process group and Windows uses `taskkill /T /F` with fallback. After forced termination, a bounded final close grace lets cleanup settle even if the child never emits `close`. Tests may inject shorter timeout/grace values.
 
-Packages that do not emit the action produce `orderTrace: null`, so older Rolldown versions remain usable. A malformed matching action, an unsupported version, invalid JSON, or multiple matching actions is a harness error because the diagnostic data cannot be trusted. The parser validates the required version-1 structure, including unsigned 32-bit bounds for every chunk ID and reference, then constructs a schema-only object that discards transport and unknown metadata.
+Packages that do not emit the action produce `orderTrace: null`, so older Rolldown versions remain usable. A malformed matching action, an unsupported version, invalid JSON, or multiple matching actions is a harness error because the diagnostic data cannot be trusted. The parser validates historical version 1 and current version 2 structures, including unsigned 32-bit bounds for every chunk ID and reference, then normalizes them to the version-2 module shape while discarding transport and unknown metadata.
 
 Before exposure or persistence, every module ID is canonicalized. Rendered source file paths map back to `ProgramModel` module IDs, other paths under the temporary source root become `<source>/relative`, and stable virtual or runtime IDs remain unchanged. This makes semantically identical traces and persisted `order-trace.json` files deterministic across temporary roots, sessions, builds, and timestamps. The trace is stored for diagnosis and over-wrapping analysis only; source-versus-bundle execution remains the semantic oracle.
 
@@ -68,7 +68,8 @@ Every non-pass result is first written to a unique `.case-NNNN-seed-S-HASH.tmp-*
 - `source-manifest.json` and `bundle-manifest.json`: the source schedule and emitted bundle schedule; the bundle manifest is `null` when no build ran.
 - `source-outcome.json`: the native Node execution outcome.
 - `bundle-outcome.json`: the bundle execution outcome, or the exact Rolldown adapter failure when no bundle ran.
-- `order-trace.json`: the collected version-1 strict execution-order plan, or `null` when collection was disabled or the package emitted no matching action.
+- `order-trace.json`: the collected versioned strict execution-order plan, or `null` when collection was disabled or the package emitted no matching action.
+- `order-event-graph.json`: the reconstructed final chunk/module/init/entry-trigger event graph, or `null` without a trace.
 - `verdict.json`: the verdict and exact failure signature.
 - `signature.txt`: the exact failure signature.
 - `source/`: every rendered source file, including the source schedule.

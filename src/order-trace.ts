@@ -1,5 +1,6 @@
 export const STRICT_EXECUTION_ORDER_ACTION = "StrictExecutionOrderPlanReady" as const;
-export const STRICT_EXECUTION_ORDER_TRACE_VERSION = 1 as const;
+export const STRICT_EXECUTION_ORDER_TRACE_VERSION = 2 as const;
+export const SUPPORTED_STRICT_EXECUTION_ORDER_TRACE_VERSIONS = [1, 2] as const;
 
 const PLAN_REASONS = [
   "direct-violation",
@@ -8,6 +9,8 @@ const PLAN_REASONS = [
   "top-level-reader",
 ] as const;
 const WRAP_KINDS = ["none", "cjs", "esm"] as const;
+const WRAPPER_ORIGINS = ["none", "interop-cjs", "interop-esm", "execution-order"] as const;
+const ENTRY_TRIGGERS = ["none", "cjs-require", "interop-init", "order-init"] as const;
 const INIT_OBLIGATION_KINDS = ["direct-import", "transitive-init-target"] as const;
 const UINT32_MAX = 0xffff_ffff;
 
@@ -25,8 +28,10 @@ export interface StrictExecutionOrderPlanModule {
 
 export interface StrictExecutionOrderModule {
   readonly module_id: string;
-  readonly original_wrap_kind: (typeof WRAP_KINDS)[number];
-  readonly final_wrap_kind: (typeof WRAP_KINDS)[number];
+  readonly interop_wrap_kind: (typeof WRAP_KINDS)[number];
+  readonly order_wrapped: boolean;
+  readonly wrapper_origin: (typeof WRAPPER_ORIGINS)[number];
+  readonly entry_trigger: (typeof ENTRY_TRIGGERS)[number];
   readonly final_chunk_id: number | null;
   readonly entry_chunk_id: number | null;
   readonly wrapper_included: boolean;
@@ -51,12 +56,23 @@ export interface StrictExecutionOrderInitObligation {
 
 export interface StrictExecutionOrderPlanReady {
   readonly action: typeof STRICT_EXECUTION_ORDER_ACTION;
-  readonly version: typeof STRICT_EXECUTION_ORDER_TRACE_VERSION;
+  readonly version: (typeof SUPPORTED_STRICT_EXECUTION_ORDER_TRACE_VERSIONS)[number];
   readonly roots: readonly StrictExecutionOrderRoot[];
   readonly plan_modules: readonly StrictExecutionOrderPlanModule[];
   readonly included_modules: readonly StrictExecutionOrderModule[];
   readonly rendered_chunks: readonly StrictExecutionOrderChunk[];
   readonly init_obligations: readonly StrictExecutionOrderInitObligation[];
+}
+
+export interface StrictExecutionOrderEventEdge {
+  readonly from: string;
+  readonly to: string;
+  readonly kind: "static-chunk" | "chunk-module-order" | "init" | "awaited-init" | "entry-trigger";
+}
+
+export interface StrictExecutionOrderEventGraph {
+  readonly nodes: readonly string[];
+  readonly edges: readonly StrictExecutionOrderEventEdge[];
 }
 
 export function parseStrictExecutionOrderLogs(
@@ -97,11 +113,12 @@ export function parseStrictExecutionOrderPlanReady(value: unknown): StrictExecut
   const path = STRICT_EXECUTION_ORDER_ACTION;
   const action = requireRecord(value, path);
   requireLiteral(action.action, STRICT_EXECUTION_ORDER_ACTION, `${path}.action`);
-  if (action.version !== STRICT_EXECUTION_ORDER_TRACE_VERSION) {
+  if (!SUPPORTED_STRICT_EXECUTION_ORDER_TRACE_VERSIONS.includes(action.version as 1 | 2)) {
     throw new TypeError(
       `Unsupported ${STRICT_EXECUTION_ORDER_ACTION} version: ${describeValue(action.version)}`,
     );
   }
+  const version = action.version as 1 | 2;
 
   const roots = requireArray(action.roots, `${path}.roots`).map((root, index) => {
     const itemPath = `${path}.roots[${index}]`;
@@ -136,16 +153,17 @@ export function parseStrictExecutionOrderPlanReady(value: unknown): StrictExecut
       const itemPath = `${path}.included_modules[${index}]`;
       const item = requireRecord(module, itemPath);
       requireString(item.module_id, `${itemPath}.module_id`);
-      requireLiteral(item.original_wrap_kind, WRAP_KINDS, `${itemPath}.original_wrap_kind`);
-      requireLiteral(item.final_wrap_kind, WRAP_KINDS, `${itemPath}.final_wrap_kind`);
+      const normalized =
+        version === 1 && "original_wrap_kind" in item
+          ? parseVersion1Module(item, itemPath)
+          : parseVersion2Module(item, itemPath);
       requireUint32OrNull(item.final_chunk_id, `${itemPath}.final_chunk_id`);
       requireUint32OrNull(item.entry_chunk_id, `${itemPath}.entry_chunk_id`);
       requireBoolean(item.wrapper_included, `${itemPath}.wrapper_included`);
       requireBoolean(item.tla_tainted, `${itemPath}.tla_tainted`);
       return {
         module_id: item.module_id,
-        original_wrap_kind: item.original_wrap_kind,
-        final_wrap_kind: item.final_wrap_kind,
+        ...normalized,
         final_chunk_id: item.final_chunk_id,
         entry_chunk_id: item.entry_chunk_id,
         wrapper_included: item.wrapper_included,
@@ -194,7 +212,7 @@ export function parseStrictExecutionOrderPlanReady(value: unknown): StrictExecut
 
   return {
     action: STRICT_EXECUTION_ORDER_ACTION,
-    version: STRICT_EXECUTION_ORDER_TRACE_VERSION,
+    version,
     roots,
     plan_modules: planModules,
     included_modules: includedModules,
@@ -209,7 +227,7 @@ export function canonicalizeStrictExecutionOrderModuleIds(
 ): StrictExecutionOrderPlanReady {
   return {
     action: STRICT_EXECUTION_ORDER_ACTION,
-    version: STRICT_EXECUTION_ORDER_TRACE_VERSION,
+    version: action.version,
     roots: action.roots.map((root) => ({
       root_module_id: canonicalizeModuleId(root.root_module_id),
       expected_order: root.expected_order.map(canonicalizeModuleId),
@@ -222,8 +240,10 @@ export function canonicalizeStrictExecutionOrderModuleIds(
     })),
     included_modules: action.included_modules.map((module) => ({
       module_id: canonicalizeModuleId(module.module_id),
-      original_wrap_kind: module.original_wrap_kind,
-      final_wrap_kind: module.final_wrap_kind,
+      interop_wrap_kind: module.interop_wrap_kind,
+      order_wrapped: module.order_wrapped,
+      wrapper_origin: module.wrapper_origin,
+      entry_trigger: module.entry_trigger,
       final_chunk_id: module.final_chunk_id,
       entry_chunk_id: module.entry_chunk_id,
       wrapper_included: module.wrapper_included,
@@ -243,6 +263,120 @@ export function canonicalizeStrictExecutionOrderModuleIds(
       importer_tla_tainted: obligation.importer_tla_tainted,
       importee_tla_tainted: obligation.importee_tla_tainted,
     })),
+  };
+}
+
+export function reconstructStrictExecutionOrderEventGraph(
+  action: StrictExecutionOrderPlanReady,
+): StrictExecutionOrderEventGraph {
+  const nodes = new Set<string>();
+  const edges: StrictExecutionOrderEventEdge[] = [];
+  const addEdge = (edge: StrictExecutionOrderEventEdge) => {
+    nodes.add(edge.from);
+    nodes.add(edge.to);
+    edges.push(edge);
+  };
+
+  for (const chunk of action.rendered_chunks) {
+    const chunkNode = `chunk:${chunk.chunk_id}`;
+    nodes.add(chunkNode);
+    for (const dependency of chunk.static_chunk_imports) {
+      addEdge({
+        from: `chunk:${dependency}`,
+        to: chunkNode,
+        kind: "static-chunk",
+      });
+    }
+    for (let index = 1; index < chunk.module_ids.length; index += 1) {
+      addEdge({
+        from: `module:${chunk.module_ids[index - 1]}`,
+        to: `module:${chunk.module_ids[index]}`,
+        kind: "chunk-module-order",
+      });
+    }
+  }
+
+  for (const obligation of action.init_obligations) {
+    addEdge({
+      from: `module:${obligation.importee_id}`,
+      to: `module:${obligation.importer_id}`,
+      kind: obligation.awaited ? "awaited-init" : "init",
+    });
+  }
+
+  for (const module of action.included_modules) {
+    nodes.add(`module:${module.module_id}`);
+    if (module.entry_chunk_id !== null && module.entry_trigger !== "none") {
+      addEdge({
+        from: `module:${module.module_id}`,
+        to: `entry:${module.entry_chunk_id}`,
+        kind: "entry-trigger",
+      });
+    }
+  }
+
+  edges.sort(
+    (left, right) =>
+      left.from.localeCompare(right.from) ||
+      left.to.localeCompare(right.to) ||
+      left.kind.localeCompare(right.kind),
+  );
+  return { nodes: [...nodes].sort(), edges };
+}
+
+function parseVersion1Module(
+  item: Record<string, unknown>,
+  itemPath: string,
+): Pick<
+  StrictExecutionOrderModule,
+  "interop_wrap_kind" | "order_wrapped" | "wrapper_origin" | "entry_trigger"
+> {
+  requireLiteral(item.original_wrap_kind, WRAP_KINDS, `${itemPath}.original_wrap_kind`);
+  requireLiteral(item.final_wrap_kind, WRAP_KINDS, `${itemPath}.final_wrap_kind`);
+  requireUint32OrNull(item.entry_chunk_id, `${itemPath}.entry_chunk_id`);
+  const orderWrapped = item.original_wrap_kind === "none" && item.final_wrap_kind === "esm";
+  const wrapperOrigin =
+    item.original_wrap_kind === "cjs"
+      ? "interop-cjs"
+      : item.original_wrap_kind === "esm"
+        ? "interop-esm"
+        : orderWrapped
+          ? "execution-order"
+          : "none";
+  const entryTrigger =
+    item.entry_chunk_id === null
+      ? "none"
+      : wrapperOrigin === "interop-cjs"
+        ? "cjs-require"
+        : wrapperOrigin === "interop-esm"
+          ? "interop-init"
+          : wrapperOrigin === "execution-order"
+            ? "order-init"
+            : "none";
+  return {
+    interop_wrap_kind: item.original_wrap_kind,
+    order_wrapped: orderWrapped,
+    wrapper_origin: wrapperOrigin,
+    entry_trigger: entryTrigger,
+  };
+}
+
+function parseVersion2Module(
+  item: Record<string, unknown>,
+  itemPath: string,
+): Pick<
+  StrictExecutionOrderModule,
+  "interop_wrap_kind" | "order_wrapped" | "wrapper_origin" | "entry_trigger"
+> {
+  requireLiteral(item.interop_wrap_kind, WRAP_KINDS, `${itemPath}.interop_wrap_kind`);
+  requireBoolean(item.order_wrapped, `${itemPath}.order_wrapped`);
+  requireLiteral(item.wrapper_origin, WRAPPER_ORIGINS, `${itemPath}.wrapper_origin`);
+  requireLiteral(item.entry_trigger, ENTRY_TRIGGERS, `${itemPath}.entry_trigger`);
+  return {
+    interop_wrap_kind: item.interop_wrap_kind,
+    order_wrapped: item.order_wrapped,
+    wrapper_origin: item.wrapper_origin,
+    entry_trigger: item.entry_trigger,
   };
 }
 

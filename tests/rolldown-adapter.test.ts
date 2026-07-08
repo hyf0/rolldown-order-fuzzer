@@ -1220,8 +1220,10 @@ describe("withRolldownBuild", () => {
         included_modules: [
           {
             module_id: "entry",
-            original_wrap_kind: "none",
-            final_wrap_kind: "esm",
+            interop_wrap_kind: "none",
+            order_wrapped: true,
+            wrapper_origin: "execution-order",
+            entry_trigger: "order-init",
             final_chunk_id: 1,
             entry_chunk_id: 1,
             wrapper_included: true,
@@ -1277,7 +1279,7 @@ describe("withRolldownBuild", () => {
     let temporaryDirectory = "";
 
     await withTemporaryModule(
-      fakeRolldownModule([{ ...orderTraceAction(), version: 2 }]),
+      fakeRolldownModule([{ ...orderTraceAction(), version: 3 }]),
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           program,
@@ -1298,7 +1300,7 @@ describe("withRolldownBuild", () => {
           stage: "collect-order-trace",
           error: {
             name: "TypeError",
-            message: "Unsupported StrictExecutionOrderPlanReady version: 2",
+            message: "Unsupported StrictExecutionOrderPlanReady version: 3",
           },
         });
       },
@@ -1912,8 +1914,10 @@ function orderTraceAction() {
     included_modules: [
       {
         module_id: "/project/entry.js",
-        original_wrap_kind: "none",
-        final_wrap_kind: "esm",
+        interop_wrap_kind: "none",
+        order_wrapped: true,
+        wrapper_origin: "execution-order",
+        entry_trigger: "order-init",
         final_chunk_id: 1,
         entry_chunk_id: 1,
         wrapper_included: true,

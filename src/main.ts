@@ -8,7 +8,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { executeManifest } from "./execute.ts";
 import { generateCase, type GeneratedCase } from "./generate.ts";
-import type { StrictExecutionOrderPlanReady } from "./order-trace.ts";
+import {
+  reconstructStrictExecutionOrderEventGraph,
+  type StrictExecutionOrderEventGraph,
+  type StrictExecutionOrderPlanReady,
+} from "./order-trace.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -31,7 +35,7 @@ const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/
 let campaignEnvironmentLock = Promise.resolve();
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 4 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 5 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
@@ -545,6 +549,7 @@ interface FailureArtifactIdentity {
     readonly verdict: CampaignVerdict;
     readonly verdictSignature: string;
     readonly canonicalOrderTrace: StrictExecutionOrderPlanReady | null;
+    readonly finalEventGraph: StrictExecutionOrderEventGraph | null;
     readonly renderedSourceFiles: readonly {
       readonly path: string;
       readonly sha256: string;
@@ -598,6 +603,10 @@ function createFailureArtifactIdentity(
     verdict: result.verdict,
     verdictSignature: result.verdict.signature,
     canonicalOrderTrace: result.orderTrace,
+    finalEventGraph:
+      result.orderTrace === null
+        ? null
+        : reconstructStrictExecutionOrderEventGraph(result.orderTrace),
     renderedSourceFiles: result.rendered.files
       .map((file) => ({
         path: file.path,
@@ -714,6 +723,7 @@ function createArtifactFiles(
     jsonFile("source-outcome.json", result.sourceOutcome),
     jsonFile("bundle-outcome.json", identity.inputs.bundleOutcome),
     jsonFile("order-trace.json", result.orderTrace),
+    jsonFile("order-event-graph.json", identity.inputs.finalEventGraph),
     jsonFile("verdict.json", result.verdict),
     { path: "signature.txt", contents: Buffer.from(`${result.verdict.signature}\n`, "utf8") },
     ...result.rendered.files.map((file) => ({
