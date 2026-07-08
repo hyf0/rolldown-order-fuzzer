@@ -473,6 +473,81 @@ describe("withRolldownBuild", () => {
     }
   });
 
+  test("resolves relative native overrides from the source loader", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-source-loader-"));
+    const sourceDirectory = join(directory, "src");
+    const distDirectory = join(directory, "dist");
+    const sourceLoader = join(sourceDirectory, "binding.cjs");
+    const sourceOverride = join(sourceDirectory, "override.node");
+    const previousOverride = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;
+    await mkdir(sourceDirectory, { recursive: true });
+    await mkdir(distDirectory, { recursive: true });
+    await writeFile(join(directory, "package.json"), '{"type":"module","version":"1.0.0"}\n');
+    await writeFile(join(sourceDirectory, "index.mjs"), 'import "./binding.cjs";\n');
+    await writeFile(sourceLoader, "process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\n");
+    await writeFile(
+      join(distDirectory, "binding.cjs"),
+      "process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\n",
+    );
+    await writeFile(sourceOverride, "source override");
+
+    try {
+      process.env.NAPI_RS_NATIVE_LIBRARY_PATH = "./override.node";
+      const identity = await inspectRolldownRuntimeIdentity(
+        pathToFileURL(join(sourceDirectory, "index.mjs")).href,
+      );
+
+      expect(identity.napiRsNativeLibrary.loaderPath).toBe(await realpath(sourceLoader));
+      expect(identity.napiRsNativeLibrary.realPath).toBe(await realpath(sourceOverride));
+    } finally {
+      if (previousOverride === undefined) {
+        delete process.env.NAPI_RS_NATIVE_LIBRARY_PATH;
+      } else {
+        process.env.NAPI_RS_NATIVE_LIBRARY_PATH = previousOverride;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("discovers binding packages referenced by the source loader", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-source-binding-"));
+    const sourceDirectory = join(directory, "src");
+    const bindingDirectory = join(directory, "node_modules", "@rolldown", "binding-test");
+    const bindingPath = join(bindingDirectory, "index.js");
+    await mkdir(sourceDirectory, { recursive: true });
+    await mkdir(bindingDirectory, { recursive: true });
+    await writeFile(join(directory, "package.json"), '{"type":"module","version":"1.0.0"}\n');
+    await writeFile(join(sourceDirectory, "index.mjs"), 'import "./binding.cjs";\n');
+    await writeFile(
+      join(sourceDirectory, "binding.cjs"),
+      'process.env.NAPI_RS_NATIVE_LIBRARY_PATH; require("@rolldown/binding-test");\n',
+    );
+    await writeFile(
+      join(bindingDirectory, "package.json"),
+      '{"name":"@rolldown/binding-test","version":"1.0.0","main":"index.js"}\n',
+    );
+
+    try {
+      await writeFile(bindingPath, "module.exports = 1;\n");
+      const first = await inspectRolldownRuntimeIdentity(
+        pathToFileURL(join(sourceDirectory, "index.mjs")).href,
+      );
+      await writeFile(bindingPath, "module.exports = 2;\n");
+      const second = await inspectRolldownRuntimeIdentity(
+        pathToFileURL(join(sourceDirectory, "index.mjs")).href,
+      );
+
+      expect(first.optionalBindingPackages.map((item) => item.name)).toEqual([
+        "@rolldown/binding-test",
+      ]);
+      expect(first.optionalBindingPackages[0]?.contentSha256).not.toBe(
+        second.optionalBindingPackages[0]?.contentSha256,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("hashes source files for large packages", async () => {
     const directory = await mkdtemp(join(tmpdir(), "rolldown-large-package-"));
     const sourceDirectory = join(directory, "src");

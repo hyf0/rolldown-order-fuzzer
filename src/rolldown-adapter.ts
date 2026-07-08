@@ -285,6 +285,7 @@ export async function inspectRolldownRuntimeIdentity(
   let packageContentFiles: readonly string[] = [];
   let runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[] = [];
   let optionalBindingPackages: readonly ObservedBindingPackageIdentity[] = [];
+  let runtimeBindingLoaderCandidates: readonly string[] = [];
 
   try {
     resolvedEntryUrl = import.meta.resolve(packageSpecifier);
@@ -318,16 +319,24 @@ export async function inspectRolldownRuntimeIdentity(
           packageInfo,
           [...runtimeDependencyNames].sort(),
         );
-        optionalBindingPackages = await inspectOptionalBindingPackages(packageInfo);
+        runtimeBindingLoaderCandidates = await findRuntimeBindingLoaderCandidates(
+          resolvedEntryPath,
+          packageInfo.rootPath,
+        );
+        const bindingNames = new Set(packageInfo.optionalBindingNames);
+        for (const name of await bindingPackageNamesFromLoaders(runtimeBindingLoaderCandidates)) {
+          bindingNames.add(name);
+        }
+        optionalBindingPackages = await inspectPackageDependencies(
+          packageInfo,
+          [...bindingNames].sort(),
+        );
       }
     }
   }
 
   const lockfile = await inspectFuzzerLockfile();
-  const napiRsNativeLibrary = await inspectNativeLibraryOverride(
-    resolvedEntryPath,
-    packageRootPath,
-  );
+  const napiRsNativeLibrary = await inspectNativeLibraryOverride(runtimeBindingLoaderCandidates);
 
   return {
     processVersion: process.version,
@@ -353,14 +362,9 @@ export async function inspectRolldownRuntimeIdentity(
 }
 
 async function inspectNativeLibraryOverride(
-  resolvedEntryPath: string | null,
-  packageRootPath: string | null,
+  loaderCandidates: readonly string[],
 ): Promise<ObservedNativeLibraryOverrideIdentity> {
   const requested = process.env.NAPI_RS_NATIVE_LIBRARY_PATH ?? null;
-  const loaderCandidates =
-    resolvedEntryPath === null || packageRootPath === null
-      ? []
-      : await findRuntimeBindingLoaderCandidates(resolvedEntryPath, packageRootPath);
   const loaderPath = loaderCandidates.length === 1 ? (loaderCandidates[0] ?? null) : null;
   if (requested !== null && isAbsolute(requested)) {
     try {
@@ -427,13 +431,16 @@ async function findRuntimeBindingLoaderCandidates(
   packageRootPath: string,
 ): Promise<readonly string[]> {
   const packageDist = join(packageRootPath, "dist");
+  const packageSource = join(packageRootPath, "src");
   const entryRelativePath = relative(packageRootPath, resolvedEntryPath);
   const runtimeRoot =
     entryRelativePath === "dist" || entryRelativePath.startsWith(`dist${sep}`)
       ? packageDist
-      : (await directoryExists(packageDist))
-        ? packageDist
-        : null;
+      : entryRelativePath === "src" || entryRelativePath.startsWith(`src${sep}`)
+        ? packageSource
+        : (await directoryExists(packageDist))
+          ? packageDist
+          : null;
   if (runtimeRoot === null) {
     return [];
   }
@@ -465,6 +472,24 @@ async function findRuntimeBindingLoaderCandidates(
     }
   }
   return [...new Set(candidates)].sort();
+}
+
+async function bindingPackageNamesFromLoaders(
+  loaderCandidates: readonly string[],
+): Promise<readonly string[]> {
+  const names = new Set<string>();
+  for (const loaderPath of loaderCandidates) {
+    try {
+      for (const match of (await readFile(loaderPath, "utf8")).matchAll(
+        /@rolldown\/binding-[a-z0-9_-]+/gi,
+      )) {
+        if (match[0] !== undefined) {
+          names.add(match[0]);
+        }
+      }
+    } catch {}
+  }
+  return [...names].sort();
 }
 
 async function directoryExists(path: string): Promise<boolean> {
@@ -522,12 +547,6 @@ function readDependencyNames(value: unknown): readonly string[] {
     return [];
   }
   return Object.keys(value).sort();
-}
-
-async function inspectOptionalBindingPackages(
-  packageInfo: PackageInfo,
-): Promise<readonly ObservedBindingPackageIdentity[]> {
-  return inspectPackageDependencies(packageInfo, packageInfo.optionalBindingNames);
 }
 
 async function inspectPackageDependencies(
