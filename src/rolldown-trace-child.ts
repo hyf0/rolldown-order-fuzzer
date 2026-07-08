@@ -1,7 +1,7 @@
 /// <reference types="node" />
 
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -170,7 +170,10 @@ export function parseTraceChildRequest(value: unknown): TraceChildRequest {
   };
 }
 
-export function parseTraceChildResponse(value: unknown): TraceChildResponse {
+export function parseTraceChildResponse(
+  value: unknown,
+  bundleDirectory: string,
+): TraceChildResponse {
   const response = requireRecord(value, "traced build response");
   if (response.version !== TRACE_CHILD_PROTOCOL_VERSION) {
     throw new TypeError(`Unsupported traced build response version: ${String(response.version)}`);
@@ -182,7 +185,7 @@ export function parseTraceChildResponse(value: unknown): TraceChildResponse {
       version: TRACE_CHILD_PROTOCOL_VERSION,
       status: "ok",
       outputFiles: requireArray(response.outputFiles, "traced build outputFiles").map(
-        parseOutputFile,
+        (output, index) => parseOutputFile(output, index, bundleDirectory),
       ),
       orderTrace,
     };
@@ -283,15 +286,20 @@ export async function runTraceChild(request: TraceChildRequest): Promise<TraceCh
   return {
     version: TRACE_CHILD_PROTOCOL_VERSION,
     status: "ok",
-    outputFiles: output.output.map(serializeOutputFile),
+    outputFiles: output.output.map((file) => serializeOutputFile(file, request.bundleDirectory)),
     orderTrace,
   };
 }
 
-function parseOutputFile(value: unknown, index: number): TraceChildOutputFile {
+function parseOutputFile(
+  value: unknown,
+  index: number,
+  bundleDirectory: string,
+): TraceChildOutputFile {
   const output = requireRecord(value, `traced build outputFiles[${index}]`);
-  const fileName = requireNonEmptyString(
-    output.fileName,
+  const fileName = validateOutputFileName(
+    requireNonEmptyString(output.fileName, `traced build outputFiles[${index}].fileName`),
+    bundleDirectory,
     `traced build outputFiles[${index}].fileName`,
   );
   if (output.type === "asset") {
@@ -458,17 +466,49 @@ function pathIsInside(rootDirectory: string, candidate: string): boolean {
   );
 }
 
-function serializeOutputFile(output: RolldownOutput["output"][number]): TraceChildOutputFile {
+function serializeOutputFile(
+  output: RolldownOutput["output"][number],
+  bundleDirectory: string,
+): TraceChildOutputFile {
+  const fileName = validateOutputFileName(
+    output.fileName,
+    bundleDirectory,
+    "Rolldown output fileName",
+  );
   if (output.type === "asset") {
-    return { type: "asset", fileName: output.fileName };
+    return { type: "asset", fileName };
   }
   return {
     type: "chunk",
-    fileName: output.fileName,
+    fileName,
     name: output.name,
     isEntry: output.isEntry,
     facadeModuleId: output.facadeModuleId,
   };
+}
+
+function validateOutputFileName(fileName: string, bundleDirectory: string, label: string): string {
+  if (
+    fileName.includes("\0") ||
+    fileName.includes("\\") ||
+    posix.isAbsolute(fileName) ||
+    win32.isAbsolute(fileName) ||
+    /^[A-Za-z]:/.test(fileName)
+  ) {
+    throw new TypeError(`${label} must be a canonical relative output path`);
+  }
+  const segments = fileName.split("/");
+  if (
+    segments.some((segment) => segment.length === 0 || segment === "." || segment === "..") ||
+    posix.normalize(fileName) !== fileName
+  ) {
+    throw new TypeError(`${label} must be a canonical relative output path`);
+  }
+  const resolvedPath = resolve(bundleDirectory, fileName);
+  if (!pathIsInside(bundleDirectory, resolvedPath) || resolvedPath === resolve(bundleDirectory)) {
+    throw new TypeError(`${label} escapes the bundle directory`);
+  }
+  return fileName;
 }
 
 function childFailure(

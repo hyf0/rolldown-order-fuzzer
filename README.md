@@ -49,7 +49,9 @@ The child imports the configured Rolldown package, reconstructs serializable inp
 
 Both sides structurally validate the versioned child protocol before using it, including absolute paths, manual groups, output metadata, error fields, and canonical trace shape. The child inherits only safe Node execution arguments needed for TypeScript/loaders; inspector and eval flags are not forwarded.
 
-The parent never changes its cwd and does not use parent `globalThis` instrumentation. All child devtools sessions, including fixed names such as `unknown-session`, disappear with the adapter temporary directory. Non-traced builds may still run in-process. Bundle manifest mapping considers only output chunks explicitly marked as entries.
+Every emitted chunk and asset filename must be a canonical forward-slash relative path confined to the bundle directory; absolute paths, drive/UNC paths, NULs, backslashes, and dot segments are rejected before manifest mapping. Bundle manifest mapping considers only output chunks explicitly marked as entries.
+
+The parent never changes its cwd and does not use parent `globalThis` instrumentation. All child devtools sessions, including fixed names such as `unknown-session`, disappear with the adapter temporary directory. Traced children have an explicit 60-second production timeout, followed by TERM/KILL shutdown and a deterministic harness error; tests may inject a shorter timeout. Non-traced builds may still run in-process.
 
 Packages that do not emit the action produce `orderTrace: null`, so older Rolldown versions remain usable. A malformed matching action, an unsupported version, invalid JSON, or multiple matching actions is a harness error because the diagnostic data cannot be trusted. The parser validates the required version-1 structure, including unsigned 32-bit bounds for every chunk ID and reference, then constructs a schema-only object that discards transport and unknown metadata.
 

@@ -763,10 +763,10 @@ describe("withRolldownBuild", () => {
       version: TRACE_CHILD_PROTOCOL_VERSION,
       status: "ok",
       outputFiles: [
-        { type: "asset", fileName: "asset.txt" },
+        { type: "asset", fileName: "assets/nested/asset.txt" },
         {
           type: "chunk",
-          fileName: "entry.js",
+          fileName: "entries/nested/entry.js",
           name: "entry",
           isEntry: true,
           facadeModuleId: null,
@@ -774,7 +774,7 @@ describe("withRolldownBuild", () => {
       ],
       orderTrace: null,
     } as const;
-    expect(parseTraceChildResponse(valid)).toEqual(valid);
+    expect(parseTraceChildResponse(valid, "/tmp/bundle")).toEqual(valid);
 
     const invalid = [
       null,
@@ -805,6 +805,14 @@ describe("withRolldownBuild", () => {
           },
         ],
       },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "/tmp/escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "C:\\temp\\escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "\\\\server\\escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "../escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "assets/../escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "./escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "assets\\..\\escape.txt" }] },
+      { ...valid, outputFiles: [{ type: "asset", fileName: "assets/escape\u0000.txt" }] },
       { ...valid, orderTrace: {} },
       {
         version: TRACE_CHILD_PROTOCOL_VERSION,
@@ -824,8 +832,65 @@ describe("withRolldownBuild", () => {
       },
     ];
     for (const value of invalid) {
-      expect(() => parseTraceChildResponse(value)).toThrow(TypeError);
+      expect(() => parseTraceChildResponse(value, "/tmp/bundle")).toThrow(TypeError);
     }
+  });
+
+  test("rejects escaped child output before the callback can execute it", async () => {
+    const program = singleEntryProgram();
+    let callbackRan = false;
+
+    await withTemporaryModule(
+      [
+        "export async function rolldown(options) {",
+        "  return {",
+        "    async write() {",
+        "      return {",
+        "        output: [",
+        "          {",
+        '            type: "chunk",',
+        '            fileName: "chunks/context.js",',
+        '            name: "context",',
+        "            isEntry: false,",
+        "            facadeModuleId: null,",
+        "          },",
+        "          {",
+        '            type: "chunk",',
+        '            fileName: "../source/module-0000.mjs",',
+        '            name: "__entry_0000",',
+        "            isEntry: true,",
+        "            facadeModuleId: Object.values(options.input)[0],",
+        "          },",
+        "        ],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (): Promise<never> => {
+            callbackRan = true;
+            throw new Error("escaped output callback must not run");
+          },
+          { packageSpecifier },
+        );
+
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: {
+            name: "TypeError",
+          },
+        });
+      },
+    );
+
+    expect(callbackRan).toBe(false);
   });
 
   test("forwards safe TypeScript execArgv without inspector conflicts", () => {
@@ -840,6 +905,64 @@ describe("withRolldownBuild", () => {
         "process.exit()",
       ]),
     ).toEqual(["--conditions=trace-child", "--import", "/tmp/register.mjs"]);
+  });
+
+  test("times out and cleans a stalled traced build child", async () => {
+    const program = singleEntryProgram();
+    let callbackRan = false;
+    let temporaryDirectory = "";
+
+    await withTemporaryModule(
+      [
+        "await new Promise((resolve) => setTimeout(resolve, 200));",
+        "export async function rolldown(options) {",
+        "  return {",
+        "    async write() {",
+        "      return {",
+        "        output: [{",
+        '          type: "chunk",',
+        '          fileName: "entries/__entry_0000.js",',
+        '          name: "__entry_0000",',
+        "          isEntry: true,",
+        "          facadeModuleId: Object.values(options.input)[0],",
+        "        }],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (): Promise<never> => {
+            callbackRan = true;
+            throw new Error("timed out child callback must not run");
+          },
+          {
+            packageSpecifier,
+            traceChildTimeoutMs: 25,
+            onFailureArtifacts: (_failure, artifacts) => {
+              temporaryDirectory = artifacts.temporaryDirectory;
+            },
+          },
+        );
+
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: {
+            name: "Error",
+            message: "Traced build child timed out after 25ms",
+          },
+        });
+      },
+    );
+
+    expect(callbackRan).toBe(false);
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {

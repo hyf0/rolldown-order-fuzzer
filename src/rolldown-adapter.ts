@@ -56,6 +56,8 @@ const IGNORED_PACKAGE_DIRECTORIES = new Set([
 ]);
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 const TRACE_CHILD_PATH = fileURLToPath(new URL("./rolldown-trace-child.ts", import.meta.url));
+const DEFAULT_TRACE_CHILD_TIMEOUT_MS = 60_000;
+const TRACE_CHILD_TERMINATION_GRACE_MS = 250;
 
 export const ROLLDOWN_BUILD_OPTIONS = {
   preserveEntrySignatures: "allow-extension",
@@ -71,6 +73,7 @@ export const ROLLDOWN_BUILD_OPTIONS = {
 export interface RolldownAdapterOptions {
   readonly packageSpecifier?: string;
   readonly collectOrderTrace?: boolean;
+  readonly traceChildTimeoutMs?: number;
   readonly onFailureArtifacts?: (
     failure: FailedRolldownAdapterResult,
     artifacts: RolldownFailureArtifacts,
@@ -165,6 +168,10 @@ export async function withRolldownBuild<T>(
   const packageSpecifier = options.packageSpecifier ?? process.env.ROLLDOWN_PACKAGE ?? "rolldown";
   const runtimeIdentity = await inspectRolldownRuntimeIdentity(packageSpecifier);
   const collectOrderTrace = options.collectOrderTrace ?? true;
+  const traceChildTimeoutMs = options.traceChildTimeoutMs ?? DEFAULT_TRACE_CHILD_TIMEOUT_MS;
+  if (!Number.isFinite(traceChildTimeoutMs) || traceChildTimeoutMs <= 0) {
+    throw new Error(`traceChildTimeoutMs must be positive, received ${traceChildTimeoutMs}`);
+  }
   const temporaryDirectory = await mkdtemp(join(tmpdir(), "rolldown-order-fuzzer-"));
   const sourceDirectory = join(temporaryDirectory, "source");
   const bundleDirectory = join(temporaryDirectory, "bundle");
@@ -213,6 +220,7 @@ export async function withRolldownBuild<T>(
         bundleDirectory,
         temporaryDirectory,
         packageSpecifier,
+        traceChildTimeoutMs,
       );
     } else {
       const loaded = await loadRolldown(packageSpecifier);
@@ -611,6 +619,7 @@ async function buildWithTraceChild(
   bundleDirectory: string,
   temporaryDirectory: string,
   packageSpecifier: string,
+  timeoutMs: number,
 ): Promise<BuiltRolldown | FailedRolldownBuild> {
   const requestPath = join(temporaryDirectory, "trace-request.json");
   const responsePath = join(temporaryDirectory, "trace-response.json");
@@ -645,11 +654,28 @@ async function buildWithTraceChild(
   };
   await writeFile(requestPath, `${JSON.stringify(request)}\n`);
 
-  const childResult = await runTraceChildProcess(temporaryDirectory, requestPath, responsePath);
+  const childResult = await runTraceChildProcess(
+    temporaryDirectory,
+    requestPath,
+    responsePath,
+    timeoutMs,
+  );
   if (childResult.status === "spawn-error") {
     return {
       status: "failed",
       failure: failure("harness-error", "build", packageSpecifier, childResult.error),
+      orderTrace: null,
+    };
+  }
+  if (childResult.status === "timeout") {
+    return {
+      status: "failed",
+      failure: failure(
+        "harness-error",
+        "build",
+        packageSpecifier,
+        new Error(`Traced build child timed out after ${childResult.timeoutMs}ms`),
+      ),
       orderTrace: null,
     };
   }
@@ -672,7 +698,10 @@ async function buildWithTraceChild(
 
   let response: TraceChildResponse;
   try {
-    response = parseTraceChildResponse(JSON.parse(await readFile(responsePath, "utf8")) as unknown);
+    response = parseTraceChildResponse(
+      JSON.parse(await readFile(responsePath, "utf8")) as unknown,
+      bundleDirectory,
+    );
   } catch (error) {
     return {
       status: "failed",
@@ -713,6 +742,7 @@ async function buildWithTraceChild(
 
 type TraceChildProcessResult =
   | { readonly status: "spawn-error"; readonly error: Error }
+  | { readonly status: "timeout"; readonly timeoutMs: number }
   | {
       readonly status: "closed";
       readonly code: number | null;
@@ -723,6 +753,7 @@ async function runTraceChildProcess(
   cwd: string,
   requestPath: string,
   responsePath: string,
+  timeoutMs: number,
 ): Promise<TraceChildProcessResult> {
   return new Promise((resolveResult) => {
     const child = spawn(
@@ -733,12 +764,47 @@ async function runTraceChildProcess(
         stdio: "ignore",
       },
     );
-    child.once("error", (error) => {
-      resolveResult({ status: "spawn-error", error });
-    });
-    child.once("close", (code, signal) => {
-      resolveResult({ status: "closed", code, signal });
-    });
+    let settled = false;
+    let timedOut = false;
+    let killTimer: ReturnType<typeof setTimeout> | undefined;
+    const cleanup = () => {
+      clearTimeout(timeoutTimer);
+      if (killTimer !== undefined) {
+        clearTimeout(killTimer);
+      }
+      child.off("error", onError);
+      child.off("close", onClose);
+    };
+    const settle = (result: TraceChildProcessResult) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolveResult(result);
+    };
+    const onError = (error: Error) => {
+      if (!timedOut) {
+        settle({ status: "spawn-error", error });
+      }
+    };
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+      settle(timedOut ? { status: "timeout", timeoutMs } : { status: "closed", code, signal });
+    };
+    const timeoutTimer = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      timedOut = true;
+      child.kill("SIGTERM");
+      killTimer = setTimeout(() => {
+        if (!settled) {
+          child.kill("SIGKILL");
+        }
+      }, TRACE_CHILD_TERMINATION_GRACE_MS);
+    }, timeoutMs);
+    child.once("error", onError);
+    child.once("close", onClose);
   });
 }
 
