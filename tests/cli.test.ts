@@ -1272,6 +1272,28 @@ describe("writeFailureArtifacts", () => {
     }
   });
 
+  test("rejects an existing artifact path that is itself a symlink", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-cli-artifact-root-link-"));
+    const targetDirectory = await mkdtemp(join(tmpdir(), "order-cli-artifact-root-target-"));
+    const generated = generateCase(7, DEFAULT_CASE_SIZE);
+    const result = failedCase(generated);
+    const artifactDirectory = failureArtifactPath(result, directory, 3);
+
+    try {
+      const targetArtifact = await writeFailureArtifacts(result, targetDirectory, 3);
+      await symlink(targetArtifact, artifactDirectory);
+
+      await expect(writeFailureArtifacts(result, directory, 3)).rejects.toThrow(
+        "Existing failure artifact is incomplete or has a different identity",
+      );
+    } finally {
+      await Promise.all([
+        rm(directory, { recursive: true, force: true }),
+        rm(targetDirectory, { recursive: true, force: true }),
+      ]);
+    }
+  });
+
   test("records a deterministic null bundle manifest identity", async () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-null-manifest-"));
     const result = failedCase(generateCase(7, DEFAULT_CASE_SIZE));

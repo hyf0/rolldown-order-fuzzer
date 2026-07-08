@@ -419,6 +419,14 @@ async function requireCompleteExistingArtifact(
   const invalid = new Error(
     `Existing failure artifact is incomplete or has a different identity: ${artifactDirectory}`,
   );
+  try {
+    const rootMetadata = await lstat(artifactDirectory);
+    if (!rootMetadata.isDirectory() || rootMetadata.isSymbolicLink()) {
+      throw invalid;
+    }
+  } catch {
+    throw invalid;
+  }
   const expectedFiles = createArtifactFiles(result, caseIndexFromIdentity(identity), identity);
   const expectedFilePaths = expectedFiles.map((file) => file.path).sort();
   const expectedDirectoryPaths = [
