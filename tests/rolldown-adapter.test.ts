@@ -24,6 +24,7 @@ import type { ProgramModel } from "../src/model.ts";
 import {
   inspectRolldownRuntimeIdentity,
   buildChildExecArgv,
+  splitNodeOptions,
   waitForBuildChildProcess,
   withRolldownBuild,
   type RolldownAdapterResult,
@@ -533,18 +534,23 @@ describe("withRolldownBuild", () => {
   test("hashes NODE_OPTIONS hook files", async () => {
     const directory = await mkdtemp(join(tmpdir(), "rolldown node options "));
     const hookPath = join(directory, "hook.cjs");
+    const helperPath = join(directory, "helper.cjs");
     const previousNodeOptions = process.env.NODE_OPTIONS;
 
     try {
       process.env.NODE_OPTIONS = `--require="${hookPath}"`;
-      await writeFile(hookPath, "module.exports = 1;\n");
+      await writeFile(hookPath, 'module.exports = require("./helper.cjs");\n');
+      await writeFile(helperPath, "module.exports = 1;\n");
       const first = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
-      await writeFile(hookPath, "module.exports = 2;\n");
+      await writeFile(helperPath, "module.exports = 2;\n");
       const second = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
 
       expect(first.nodeOptions).toBe(`--require="${hookPath}"`);
       expect(first.nodeOptionFiles).toHaveLength(1);
-      expect(first.nodeOptionFiles[0]?.sha256).not.toBe(second.nodeOptionFiles[0]?.sha256);
+      expect(first.nodeOptionFiles[0]?.sha256).toBe(second.nodeOptionFiles[0]?.sha256);
+      expect(first.nodeOptionFiles[0]?.scopeSha256).not.toBe(
+        second.nodeOptionFiles[0]?.scopeSha256,
+      );
     } finally {
       restoreEnvironment("NODE_OPTIONS", previousNodeOptions);
       await rm(directory, { recursive: true, force: true });
@@ -1181,6 +1187,15 @@ describe("withRolldownBuild", () => {
         "process.exit()",
       ]),
     ).toEqual(["--conditions=build-child", "-C", "dev", "--import", "/tmp/register.mjs"]);
+  });
+
+  test("matches Node NODE_OPTIONS tokenization", () => {
+    expect(
+      splitNodeOptions(String.raw`--require C:\hooks\preload.cjs --conditions 'dev mode'`),
+    ).toEqual(["--require", String.raw`C:\hooks\preload.cjs`, "--conditions", "'dev", "mode'"]);
+    expect(splitNodeOptions(String.raw`--require="C:\path with spaces\hook.cjs"`)).toEqual([
+      "--require=C:path with spaceshook.cjs",
+    ]);
   });
 
   test("hashes an absolute native override despite ambiguous binding loaders", async () => {

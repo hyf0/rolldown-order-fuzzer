@@ -129,6 +129,11 @@ export interface ObservedRuntimeFileIdentity {
   readonly specifier: string;
   readonly resolvedPath: string | null;
   readonly sha256: string | null;
+  readonly scopePath: string | null;
+  readonly scopeSha256: string | null;
+  readonly scopeFiles: readonly string[];
+  readonly packageRootPath: string | null;
+  readonly packageContentSha256: string | null;
 }
 
 export interface ObservedNativeLibraryOverrideIdentity {
@@ -851,53 +856,62 @@ async function inspectExecArgvFiles(
       try {
         const resolvedUrl = import.meta.resolve(specifier);
         const resolvedPath = await realpath(fileURLToPath(resolvedUrl));
+        const scopePath = await realpath(dirname(resolvedPath));
+        const scope = await hashPackageFiles(await collectPackageFiles(scopePath));
+        const packageInfo = await findNearestPackageInfo(scopePath);
+        const packageContent =
+          packageInfo === null ? null : await hashPackageContents(packageInfo.rootPath);
         return {
           specifier,
           resolvedPath,
           sha256: createHash("sha256")
             .update(await readFile(resolvedPath))
             .digest("hex"),
+          scopePath,
+          scopeSha256: scope.sha256,
+          scopeFiles: scope.files,
+          packageRootPath: packageInfo?.rootPath ?? null,
+          packageContentSha256: packageContent?.sha256 ?? null,
         };
       } catch {
-        return { specifier, resolvedPath: null, sha256: null };
+        return {
+          specifier,
+          resolvedPath: null,
+          sha256: null,
+          scopePath: null,
+          scopeSha256: null,
+          scopeFiles: [],
+          packageRootPath: null,
+          packageContentSha256: null,
+        };
       }
     }),
   );
 }
 
-function splitNodeOptions(value: string): string[] {
+export function splitNodeOptions(value: string): string[] {
   const result: string[] = [];
-  let current = "";
-  let quote: '"' | "'" | null = null;
-  let escaped = false;
-  for (const character of value) {
-    if (escaped) {
-      current += character;
-      escaped = false;
-    } else if (character === "\\") {
-      escaped = true;
-    } else if (quote !== null) {
-      if (character === quote) {
-        quote = null;
-      } else {
-        current += character;
-      }
-    } else if (character === '"' || character === "'") {
-      quote = character;
-    } else if (/\s/.test(character)) {
-      if (current.length > 0) {
-        result.push(current);
-        current = "";
-      }
-    } else {
-      current += character;
+  let inString = false;
+  let startNewArgument = true;
+  for (let index = 0; index < value.length; index += 1) {
+    let character = value[index] as string;
+    if (character === "\\" && inString && index + 1 < value.length) {
+      index += 1;
+      character = value[index] as string;
+    } else if (character === " " && !inString) {
+      startNewArgument = true;
+      continue;
+    } else if (character === '"') {
+      inString = !inString;
+      continue;
     }
-  }
-  if (escaped) {
-    current += "\\";
-  }
-  if (current.length > 0) {
-    result.push(current);
+
+    if (startNewArgument) {
+      result.push(character);
+      startNewArgument = false;
+    } else {
+      result[result.length - 1] += character;
+    }
   }
   return result;
 }
