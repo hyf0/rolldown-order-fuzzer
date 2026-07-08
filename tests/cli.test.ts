@@ -605,6 +605,8 @@ describe("runCampaign", () => {
         optionalBindingPackages: [],
         napiRsNativeLibrary: {
           requested: null,
+          loaderPath: null,
+          loaderCandidates: [],
           resolvedPath: null,
           realPath: null,
           sha256: null,
@@ -831,51 +833,86 @@ describe("runCampaign", () => {
     }
   });
 
-  test("binds NAPI_RS_NATIVE_LIBRARY_PATH override bytes to runtime identity", async () => {
+  test("resolves NAPI_RS_NATIVE_LIBRARY_PATH from the generated binding loader", async () => {
     const packageRoot = await mkdtemp(join(tmpdir(), "order-runtime-override-package-"));
     const targetRoot = await mkdtemp(join(tmpdir(), "order-runtime-override-target-"));
     const entryPath = join(packageRoot, "dist/index.mjs");
-    const overrideLinkPath = join(packageRoot, "dist/override.node");
-    const overrideTargetPath = join(targetRoot, "override.node");
+    const loaderPath = join(packageRoot, "dist/shared/binding-test.mjs");
+    const secondLoaderPath = join(packageRoot, "dist/shared/binding-other.mjs");
+    const publicOverridePath = join(packageRoot, "dist/override.node");
+    const loaderOverrideLinkPath = join(packageRoot, "dist/shared/override.node");
+    const loaderOverrideTargetPath = join(targetRoot, "override.node");
     const previousOverride = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;
 
     try {
-      await mkdir(dirname(entryPath), { recursive: true });
+      await mkdir(dirname(loaderPath), { recursive: true });
       await Promise.all([
         writeFile(
           join(packageRoot, "package.json"),
           `${JSON.stringify({ type: "module", version: "1.0.0" })}\n`,
         ),
         writeFile(entryPath, "export const rolldown = true;\n"),
-        writeFile(overrideTargetPath, Buffer.from([0, 1, 2, 3])),
+        writeFile(
+          loaderPath,
+          "const nativePath = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\nexport { nativePath };\n",
+        ),
+        writeFile(publicOverridePath, Buffer.from([9, 9, 9, 9])),
+        writeFile(loaderOverrideTargetPath, Buffer.from([0, 1, 2, 3])),
       ]);
-      await symlink(overrideTargetPath, overrideLinkPath);
+      await symlink(loaderOverrideTargetPath, loaderOverrideLinkPath);
       process.env.NAPI_RS_NATIVE_LIBRARY_PATH = "./override.node";
 
       const specifier = pathToFileURL(entryPath).href;
       const first = await inspectRolldownRuntimeIdentity(specifier);
-      const resolvedOverride = createRequire(entryPath).resolve("./override.node");
-      await writeFile(overrideTargetPath, Buffer.from([3, 2, 1, 0]));
-      const changed = await inspectRolldownRuntimeIdentity(specifier);
+      const resolvedOverride = createRequire(loaderPath).resolve("./override.node");
+      await writeFile(publicOverridePath, Buffer.from([8, 8, 8, 8]));
+      const changedPublic = await inspectRolldownRuntimeIdentity(specifier);
+      await writeFile(loaderOverrideTargetPath, Buffer.from([3, 2, 1, 0]));
+      const changedLoader = await inspectRolldownRuntimeIdentity(specifier);
 
       expect(first.napiRsNativeLibrary).toEqual({
         requested: "./override.node",
+        loaderPath: await realpath(loaderPath),
+        loaderCandidates: [await realpath(loaderPath)],
         resolvedPath: resolvedOverride,
         realPath: await realpath(resolvedOverride),
         sha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
       });
-      expect(changed.napiRsNativeLibrary.sha256).not.toBe(first.napiRsNativeLibrary.sha256);
+      expect(changedPublic.napiRsNativeLibrary).toEqual(first.napiRsNativeLibrary);
+      expect(changedLoader.napiRsNativeLibrary.sha256).not.toBe(first.napiRsNativeLibrary.sha256);
 
       const generated = generateCase(7, DEFAULT_CASE_SIZE);
       const base = failedCase(generated);
       expect(failureArtifactPath({ ...base, runtimeIdentity: first }, packageRoot, 0)).not.toBe(
-        failureArtifactPath({ ...base, runtimeIdentity: changed }, packageRoot, 0),
+        failureArtifactPath({ ...base, runtimeIdentity: changedLoader }, packageRoot, 0),
       );
 
-      process.env.NAPI_RS_NATIVE_LIBRARY_PATH = "./missing.node";
-      const missing = await inspectRolldownRuntimeIdentity(specifier);
-      expect(missing.napiRsNativeLibrary).toEqual({
-        requested: "./missing.node",
+      await writeFile(loaderPath, "export const withoutMarker = true;\n");
+      const noMarker = await inspectRolldownRuntimeIdentity(specifier);
+      expect(noMarker.napiRsNativeLibrary).toEqual({
+        requested: "./override.node",
+        loaderPath: null,
+        loaderCandidates: [],
+        resolvedPath: null,
+        realPath: null,
+        sha256: null,
+      });
+
+      await Promise.all([
+        writeFile(
+          loaderPath,
+          "const first = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\nexport { first };\n",
+        ),
+        writeFile(
+          secondLoaderPath,
+          "const second = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\nexport { second };\n",
+        ),
+      ]);
+      const ambiguous = await inspectRolldownRuntimeIdentity(specifier);
+      expect(ambiguous.napiRsNativeLibrary).toEqual({
+        requested: "./override.node",
+        loaderPath: null,
+        loaderCandidates: [await realpath(secondLoaderPath), await realpath(loaderPath)].sort(),
         resolvedPath: null,
         realPath: null,
         sha256: null,
@@ -1469,6 +1506,8 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     optionalBindingPackages: [],
     napiRsNativeLibrary: {
       requested: null,
+      loaderPath: null,
+      loaderCandidates: [],
       resolvedPath: null,
       realPath: null,
       sha256: null,

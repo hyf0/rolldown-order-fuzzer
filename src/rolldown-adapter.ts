@@ -14,7 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type {
@@ -124,6 +124,8 @@ export interface ObservedRuntimeIdentity {
 
 export interface ObservedNativeLibraryOverrideIdentity {
   readonly requested: string | null;
+  readonly loaderPath: string | null;
+  readonly loaderCandidates: readonly string[];
   readonly resolvedPath: string | null;
   readonly realPath: string | null;
   readonly sha256: string | null;
@@ -321,7 +323,10 @@ export async function inspectRolldownRuntimeIdentity(
   }
 
   const lockfile = await inspectFuzzerLockfile();
-  const napiRsNativeLibrary = await inspectNativeLibraryOverride(resolvedEntryPath);
+  const napiRsNativeLibrary = await inspectNativeLibraryOverride(
+    resolvedEntryPath,
+    packageRootPath,
+  );
 
   return {
     processVersion: process.version,
@@ -345,11 +350,19 @@ export async function inspectRolldownRuntimeIdentity(
 
 async function inspectNativeLibraryOverride(
   resolvedEntryPath: string | null,
+  packageRootPath: string | null,
 ): Promise<ObservedNativeLibraryOverrideIdentity> {
   const requested = process.env.NAPI_RS_NATIVE_LIBRARY_PATH ?? null;
-  if (requested === null || resolvedEntryPath === null) {
+  const loaderCandidates =
+    resolvedEntryPath === null || packageRootPath === null
+      ? []
+      : await findRuntimeBindingLoaderCandidates(resolvedEntryPath, packageRootPath);
+  const loaderPath = loaderCandidates.length === 1 ? (loaderCandidates[0] ?? null) : null;
+  if (requested === null || loaderPath === null) {
     return {
       requested,
+      loaderPath,
+      loaderCandidates,
       resolvedPath: null,
       realPath: null,
       sha256: null,
@@ -357,10 +370,12 @@ async function inspectNativeLibraryOverride(
   }
 
   try {
-    const resolvedPath = createRequire(resolvedEntryPath).resolve(requested);
+    const resolvedPath = createRequire(loaderPath).resolve(requested);
     const realPath = await realpath(resolvedPath);
     return {
       requested,
+      loaderPath,
+      loaderCandidates,
       resolvedPath,
       realPath,
       sha256: createHash("sha256")
@@ -370,10 +385,65 @@ async function inspectNativeLibraryOverride(
   } catch {
     return {
       requested,
+      loaderPath,
+      loaderCandidates,
       resolvedPath: null,
       realPath: null,
       sha256: null,
     };
+  }
+}
+
+async function findRuntimeBindingLoaderCandidates(
+  resolvedEntryPath: string,
+  packageRootPath: string,
+): Promise<readonly string[]> {
+  const packageDist = join(packageRootPath, "dist");
+  const entryRelativePath = relative(packageRootPath, resolvedEntryPath);
+  const runtimeRoot =
+    entryRelativePath === "dist" || entryRelativePath.startsWith(`dist${sep}`)
+      ? packageDist
+      : (await directoryExists(packageDist))
+        ? packageDist
+        : null;
+  if (runtimeRoot === null) {
+    return [];
+  }
+
+  const candidates: string[] = [];
+  const pending = [runtimeRoot];
+  while (pending.length > 0) {
+    const directory = pending.pop();
+    if (directory === undefined) {
+      continue;
+    }
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      if (entry.isSymbolicLink()) {
+        continue;
+      }
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(path);
+      } else if (
+        entry.isFile() &&
+        (entry.name.endsWith(".js") || entry.name.endsWith(".mjs") || entry.name.endsWith(".cjs"))
+      ) {
+        try {
+          if ((await readFile(path, "utf8")).includes("NAPI_RS_NATIVE_LIBRARY_PATH")) {
+            candidates.push(await realpath(path));
+          }
+        } catch {}
+      }
+    }
+  }
+  return [...new Set(candidates)].sort();
+}
+
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    return (await lstat(path)).isDirectory();
+  } catch {
+    return false;
   }
 }
 
