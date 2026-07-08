@@ -16,6 +16,7 @@ export const MIXED_TEMPLATE_NAMES = [
   "manual-chunk-separation",
   "dynamic-entry-cjs-carrier",
   "internal-wrapped-entry-order",
+  "wrapped-entry-cycle",
 ] as const;
 
 export type MixedTemplateName = (typeof MIXED_TEMPLATE_NAMES)[number];
@@ -66,6 +67,7 @@ const TEMPLATE_BUILDERS: Readonly<Record<MixedTemplateName, TemplateBuilder>> = 
   "manual-chunk-separation": buildManualChunkSeparation,
   "dynamic-entry-cjs-carrier": buildDynamicEntryCjsCarrier,
   "internal-wrapped-entry-order": buildInternalWrappedEntryOrder,
+  "wrapped-entry-cycle": buildWrappedEntryCycle,
 };
 
 function buildEsmImportsCjs(rng: SeededRng, size: number): TemplateResult {
@@ -344,6 +346,54 @@ function buildInternalWrappedEntryOrder(rng: SeededRng): TemplateResult {
   };
 }
 
+function buildWrappedEntryCycle(rng: SeededRng): TemplateResult {
+  const main = esmModule(
+    "main",
+    [
+      {
+        kind: "esm-value-import",
+        target: "hub",
+        importedName: "hubValue",
+        localName: "hubValue",
+      },
+    ],
+    events("main", rng, 0, "hubValue"),
+  );
+  const hub = esmModule(
+    "hub",
+    [
+      { kind: "esm-side-effect-import", target: "interop" },
+      { kind: "esm-side-effect-import", target: "dep" },
+    ],
+    events("hub", rng, 1),
+  );
+  const dep = esmModule(
+    "dep",
+    [{ kind: "esm-side-effect-import", target: "hub" }],
+    events("dep", rng, 1),
+  );
+  const interop = cjsModule(
+    "interop",
+    [{ kind: "cjs-require", target: "dep" }],
+    events("interop", rng, 1),
+  );
+
+  return {
+    program: {
+      modules: [main, hub, dep, interop],
+      entries: [
+        { name: "main", moduleId: main.id },
+        { name: "hub", moduleId: hub.id },
+      ],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      manualChunkGroups: [
+        { name: "dep", moduleIds: [dep.id] },
+        { name: "hub", moduleIds: [hub.id, interop.id] },
+      ],
+    },
+  };
+}
+
 export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   const tags = new Set<string>();
   const modulesById = new Map(program.modules.map((module) => [module.id, module]));
@@ -402,6 +452,9 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   if (requiresSynchronousEsm) {
     tags.add("mechanism:synchronous-esm");
   }
+  if (hasSynchronousCycle(program, modulesById)) {
+    tags.add("mechanism:source-cycle");
+  }
   if (program.schedule.some((operation) => operation.kind === "trigger-dynamic-import")) {
     tags.add("mechanism:scheduled-dynamic-import");
   }
@@ -436,6 +489,9 @@ function deriveTemplateName(
   hasOverlappingEntries: boolean,
   esmCarriersByCjsTarget: ReadonlyMap<string, ReadonlySet<string>>,
 ): MixedTemplateName | undefined {
+  if (tags.has("mechanism:source-cycle")) {
+    return "wrapped-entry-cycle";
+  }
   if (tags.has("mechanism:scheduled-dynamic-import") && tags.has("mechanism:esm-imports-cjs")) {
     return "dynamic-entry-cjs-carrier";
   }
@@ -498,6 +554,32 @@ function synchronouslyReachable(
     }
   }
   return reached;
+}
+
+function hasSynchronousCycle(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): boolean {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (moduleId: string): boolean => {
+    if (visiting.has(moduleId)) {
+      return true;
+    }
+    if (visited.has(moduleId)) {
+      return false;
+    }
+    visiting.add(moduleId);
+    for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
+      if (dependency.kind !== "esm-dynamic-import" && visit(dependency.target)) {
+        return true;
+      }
+    }
+    visiting.delete(moduleId);
+    visited.add(moduleId);
+    return false;
+  };
+  return program.modules.some((module) => visit(module.id));
 }
 
 function reachesTopLevelAwait(

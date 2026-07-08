@@ -36,7 +36,7 @@ Each case uses size `4`. Campaign seeds increment by one and wrap as unsigned 32
 vp exec node src/main.ts --seed <reported-seed> --cases 1
 ```
 
-Generation selects one controlled template and varies only bounded graph parameters, import forms, event values, and schedule order. The MVP templates cover ESM importing side-effectful CJS, multiple ESM carriers sharing CJS, CJS requiring synchronous ESM, overlapping multiple entries, manual chunks separating carriers from interop modules, scheduled dynamic entries whose eager dependency order crosses an ESM-to-CJS carrier, and internal references to wrapped entry modules. Generated value imports are observed through the imported binding. Coverage tags are derived from the resulting `ProgramModel`, not declared by the selected template.
+Generation selects one controlled template and varies only bounded graph parameters, import forms, event values, and schedule order. The MVP templates cover ESM importing side-effectful CJS, multiple ESM carriers sharing CJS, CJS requiring synchronous ESM, overlapping multiple entries, manual chunks separating carriers from interop modules, scheduled dynamic entries whose eager dependency order crosses an ESM-to-CJS carrier, internal references to wrapped entry modules, and manual-chunked mixed-module cycles. Generated value imports are observed through the imported binding. Coverage tags are derived from the resulting `ProgramModel`, not declared by the selected template.
 
 Each result line contains the case index, replay seed, template, coverage tags, and exact verdict signature. The process exits `0` when every case passes, `1` when any case fails, and `2` for invalid arguments or campaign harness errors.
 

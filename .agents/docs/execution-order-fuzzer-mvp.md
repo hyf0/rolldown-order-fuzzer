@@ -98,6 +98,7 @@ Generation is deterministic from seed and size. The first mixed campaign covers:
 - manual chunk groups that separate carriers from interop modules
 - scheduled dynamic entries that execute ordinary ESM before an ESM-to-CJS carrier
 - CJS entries that synchronously reference another wrapped entry
+- manual-chunked ESM cycles re-entered through CJS
 
 Random generation starts after fixed scenarios pass through the complete pipeline.
 

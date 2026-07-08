@@ -76,6 +76,14 @@ describe("generateCase", () => {
     expect(generated).toBeDefined();
   });
 
+  test("generates synchronous mixed-module cycles", () => {
+    const generated = Array.from({ length: 1_000 }, (_, seed) => generateCase(seed, 4)).find(
+      (candidate) => candidate.coverageTags.includes("mechanism:source-cycle"),
+    );
+
+    expect(generated).toBeDefined();
+  });
+
   test("returns valid programs with template and mechanism coverage tags", () => {
     const casesByTemplate = new Map<MixedTemplateName, ReturnType<typeof generateCase>>();
 
@@ -225,6 +233,12 @@ function assertTemplateGraph(template: MixedTemplateName, program: ProgramModel)
     return;
   }
 
+  if (template === "wrapped-entry-cycle") {
+    expect(hasSynchronousCycle(program, modulesById)).toBe(true);
+    expect(program.manualChunkGroups?.length).toBeGreaterThanOrEqual(2);
+    return;
+  }
+
   const groups = program.manualChunkGroups ?? [];
   expect(groups.length).toBeGreaterThanOrEqual(2);
   const groupFormats = groups.map(
@@ -293,4 +307,30 @@ function synchronouslyReachable(
 
 function intersection(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> {
   return new Set([...left].filter((value) => right.has(value)));
+}
+
+function hasSynchronousCycle(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): boolean {
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (moduleId: string): boolean => {
+    if (visiting.has(moduleId)) {
+      return true;
+    }
+    if (visited.has(moduleId)) {
+      return false;
+    }
+    visiting.add(moduleId);
+    for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
+      if (dependency.kind !== "esm-dynamic-import" && visit(dependency.target)) {
+        return true;
+      }
+    }
+    visiting.delete(moduleId);
+    visited.add(moduleId);
+    return false;
+  };
+  return program.modules.some((module) => visit(module.id));
 }

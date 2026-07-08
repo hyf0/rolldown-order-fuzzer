@@ -261,7 +261,7 @@ describe("withRolldownBuild", () => {
     "keeps the generated manual-chunk graph free of harness runtime modules",
     { timeout: 30_000 },
     async () => {
-      const generated = generateCase(8, 4);
+      const generated = generateCase(3, 4);
       expect(generated.template).toBe("manual-chunk-separation");
       const rendered = renderProgram(generated.program);
       const expectedSourceFiles = [...rendered.modulePaths.values(), rendered.schedulePath].sort();
