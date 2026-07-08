@@ -115,6 +115,14 @@ export interface ObservedRuntimeIdentity {
   readonly fuzzerLockfilePath: string | null;
   readonly fuzzerLockfileSha256: string | null;
   readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
+  readonly napiRsNativeLibrary: ObservedNativeLibraryOverrideIdentity;
+}
+
+export interface ObservedNativeLibraryOverrideIdentity {
+  readonly requested: string | null;
+  readonly resolvedPath: string | null;
+  readonly realPath: string | null;
+  readonly sha256: string | null;
 }
 
 export interface ObservedBindingPackageIdentity {
@@ -304,6 +312,7 @@ export async function inspectRolldownRuntimeIdentity(
   }
 
   const lockfile = await inspectFuzzerLockfile();
+  const napiRsNativeLibrary = await inspectNativeLibraryOverride(resolvedEntryPath);
 
   return {
     processVersion: process.version,
@@ -321,7 +330,42 @@ export async function inspectRolldownRuntimeIdentity(
     fuzzerLockfilePath: lockfile.path,
     fuzzerLockfileSha256: lockfile.sha256,
     optionalBindingPackages,
+    napiRsNativeLibrary,
   };
+}
+
+async function inspectNativeLibraryOverride(
+  resolvedEntryPath: string | null,
+): Promise<ObservedNativeLibraryOverrideIdentity> {
+  const requested = process.env.NAPI_RS_NATIVE_LIBRARY_PATH ?? null;
+  if (requested === null || resolvedEntryPath === null) {
+    return {
+      requested,
+      resolvedPath: null,
+      realPath: null,
+      sha256: null,
+    };
+  }
+
+  try {
+    const resolvedPath = createRequire(resolvedEntryPath).resolve(requested);
+    const realPath = await realpath(resolvedPath);
+    return {
+      requested,
+      resolvedPath,
+      realPath,
+      sha256: createHash("sha256")
+        .update(await readFile(realPath))
+        .digest("hex"),
+    };
+  } catch {
+    return {
+      requested,
+      resolvedPath: null,
+      realPath: null,
+      sha256: null,
+    };
+  }
 }
 
 interface PackageInfo {
@@ -395,6 +439,7 @@ interface PackageFile {
   readonly path: string;
   readonly absolutePath: string;
   readonly size: number;
+  readonly symlinkRealPath: string | null;
 }
 
 async function hashPackageContents(
@@ -410,11 +455,11 @@ async function hashPackageContents(
     const sorted = [...selected].sort((left, right) => left.path.localeCompare(right.path));
     const hash = createHash("sha256");
     for (const file of sorted) {
-      hash
-        .update(file.path)
-        .update(Uint8Array.of(0))
-        .update(await readFile(file.absolutePath))
-        .update(Uint8Array.of(0));
+      hash.update(file.path).update(Uint8Array.of(0));
+      if (file.symlinkRealPath !== null) {
+        hash.update(file.symlinkRealPath).update(Uint8Array.of(0));
+      }
+      hash.update(await readFile(file.absolutePath)).update(Uint8Array.of(0));
     }
     return {
       sha256: hash.digest("hex"),
@@ -437,19 +482,36 @@ async function collectPackageFiles(packageRoot: string): Promise<readonly Packag
     }
     const entries = await readdir(current.directory, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isSymbolicLink()) {
-        continue;
-      }
       const path =
         current.relativePath.length === 0 ? entry.name : `${current.relativePath}/${entry.name}`;
       const absolutePath = join(current.directory, entry.name);
-      if (entry.isDirectory()) {
+      if (entry.isSymbolicLink()) {
+        if (path.endsWith(".node")) {
+          try {
+            const symlinkRealPath = await realpath(absolutePath);
+            const metadata = await lstat(symlinkRealPath);
+            if (metadata.isFile()) {
+              files.push({
+                path,
+                absolutePath: symlinkRealPath,
+                size: metadata.size,
+                symlinkRealPath,
+              });
+            }
+          } catch {}
+        }
+      } else if (entry.isDirectory()) {
         if (!IGNORED_PACKAGE_DIRECTORIES.has(entry.name)) {
           pending.push({ directory: absolutePath, relativePath: path });
         }
       } else if (entry.isFile()) {
         const metadata = await lstat(absolutePath);
-        files.push({ path, absolutePath, size: metadata.size });
+        files.push({
+          path,
+          absolutePath,
+          size: metadata.size,
+          symlinkRealPath: null,
+        });
       }
     }
   }
