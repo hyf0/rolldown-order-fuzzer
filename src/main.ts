@@ -203,16 +203,16 @@ export async function runCampaign(
     const previousTraceValue = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
     if (options.collectOrderTrace) {
       process.env.ROLLDOWN_STRICT_ORDER_TRACE = "1";
+    } else {
+      delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
     }
     try {
       return await runCampaignCases(options, overrides);
     } finally {
-      if (options.collectOrderTrace) {
-        if (previousTraceValue === undefined) {
-          delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
-        } else {
-          process.env.ROLLDOWN_STRICT_ORDER_TRACE = previousTraceValue;
-        }
+      if (previousTraceValue === undefined) {
+        delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
+      } else {
+        process.env.ROLLDOWN_STRICT_ORDER_TRACE = previousTraceValue;
       }
     }
   });
@@ -385,6 +385,7 @@ export async function writeFailureArtifacts(
   const artifactDirectory = join(outDir, artifactName);
   await mkdir(outDir, { recursive: true });
   if (await pathExists(artifactDirectory)) {
+    await requireCompleteExistingArtifact(artifactDirectory, result, identity);
     return artifactDirectory;
   }
 
@@ -393,6 +394,7 @@ export async function writeFailureArtifacts(
 
   if (await pathExists(artifactDirectory)) {
     await rm(stagingDirectory, { recursive: true, force: true });
+    await requireCompleteExistingArtifact(artifactDirectory, result, identity);
     return artifactDirectory;
   }
 
@@ -403,9 +405,56 @@ export async function writeFailureArtifacts(
       throw error;
     }
     await rm(stagingDirectory, { recursive: true, force: true });
+    await requireCompleteExistingArtifact(artifactDirectory, result, identity);
   }
 
   return artifactDirectory;
+}
+
+async function requireCompleteExistingArtifact(
+  artifactDirectory: string,
+  result: CampaignCaseResult,
+  identity: FailureArtifactIdentity,
+): Promise<void> {
+  const invalid = new Error(
+    `Existing failure artifact is incomplete or has a different identity: ${artifactDirectory}`,
+  );
+  let persistedIdentity: unknown;
+  try {
+    persistedIdentity = JSON.parse(
+      await readFile(join(artifactDirectory, "identity.json"), "utf8"),
+    ) as unknown;
+  } catch {
+    throw invalid;
+  }
+  if (canonicalJsonStringify(persistedIdentity) !== canonicalJsonStringify(identity)) {
+    throw invalid;
+  }
+
+  const requiredFiles = [
+    "identity.json",
+    "model.json",
+    "case.json",
+    "replay.json",
+    "source-manifest.json",
+    "bundle-manifest.json",
+    "source-outcome.json",
+    "bundle-outcome.json",
+    "order-trace.json",
+    "verdict.json",
+    "signature.txt",
+    ...result.rendered.files.map((file) => `source/${file.path}`),
+    ...result.bundleFiles.map((file) => `bundle/${file.path}`),
+  ];
+  for (const relativePath of requiredFiles) {
+    try {
+      if (!(await lstat(join(artifactDirectory, relativePath))).isFile()) {
+        throw invalid;
+      }
+    } catch {
+      throw invalid;
+    }
+  }
 }
 
 export function failureArtifactPath(

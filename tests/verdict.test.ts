@@ -37,16 +37,26 @@ describe("classifyVerdict", () => {
     });
   });
 
-  test("passes equal normalized source and bundle errors", () => {
+  test("compares partial events before passing equal normalized errors", () => {
     expect(
       classifyVerdict(
         error(typeError("same failure"), [event("source", 1)]),
         error(typeError("same failure"), [event("bundle", 2)]),
       ),
     ).toEqual({
-      kind: "pass",
-      signature: "pass",
+      kind: "mismatch",
+      reason: "events-mismatch",
+      signature:
+        'events-mismatch:source=[["source","evaluate",1]]:bundle=[["bundle","evaluate",2]]',
     });
+
+    const events = [event("shared", 1)];
+    expect(
+      classifyVerdict(
+        error(typeError("same failure"), events),
+        error(typeError("same failure"), events),
+      ),
+    ).toEqual({ kind: "pass", signature: "pass" });
   });
 
   test("classifies identical harness failures as an invalid harness instead of passing", () => {

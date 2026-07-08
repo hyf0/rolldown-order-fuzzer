@@ -146,6 +146,34 @@ describe("runCampaign", () => {
     }
   });
 
+  test("temporarily clears an inherited trace environment for opt-out campaigns", async () => {
+    const previous = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
+    const observed: (string | undefined)[] = [];
+    process.env.ROLLDOWN_STRICT_ORDER_TRACE = "1";
+
+    try {
+      await runCampaign(campaignOptions({ collectOrderTrace: false }), {
+        executeCase: async (generated) => {
+          observed.push(process.env.ROLLDOWN_STRICT_ORDER_TRACE);
+          return passedCase(generated);
+        },
+        writeFailure: async () => {
+          throw new Error("passing cases must not write artifacts");
+        },
+        writeLine: () => {},
+      });
+
+      expect(observed).toEqual([undefined]);
+      expect(process.env.ROLLDOWN_STRICT_ORDER_TRACE).toBe("1");
+    } finally {
+      if (previous === undefined) {
+        delete process.env.ROLLDOWN_STRICT_ORDER_TRACE;
+      } else {
+        process.env.ROLLDOWN_STRICT_ORDER_TRACE = previous;
+      }
+    }
+  });
+
   test("serializes concurrent traced and opt-out campaigns around the process environment", async () => {
     const previous = process.env.ROLLDOWN_STRICT_ORDER_TRACE;
     const firstStarted = deferred();
@@ -1126,7 +1154,7 @@ describe("writeFailureArtifacts", () => {
     }
   });
 
-  test("keeps an existing complete final artifact without overwriting it", async () => {
+  test("rejects an existing incomplete final artifact without overwriting it", async () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-existing-"));
     const generated = generateCase(7, DEFAULT_CASE_SIZE);
     const result = failedCase(generated);
@@ -1136,7 +1164,9 @@ describe("writeFailureArtifacts", () => {
       await mkdir(finalDirectory, { recursive: true });
       await writeFile(join(finalDirectory, "existing.txt"), "keep\n");
 
-      await expect(writeFailureArtifacts(result, directory, 3)).resolves.toBe(finalDirectory);
+      await expect(writeFailureArtifacts(result, directory, 3)).rejects.toThrow(
+        "Existing failure artifact is incomplete or has a different identity",
+      );
       await expect(readFile(join(finalDirectory, "existing.txt"), "utf8")).resolves.toBe("keep\n");
       await expect(access(join(finalDirectory, "model.json"))).rejects.toMatchObject({
         code: "ENOENT",

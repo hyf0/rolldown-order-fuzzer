@@ -76,7 +76,7 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
         `error-mismatch:source=${serializeError(source.error)}:bundle=${serializeError(bundle.error)}`,
       );
     }
-    return PASS;
+    return compareEvents(source.events, bundle.events);
   }
 
   if (bundle.status === "timeout") {
