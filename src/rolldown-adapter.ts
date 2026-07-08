@@ -279,9 +279,21 @@ export async function withRolldownBuild<T>(
       runtimeIdentity,
     };
     try {
+      const value = await callback(artifacts);
+      const completedRuntimeIdentity = await inspectRolldownRuntimeIdentity(packageSpecifier);
+      if (!isDeepStrictEqual(runtimeIdentity, completedRuntimeIdentity)) {
+        return await reportFailure(
+          failure(
+            "harness-error",
+            "build",
+            packageSpecifier,
+            new Error("Rolldown runtime identity changed during build"),
+          ),
+        );
+      }
       return {
         status: "ok",
-        value: await callback(artifacts),
+        value,
       };
     } catch (error) {
       return await reportFailure(

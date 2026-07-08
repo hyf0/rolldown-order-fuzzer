@@ -28,6 +28,7 @@ import {
   failureArtifactPath,
   LOADED_FUZZER_SOURCE_SHA256,
   parseCliArgs,
+  assertReproducibleStartup,
   runCampaign,
   writeFailureArtifacts,
   type BundleNotRunOutcome,
@@ -261,6 +262,22 @@ describe("runCampaign", () => {
         writeLine: () => {},
       }),
     ).rejects.toThrowError("Runtime identity hash does not match replay");
+  });
+
+  test("rejects startup code hooks for reproducible campaigns", async () => {
+    const previousNodeOptions = process.env.NODE_OPTIONS;
+    try {
+      process.env.NODE_OPTIONS = "--require ./hook.cjs";
+      expect(() => assertReproducibleStartup()).toThrowError(
+        "Startup code hooks and loaders are not supported",
+      );
+    } finally {
+      if (previousNodeOptions === undefined) {
+        delete process.env.NODE_OPTIONS;
+      } else {
+        process.env.NODE_OPTIONS = previousNodeOptions;
+      }
+    }
   });
 
   test("returns exit code 2 for classified harness failures", async () => {

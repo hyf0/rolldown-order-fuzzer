@@ -376,6 +376,32 @@ describe("withRolldownBuild", () => {
     );
   });
 
+  test("rejects a package that changes during output consumption", async () => {
+    const program = singleEntryProgram();
+
+    await withTemporaryModule(
+      `export { rolldown } from ${JSON.stringify(import.meta.resolve("rolldown"))};\n`,
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async () => {
+            await writeFile(fileURLToPath(packageSpecifier), "export const changed = true;\n");
+          },
+          { packageSpecifier },
+        );
+
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: {
+            message: "Rolldown runtime identity changed during build",
+          },
+        });
+      },
+    );
+  });
+
   test("tracks direct runtime dependency contents", async () => {
     const directory = await mkdtemp(join(tmpdir(), "rolldown-runtime-dependency-"));
     const dependencyDirectory = join(directory, "node_modules", "dependency");

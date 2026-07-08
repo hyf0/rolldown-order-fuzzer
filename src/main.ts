@@ -17,6 +17,8 @@ import { renderProgram, type RenderedProgram } from "./render.ts";
 import {
   inspectRolldownRuntimeIdentity,
   inspectFuzzerSourceIdentity,
+  buildChildExecArgv,
+  splitNodeOptions,
   ROLLDOWN_BUILD_OPTIONS,
   withRolldownBuild,
   type FailedRolldownAdapterResult,
@@ -216,6 +218,27 @@ export async function runCampaign(
     throw new Error("Fuzzer source hash does not match replay");
   }
   return await runCampaignCases(options, overrides);
+}
+
+export function assertReproducibleStartup(): void {
+  const args = [
+    ...buildChildExecArgv(process.execArgv),
+    ...buildChildExecArgv(
+      process.env.NODE_OPTIONS === undefined ? [] : splitNodeOptions(process.env.NODE_OPTIONS),
+    ),
+  ];
+  const moduleFlags = new Set(["--import", "--require", "-r", "--loader", "--experimental-loader"]);
+  if (
+    args.some(
+      (argument) =>
+        moduleFlags.has(argument) ||
+        ["--import=", "--require=", "--loader=", "--experimental-loader="].some((prefix) =>
+          argument.startsWith(prefix),
+        ),
+    )
+  ) {
+    throw new Error("Startup code hooks and loaders are not supported");
+  }
 }
 
 async function runCampaignCases(
@@ -747,6 +770,7 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
 
   try {
+    assertReproducibleStartup();
     const summary = await runCampaign(options);
     return summary.exitCode;
   } catch (error) {

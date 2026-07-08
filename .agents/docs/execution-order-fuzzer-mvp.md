@@ -108,6 +108,8 @@ Each build runs in a dedicated Node child process whose working directory is the
 
 The parent and child strictly validate their versioned protocol. Output filenames must be canonical relative paths confined to the bundle directory. The child inherits only safe Node execution arguments required for TypeScript or loaders; inspector, eval, and print flags are discarded.
 
+Reproducible campaigns reject startup code hooks and loaders. Conditions remain supported and are included in runtime identity.
+
 Every build has a bounded timeout. Timeout handling terminates the child process tree with TERM followed by KILL and a bounded final-close grace, so a package loader or helper subprocess cannot stall a campaign indefinitely.
 
 The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 9 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity, including package source files, recursive runtime dependencies, compiler and fuzzer lockfiles, fuzzer source, child conditions/loaders, `NODE_OPTIONS` hooks, platform/NAPI selection facts, and compiler thread settings. The adapter compares that identity before and after each build. Replay commands require the recorded fuzzer source and full runtime identity hashes. The differential source-versus-bundle execution result is the sole semantic oracle.

@@ -50,6 +50,8 @@ Both sides structurally validate the versioned child protocol before using it, i
 
 A campaign records the first case's Node, package source/output, recursive runtime dependencies, compiler and fuzzer lockfiles, fuzzer source, child conditions/loaders, `NODE_OPTIONS` hooks, native-binding hashes, platform/NAPI selection facts, and compiler thread settings. The adapter verifies the identity before and after every build, and the campaign aborts if it changes between cases. Artifact replay commands require both the recorded fuzzer source hash and the full runtime identity hash.
 
+Startup code hooks and loaders from `NODE_OPTIONS` or Node exec arguments are rejected for reproducible campaigns. Conditions such as `-C dev` remain supported and identity-bound.
+
 Every emitted chunk and asset filename must be a canonical forward-slash relative path confined to the bundle directory; absolute paths, drive/UNC paths, NULs, backslashes, and dot segments are rejected before manifest mapping. Bundle manifest mapping considers only output chunks explicitly marked as entries.
 
 The parent never changes its cwd and does not use parent `globalThis` instrumentation. All Rolldown builds share the same protocol validation, output confinement, timeout, cleanup, and error classification. Any child has an explicit 60-second production timeout, followed by process-tree TERM/KILL shutdown and a deterministic harness error; POSIX uses an isolated process group and Windows uses `taskkill /T /F` with fallback. After forced termination, a bounded final close grace lets cleanup settle even if the child never emits `close`. Tests may inject shorter timeout/grace values.
