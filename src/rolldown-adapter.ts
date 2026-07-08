@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import {
   lstat,
   mkdir,
@@ -112,6 +113,16 @@ export interface ObservedRuntimeIdentity {
   readonly packageContentFiles: readonly string[];
   readonly fuzzerLockfilePath: string | null;
   readonly fuzzerLockfileSha256: string | null;
+  readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
+}
+
+export interface ObservedBindingPackageIdentity {
+  readonly name: string;
+  readonly version: string | null;
+  readonly packageRootPath: string;
+  readonly packageJsonPath: string;
+  readonly contentSha256: string | null;
+  readonly contentFiles: readonly string[];
 }
 
 export interface SuccessfulRolldownAdapterResult<T> {
@@ -261,6 +272,7 @@ export async function inspectRolldownRuntimeIdentity(
   let packageJsonPath: string | null = null;
   let packageContentSha256: string | null = null;
   let packageContentFiles: readonly string[] = [];
+  let optionalBindingPackages: readonly ObservedBindingPackageIdentity[] = [];
 
   try {
     resolvedEntryUrl = import.meta.resolve(packageSpecifier);
@@ -283,6 +295,7 @@ export async function inspectRolldownRuntimeIdentity(
         const packageContent = await hashPackageContents(packageInfo.rootPath);
         packageContentSha256 = packageContent.sha256;
         packageContentFiles = packageContent.files;
+        optionalBindingPackages = await inspectOptionalBindingPackages(packageInfo);
       }
     }
   }
@@ -304,6 +317,7 @@ export async function inspectRolldownRuntimeIdentity(
     packageContentFiles,
     fuzzerLockfilePath: lockfile.path,
     fuzzerLockfileSha256: lockfile.sha256,
+    optionalBindingPackages,
   };
 }
 
@@ -311,6 +325,7 @@ interface PackageInfo {
   readonly rootPath: string;
   readonly packageJsonPath: string;
   readonly version: string | null;
+  readonly optionalBindingNames: readonly string[];
 }
 
 async function findNearestPackageInfo(startDirectory: string): Promise<PackageInfo | null> {
@@ -319,12 +334,14 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
     try {
       const packageJsonPath = join(directory, "package.json");
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+        readonly optionalDependencies?: unknown;
         readonly version?: unknown;
       };
       return {
         rootPath: await realpath(directory),
         packageJsonPath: await realpath(packageJsonPath),
         version: typeof packageJson.version === "string" ? packageJson.version : null,
+        optionalBindingNames: readOptionalBindingNames(packageJson.optionalDependencies),
       };
     } catch {}
 
@@ -334,6 +351,41 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
     }
     directory = parent;
   }
+}
+
+function readOptionalBindingNames(value: unknown): readonly string[] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return [];
+  }
+  return Object.keys(value)
+    .filter((name) => name.startsWith("@rolldown/binding-"))
+    .sort();
+}
+
+async function inspectOptionalBindingPackages(
+  packageInfo: PackageInfo,
+): Promise<readonly ObservedBindingPackageIdentity[]> {
+  const requireFromPackage = createRequire(packageInfo.packageJsonPath);
+  const identities: ObservedBindingPackageIdentity[] = [];
+  for (const name of packageInfo.optionalBindingNames) {
+    try {
+      const packageJsonPath = await realpath(requireFromPackage.resolve(`${name}/package.json`));
+      const packageRootPath = await realpath(dirname(packageJsonPath));
+      const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+        readonly version?: unknown;
+      };
+      const contents = await hashPackageContents(packageRootPath);
+      identities.push({
+        name,
+        version: typeof packageJson.version === "string" ? packageJson.version : null,
+        packageRootPath,
+        packageJsonPath,
+        contentSha256: contents.sha256,
+        contentFiles: contents.files,
+      });
+    } catch {}
+  }
+  return identities.sort((left, right) => left.name.localeCompare(right.name));
 }
 
 interface PackageFile {

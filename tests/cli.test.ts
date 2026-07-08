@@ -566,6 +566,7 @@ describe("runCampaign", () => {
         fuzzerLockfileSha256: createHash("sha256")
           .update(await readFile(fileURLToPath(new URL("../package-lock.json", import.meta.url))))
           .digest("hex"),
+        optionalBindingPackages: [],
       });
 
       const artifactDirectory = await writeFailureArtifacts(result, directory, 0);
@@ -688,6 +689,77 @@ describe("runCampaign", () => {
         rm(packageRoot, { recursive: true, force: true }),
         rm(outsideRoot, { recursive: true, force: true }),
       ]);
+    }
+  });
+
+  test("hashes resolvable optional sibling binding packages", async () => {
+    const root = await mkdtemp(join(tmpdir(), "order-runtime-sibling-"));
+    const mainRoot = join(root, "node_modules/rolldown");
+    const mainEntry = join(mainRoot, "dist/index.mjs");
+    const bindingRoot = join(root, "node_modules/@rolldown/binding-darwin-arm64");
+    const bindingPath = join(bindingRoot, "binding.node");
+    const bindingName = "@rolldown/binding-darwin-arm64";
+
+    try {
+      await Promise.all([
+        mkdir(dirname(mainEntry), { recursive: true }),
+        mkdir(bindingRoot, { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(mainRoot, "package.json"),
+          `${JSON.stringify({
+            name: "rolldown",
+            type: "module",
+            version: "1.0.0",
+            optionalDependencies: {
+              [bindingName]: "1.0.0",
+              "@rolldown/binding-linux-x64": "1.0.0",
+            },
+          })}\n`,
+        ),
+        writeFile(mainEntry, "export const rolldown = true;\n"),
+        writeFile(
+          join(bindingRoot, "package.json"),
+          `${JSON.stringify({
+            name: bindingName,
+            version: "1.0.0",
+            main: "binding.node",
+          })}\n`,
+        ),
+        writeFile(bindingPath, Buffer.from([0, 1, 2, 3])),
+      ]);
+
+      const specifier = pathToFileURL(mainEntry).href;
+      const first = await inspectRolldownRuntimeIdentity(specifier);
+      const identical = await inspectRolldownRuntimeIdentity(specifier);
+      await writeFile(bindingPath, Buffer.from([3, 2, 1, 0]));
+      const changedBinding = await inspectRolldownRuntimeIdentity(specifier);
+
+      expect(identical).toEqual(first);
+      expect(first.resolvedEntrySha256).toBe(changedBinding.resolvedEntrySha256);
+      expect(first.packageContentSha256).toBe(changedBinding.packageContentSha256);
+      expect(first.optionalBindingPackages).toEqual([
+        {
+          name: bindingName,
+          version: "1.0.0",
+          packageRootPath: await realpath(bindingRoot),
+          packageJsonPath: await realpath(join(bindingRoot, "package.json")),
+          contentSha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+          contentFiles: ["binding.node", "package.json"],
+        },
+      ]);
+      expect(changedBinding.optionalBindingPackages[0]?.contentSha256).not.toBe(
+        first.optionalBindingPackages[0]?.contentSha256,
+      );
+
+      const generated = generateCase(7, DEFAULT_CASE_SIZE);
+      const base = failedCase(generated);
+      expect(failureArtifactPath({ ...base, runtimeIdentity: first }, root, 0)).not.toBe(
+        failureArtifactPath({ ...base, runtimeIdentity: changedBinding }, root, 0),
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
     }
   });
 
@@ -1262,6 +1334,7 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     packageContentFiles: [],
     fuzzerLockfilePath: null,
     fuzzerLockfileSha256: null,
+    optionalBindingPackages: [],
   };
 }
 
