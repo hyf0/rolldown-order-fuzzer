@@ -1,5 +1,6 @@
 /// <reference types="node" />
 
+import { createHash } from "node:crypto";
 import {
   lstat,
   mkdir,
@@ -12,6 +13,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type {
   CodeSplittingGroup,
@@ -67,6 +69,7 @@ export interface RolldownFailureArtifacts {
   readonly bundleManifestPath: string;
   readonly manifest?: ExecutionManifest;
   readonly orderTrace: StrictExecutionOrderPlanReady | null;
+  readonly runtimeIdentity: ObservedRuntimeIdentity;
 }
 
 export interface RolldownBuildArtifacts {
@@ -78,6 +81,18 @@ export interface RolldownBuildArtifacts {
   readonly manifest: ExecutionManifest;
   readonly outputFiles: readonly string[];
   readonly orderTrace: StrictExecutionOrderPlanReady | null;
+  readonly runtimeIdentity: ObservedRuntimeIdentity;
+}
+
+export interface ObservedRuntimeIdentity {
+  readonly processVersion: string;
+  readonly platform: NodeJS.Platform;
+  readonly arch: string;
+  readonly requestedPackageSpecifier: string;
+  readonly resolvedEntryUrl: string | null;
+  readonly resolvedEntryPath: string | null;
+  readonly packageVersion: string | null;
+  readonly resolvedEntrySha256: string | null;
 }
 
 export interface SuccessfulRolldownAdapterResult<T> {
@@ -108,6 +123,7 @@ export async function withRolldownBuild<T>(
   options: RolldownAdapterOptions = {},
 ): Promise<RolldownAdapterResult<T>> {
   const packageSpecifier = options.packageSpecifier ?? process.env.ROLLDOWN_PACKAGE ?? "rolldown";
+  const runtimeIdentity = await inspectRolldownRuntimeIdentity(packageSpecifier);
   const collectOrderTrace = options.collectOrderTrace ?? true;
   const devtoolsRootDirectory = join(process.cwd(), "node_modules", ".rolldown");
   const devtoolsSessionDirectoriesToClean = new Set<string>();
@@ -131,6 +147,7 @@ export async function withRolldownBuild<T>(
       sourceManifestPath,
       bundleManifestPath,
       orderTrace,
+      runtimeIdentity,
       ...(manifest === undefined ? {} : { manifest }),
     });
     return failureResult;
@@ -201,6 +218,7 @@ export async function withRolldownBuild<T>(
         manifest,
         outputFiles: built.output.output.map((output) => output.fileName).sort(),
         orderTrace,
+        runtimeIdentity,
       }),
     };
   } finally {
@@ -210,6 +228,59 @@ export async function withRolldownBuild<T>(
         rm(directory, { recursive: true, force: true }),
       ),
     ]);
+  }
+}
+
+export async function inspectRolldownRuntimeIdentity(
+  packageSpecifier: string,
+): Promise<ObservedRuntimeIdentity> {
+  let resolvedEntryUrl: string | null = null;
+  let resolvedEntryPath: string | null = null;
+  let packageVersion: string | null = null;
+  let resolvedEntrySha256: string | null = null;
+
+  try {
+    resolvedEntryUrl = import.meta.resolve(packageSpecifier);
+  } catch {}
+
+  if (resolvedEntryUrl?.startsWith("file:") === true) {
+    try {
+      resolvedEntryPath = fileURLToPath(resolvedEntryUrl);
+      const contents = await readFile(resolvedEntryPath);
+      resolvedEntrySha256 = createHash("sha256").update(contents).digest("hex");
+      packageVersion = await findNearestPackageVersion(dirname(resolvedEntryPath));
+    } catch {}
+  }
+
+  return {
+    processVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    requestedPackageSpecifier: packageSpecifier,
+    resolvedEntryUrl,
+    resolvedEntryPath,
+    packageVersion,
+    resolvedEntrySha256,
+  };
+}
+
+async function findNearestPackageVersion(startDirectory: string): Promise<string | null> {
+  let directory = startDirectory;
+  while (true) {
+    try {
+      const packageJson = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as {
+        readonly version?: unknown;
+      };
+      if (typeof packageJson.version === "string") {
+        return packageJson.version;
+      }
+    } catch {}
+
+    const parent = dirname(directory);
+    if (parent === directory) {
+      return null;
+    }
+    directory = parent;
   }
 }
 

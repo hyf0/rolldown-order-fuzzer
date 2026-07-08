@@ -55,12 +55,12 @@ Before exposure or persistence, every module ID is canonicalized. Rendered sourc
 
 ## Failure artifacts
 
-Every non-pass result is first written to a unique `.case-NNNN-seed-S-HASH.tmp-*` sibling and published by renaming it to `<out-dir>/case-NNNN-seed-S-HASH/`. `HASH` is a SHA-256 identity over the artifact schema and execution protocol versions, case index/seed/size/template/coverage/model, configured and replay CLI options, effective Rolldown build options, package specifier, and concrete verdict signature. The same identity may reuse an existing complete directory; a different package, verdict, or option set produces a different path. An existing final directory is never deleted or overwritten. A concurrent loser removes its complete temp directory; an interrupted writer may leave a temp directory but cannot expose a partial final directory.
+Every non-pass result is first written to a unique `.case-NNNN-seed-S-HASH.tmp-*` sibling and published by renaming it to `<out-dir>/case-NNNN-seed-S-HASH/`. `HASH` is a SHA-256 identity over the artifact schema and execution protocol versions, case index/seed/size/template/coverage/model, configured and replay CLI options, effective Rolldown build options, observed Node and package identity, source and bundle outcomes, canonical order trace, concrete verdict/signature, and path-plus-content hashes for every emitted bundle file. The same observed run identity may reuse an existing complete directory; a changed package build, output, trace, verdict, or option set produces a different path. An existing final directory is never deleted or overwritten. A concurrent loser removes its complete temp directory; an interrupted writer may leave a temp directory but cannot expose a partial final directory.
 
 - `model.json`: the generated `ProgramModel`.
-- `case.json`: schema/protocol versions, artifact identity, case index, seed, size, template, derived coverage tags, and configured Rolldown package specifier.
+- `case.json`: schema/protocol versions, artifact identity, case index, seed, size, template, derived coverage tags, configured Rolldown package specifier, and observed runtime identity.
 - `identity.json`: the SHA-256 hash and every canonical input used to derive it.
-- `replay.json`: the command arguments and normalized one-case options needed to replay the seed.
+- `replay.json`: the command arguments, normalized one-case options, and observed runtime identity needed to assess replay fidelity.
 - `source-manifest.json` and `bundle-manifest.json`: the source schedule and emitted bundle schedule; the bundle manifest is `null` when no build ran.
 - `source-outcome.json`: the native Node execution outcome.
 - `bundle-outcome.json`: the bundle execution outcome, or the exact Rolldown adapter failure when no bundle ran.
@@ -69,6 +69,8 @@ Every non-pass result is first written to a unique `.case-NNNN-seed-S-HASH.tmp-*
 - `signature.txt`: the exact failure signature.
 - `source/`: every rendered source file, including the source schedule.
 - `bundle/`: every emitted Rolldown output file, captured before the adapter removes its temporary directories.
+
+Replay is exact for the generated inputs and preserves the original observed outputs as evidence. Rerunning is environment-exact only when the recorded Node version/platform/architecture and package identity can be pinned: requested specifier, resolved entry URL/path, nearest package version when available, and resolved entry-file hash when readable. When those dependencies are unavailable or have changed, the artifact still preserves the original manifests, outcomes, trace, emitted bytes, verdict, and identity.
 
 ## Context
 

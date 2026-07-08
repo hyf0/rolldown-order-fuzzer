@@ -16,9 +16,11 @@ import {
 } from "./protocol.ts";
 import { renderProgram, type RenderedProgram } from "./render.ts";
 import {
+  inspectRolldownRuntimeIdentity,
   ROLLDOWN_BUILD_OPTIONS,
   withRolldownBuild,
   type FailedRolldownAdapterResult,
+  type ObservedRuntimeIdentity,
 } from "./rolldown-adapter.ts";
 import { classifyVerdict, type Verdict } from "./verdict.ts";
 
@@ -29,7 +31,7 @@ const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/
 let campaignEnvironmentLock = Promise.resolve();
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 1 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 2 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
@@ -73,6 +75,7 @@ export interface BundleExecutionArtifacts {
   readonly bundleManifest: ExecutionManifest;
   readonly bundleFiles: readonly CapturedFile[];
   readonly orderTrace: StrictExecutionOrderPlanReady | null;
+  readonly runtimeIdentity?: ObservedRuntimeIdentity;
 }
 
 export type BundleBuildResult =
@@ -83,6 +86,7 @@ export type BundleBuildResult =
       readonly bundleManifest: ExecutionManifest | null;
       readonly bundleFiles: readonly CapturedFile[];
       readonly orderTrace: StrictExecutionOrderPlanReady | null;
+      readonly runtimeIdentity?: ObservedRuntimeIdentity;
     };
 
 export interface CampaignCaseResult {
@@ -94,6 +98,7 @@ export interface CampaignCaseResult {
   readonly bundleManifest: ExecutionManifest | null;
   readonly bundleFiles: readonly CapturedFile[];
   readonly orderTrace: StrictExecutionOrderPlanReady | null;
+  readonly runtimeIdentity: ObservedRuntimeIdentity;
   readonly verdict: CampaignVerdict;
 }
 
@@ -120,6 +125,7 @@ export interface CampaignDependencies {
 
 export interface ExecuteGeneratedCaseDependencies {
   readonly executeSource: (rendered: RenderedProgram) => Promise<ExecutionOutcome>;
+  readonly inspectRuntimeIdentity: typeof inspectRolldownRuntimeIdentity;
   readonly buildBundle: (
     generated: GeneratedCase,
     rendered: RenderedProgram,
@@ -282,12 +288,14 @@ export async function executeGeneratedCase(
 ): Promise<CampaignCaseResult> {
   const dependencies: ExecuteGeneratedCaseDependencies = {
     executeSource: executeRenderedSource,
+    inspectRuntimeIdentity: inspectRolldownRuntimeIdentity,
     buildBundle: buildAndExecuteBundle,
     ...overrides,
   };
   const rendered = renderProgram(generated.program);
   const sourceOutcome = await dependencies.executeSource(rendered);
   if (sourceOutcome.status === "timeout" || sourceOutcome.status === "harness-error") {
+    const runtimeIdentity = await dependencies.inspectRuntimeIdentity(options.rolldownPackage);
     const bundleOutcome = {
       status: "not-run",
       reason: "source-invalid",
@@ -301,6 +309,7 @@ export async function executeGeneratedCase(
       bundleManifest: null,
       bundleFiles: [],
       orderTrace: null,
+      runtimeIdentity,
       verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
     };
   }
@@ -308,6 +317,8 @@ export async function executeGeneratedCase(
   const built = await dependencies.buildBundle(generated, rendered, options);
 
   if (built.status === "failed") {
+    const runtimeIdentity =
+      built.runtimeIdentity ?? (await dependencies.inspectRuntimeIdentity(options.rolldownPackage));
     const bundleOutcome = {
       status: "not-run",
       reason: "adapter-failure",
@@ -322,10 +333,14 @@ export async function executeGeneratedCase(
       bundleManifest: built.bundleManifest,
       bundleFiles: built.bundleFiles,
       orderTrace: built.orderTrace,
+      runtimeIdentity,
       verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
     };
   }
 
+  const runtimeIdentity =
+    built.value.runtimeIdentity ??
+    (await dependencies.inspectRuntimeIdentity(options.rolldownPackage));
   return {
     generated,
     options,
@@ -335,6 +350,7 @@ export async function executeGeneratedCase(
     bundleManifest: built.value.bundleManifest,
     bundleFiles: built.value.bundleFiles,
     orderTrace: built.value.orderTrace,
+    runtimeIdentity,
     verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome),
   };
 }
@@ -417,12 +433,21 @@ interface FailureArtifactIdentity {
     readonly rolldownPackage: string;
     readonly configuredCliOptions: CampaignOptions;
     readonly replayOptions: ReturnType<typeof createReplayMetadata>["options"];
+    readonly runtimeIdentity: ObservedRuntimeIdentity;
     readonly buildOptions: typeof ROLLDOWN_BUILD_OPTIONS & {
       readonly codeSplitting:
         | true
         | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> };
     };
+    readonly sourceOutcome: ExecutionOutcome;
+    readonly bundleOutcome: CampaignBundleOutcome;
+    readonly verdict: CampaignVerdict;
     readonly verdictSignature: string;
+    readonly canonicalOrderTrace: StrictExecutionOrderPlanReady | null;
+    readonly bundleFiles: readonly {
+      readonly path: string;
+      readonly sha256: string;
+    }[];
   };
 }
 
@@ -445,6 +470,7 @@ function createFailureArtifactIdentity(
     rolldownPackage: result.options.rolldownPackage,
     configuredCliOptions: { ...result.options },
     replayOptions: replay.options,
+    runtimeIdentity: result.runtimeIdentity,
     buildOptions: {
       ...ROLLDOWN_BUILD_OPTIONS,
       codeSplitting:
@@ -452,12 +478,30 @@ function createFailureArtifactIdentity(
           ? true
           : { groups: result.generated.program.manualChunkGroups },
     },
+    sourceOutcome: result.sourceOutcome,
+    bundleOutcome: result.bundleOutcome,
+    verdict: result.verdict,
     verdictSignature: result.verdict.signature,
+    canonicalOrderTrace: result.orderTrace,
+    bundleFiles: result.bundleFiles
+      .map((file) => ({
+        path: file.path,
+        sha256: hashCapturedFile(file),
+      }))
+      .sort((left, right) => left.path.localeCompare(right.path)),
   };
   return {
     hash: createHash("sha256").update(JSON.stringify(inputs)).digest("hex"),
     inputs,
   };
+}
+
+function hashCapturedFile(file: CapturedFile): string {
+  return createHash("sha256")
+    .update(file.path)
+    .update(Uint8Array.of(0))
+    .update(file.contents)
+    .digest("hex");
 }
 
 function failureArtifactName(result: CampaignCaseResult, caseIndex: number, hash: string): string {
@@ -484,6 +528,7 @@ async function writeArtifactDirectory(
       template: result.generated.template,
       coverageTags: result.generated.coverageTags,
       rolldownPackage: result.options.rolldownPackage,
+      runtimeIdentity: result.runtimeIdentity,
     }),
     writeJson(join(artifactDirectory, "identity.json"), identity),
     writeJson(join(artifactDirectory, "replay.json"), createReplayMetadata(result)),
@@ -556,12 +601,14 @@ async function buildAndExecuteBundle(
   rendered: RenderedProgram,
   options: CampaignOptions,
 ): Promise<BundleBuildResult> {
-  let failureArtifacts: Pick<CampaignCaseResult, "bundleManifest" | "bundleFiles" | "orderTrace"> =
-    {
-      bundleManifest: null,
-      bundleFiles: [],
-      orderTrace: null,
-    };
+  let failureArtifacts: Pick<
+    CampaignCaseResult,
+    "bundleManifest" | "bundleFiles" | "orderTrace"
+  > & { readonly runtimeIdentity?: ObservedRuntimeIdentity } = {
+    bundleManifest: null,
+    bundleFiles: [],
+    orderTrace: null,
+  };
   const built = await withRolldownBuild(
     generated.program,
     rendered,
@@ -575,6 +622,7 @@ async function buildAndExecuteBundle(
         })),
       ),
       orderTrace: artifacts.orderTrace,
+      runtimeIdentity: artifacts.runtimeIdentity,
     }),
     {
       packageSpecifier: options.rolldownPackage,
@@ -587,6 +635,7 @@ async function buildAndExecuteBundle(
             new Set(["package.json", rendered.schedulePath]),
           ),
           orderTrace: artifacts.orderTrace,
+          runtimeIdentity: artifacts.runtimeIdentity,
         };
       },
     },
@@ -671,6 +720,7 @@ function isHarnessFailure(result: CampaignCaseResult): boolean {
 function createReplayMetadata(result: CampaignCaseResult): {
   readonly command: readonly string[];
   readonly options: CampaignOptions & { readonly size: number };
+  readonly runtimeIdentity: ObservedRuntimeIdentity;
 } {
   const options = {
     seed: result.generated.seed,
@@ -699,6 +749,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
       "--stop-on-fail",
     ],
     options,
+    runtimeIdentity: result.runtimeIdentity,
   };
 }
 

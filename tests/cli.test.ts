@@ -1,6 +1,15 @@
 /// <reference types="node" />
 
-import { access, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -25,7 +34,7 @@ import {
 import { projectStatus } from "../src/project.ts";
 import type { ExecutionOutcome } from "../src/protocol.ts";
 import { renderProgram } from "../src/render.ts";
-import { withRolldownBuild } from "../src/rolldown-adapter.ts";
+import { withRolldownBuild, type ObservedRuntimeIdentity } from "../src/rolldown-adapter.ts";
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
@@ -304,6 +313,7 @@ describe("runCampaign", () => {
         bundleManifest: null,
         bundleFiles: [],
         orderTrace: null,
+        runtimeIdentity: testRuntimeIdentity(),
         verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
       }),
       writeFailure: async () => "failure",
@@ -489,6 +499,10 @@ describe("runCampaign", () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-partial-bundle-"));
     const packagePath = join(directory, "rolldown.mjs");
     await writeFile(
+      join(directory, "package.json"),
+      `${JSON.stringify({ type: "module", version: "1.2.3" })}\n`,
+    );
+    await writeFile(
       packagePath,
       [
         'import { mkdir, writeFile } from "node:fs/promises";',
@@ -519,6 +533,7 @@ describe("runCampaign", () => {
 
     try {
       const result = await executeGeneratedCase(generated, options);
+      const resolvedPackagePath = await realpath(packagePath);
 
       expect(result.verdict.kind).toBe("build-failure");
       expect(result.bundleManifest).toBeNull();
@@ -526,6 +541,16 @@ describe("runCampaign", () => {
       expect(Buffer.from(result.bundleFiles[0]?.contents ?? []).toString("utf8")).toBe(
         "export const emitted = true;\n",
       );
+      expect(result.runtimeIdentity).toEqual({
+        processVersion: process.version,
+        platform: process.platform,
+        arch: process.arch,
+        requestedPackageSpecifier: pathToFileURL(packagePath).href,
+        resolvedEntryUrl: pathToFileURL(resolvedPackagePath).href,
+        resolvedEntryPath: resolvedPackagePath,
+        packageVersion: "1.2.3",
+        resolvedEntrySha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+      });
 
       const artifactDirectory = await writeFailureArtifacts(result, directory, 0);
       await expect(
@@ -734,6 +759,7 @@ describe("writeFailureArtifacts", () => {
         template: generated.template,
         coverageTags: generated.coverageTags,
         rolldownPackage: options.rolldownPackage,
+        runtimeIdentity: result.runtimeIdentity,
       });
       await expect(readJson(join(artifactDirectory, "identity.json"))).resolves.toMatchObject({
         hash: artifactHash,
@@ -747,6 +773,7 @@ describe("writeFailureArtifacts", () => {
             model: generated.program,
           },
           rolldownPackage: options.rolldownPackage,
+          runtimeIdentity: result.runtimeIdentity,
           verdictSignature: result.verdict.signature,
         },
       });
@@ -775,6 +802,7 @@ describe("writeFailureArtifacts", () => {
           continueOnFail: false,
           collectOrderTrace: true,
         },
+        runtimeIdentity: result.runtimeIdentity,
       });
       await expect(readJson(join(artifactDirectory, "source-manifest.json"))).resolves.toEqual(
         result.rendered.schedule,
@@ -922,6 +950,45 @@ describe("writeFailureArtifacts", () => {
     }
   });
 
+  test("binds artifact identity to observed outcomes, traces, and emitted bytes", () => {
+    const directory = "/tmp/order-cli-observed-identities";
+    const generated = generateCase(7, DEFAULT_CASE_SIZE);
+    const base = {
+      ...failedCase(generated),
+      verdict: {
+        kind: "mismatch",
+        reason: "events-mismatch",
+        signature: "stable-signature",
+      },
+      bundleOutcome: ok([event("bundle", 1)]),
+      bundleFiles: [{ path: "entry.js", contents: Buffer.from("first\n") }],
+      orderTrace: orderTraceAction(),
+    } as const satisfies CampaignCaseResult;
+    const changedOutcome = {
+      ...base,
+      bundleOutcome: ok([event("bundle", 2)]),
+    } satisfies CampaignCaseResult;
+    const changedTrace = {
+      ...base,
+      orderTrace: {
+        ...orderTraceAction(),
+        plan_modules: [{ module_id: "/project/changed.js", reasons: ["direct-violation"] }],
+      },
+    } satisfies CampaignCaseResult;
+    const changedBytes = {
+      ...base,
+      bundleFiles: [{ path: "entry.js", contents: Buffer.from("second\n") }],
+    } satisfies CampaignCaseResult;
+
+    expect(
+      new Set(
+        [base, changedOutcome, changedTrace, changedBytes].map((result) =>
+          failureArtifactPath(result, directory, 3),
+        ),
+      ).size,
+    ).toBe(4);
+  });
+
   test("reports the current hashed artifact path from the campaign", async () => {
     const directory = await mkdtemp(join(tmpdir(), "order-cli-reported-artifact-"));
     const generated = generateCase(7, DEFAULT_CASE_SIZE);
@@ -976,6 +1043,7 @@ function passedCase(generated: GeneratedCase): CampaignCaseResult {
     bundleManifest: rendered.schedule,
     bundleFiles: [],
     orderTrace: null,
+    runtimeIdentity: testRuntimeIdentity(),
     verdict: { kind: "pass", signature: "pass" },
   };
 }
@@ -998,6 +1066,7 @@ function failedCase(generated: GeneratedCase): CampaignCaseResult {
     bundleManifest: null,
     bundleFiles: [],
     orderTrace: null,
+    runtimeIdentity: testRuntimeIdentity(),
     verdict,
   };
 }
@@ -1012,6 +1081,19 @@ function event(module: string, value: number): ExecutionOutcome["events"][number
 
 function timeout(): ExecutionOutcome {
   return { version: 1, status: "timeout", events: [] };
+}
+
+function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRuntimeIdentity {
+  return {
+    processVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+    requestedPackageSpecifier,
+    resolvedEntryUrl: null,
+    resolvedEntryPath: null,
+    packageVersion: null,
+    resolvedEntrySha256: null,
+  };
 }
 
 async function readJson(path: string): Promise<unknown> {
