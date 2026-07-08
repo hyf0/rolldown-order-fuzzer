@@ -37,7 +37,10 @@ export async function runExecutionManifest(manifestPath: string): Promise<Execut
     try {
       events.push(collectExecutionEvent(event));
     } catch (error) {
-      throw harnessExecutionError(error instanceof Error ? error.message : String(error));
+      throw harnessExecutionError(
+        error instanceof Error ? error.message : String(error),
+        "InvalidExecutionEvent",
+      );
     }
   };
   orderGlobal.__orderDynamicImports = dynamicImports;
@@ -140,9 +143,9 @@ async function executeSchedule(
   }
 }
 
-function harnessExecutionError(message: string): Error {
+function harnessExecutionError(message: string, name = "HarnessExecutionError"): Error {
   const error = new Error(message);
-  error.name = "HarnessExecutionError";
+  error.name = name;
   harnessExecutionErrors.add(error);
   return error;
 }

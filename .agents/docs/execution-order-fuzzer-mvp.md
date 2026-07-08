@@ -13,7 +13,7 @@ The first campaign targets synchronous ESM/CommonJS interaction. Exact top-level
 - Generated modules use explicit relative paths and `.mjs` or `.cjs` extensions.
 - The first model excludes externals, package export conditions, plugins, JSON, WASM, timers, and dishonest `sideEffects: false` metadata.
 - Generated programs cannot import Node built-ins, create operating-system child processes, or inject arbitrary source text. Process isolation only needs to terminate the generated-program runner, not sandbox hostile handwritten programs.
-- Verdicts compare primitive structured events and error identity. They do not compare CJS namespace/default/named-export object shapes.
+- Verdicts compare primitive structured events and error identity. A nonprimitive source event is an invalid oracle; a bundle-only nonprimitive event is a compiler mismatch. Other CJS namespace/default/named-export object shapes are out of scope.
 - `require(ESM)` is a separate lane and only generates synchronous ESM without TLA.
 
 ## Layers
@@ -110,7 +110,7 @@ The parent and child strictly validate their versioned protocol. Output filename
 
 Every build has a bounded timeout. Timeout handling terminates the child process tree with TERM followed by KILL and a bounded final-close grace, so a package loader or helper subprocess cannot stall a campaign indefinitely.
 
-The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 7 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity. The adapter compares that identity before and after each build. The differential source-versus-bundle execution result is the sole semantic oracle.
+The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 7 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity, including direct runtime dependencies. The adapter compares that identity before and after each build. The differential source-versus-bundle execution result is the sole semantic oracle.
 
 ## Regression policy
 

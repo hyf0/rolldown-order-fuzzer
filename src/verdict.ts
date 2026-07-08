@@ -22,6 +22,7 @@ export type MismatchReason =
   | "source-crash-suppressed"
   | "error-mismatch"
   | "timeout-mismatch"
+  | "bundle-invalid-event"
   | "operation-boundary-mismatch"
   | "events-reordered"
   | "events-missing"
@@ -55,6 +56,12 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
   }
 
   if (bundle.status === "harness-error") {
+    if (bundle.error.name === "InvalidExecutionEvent") {
+      return mismatch(
+        "bundle-invalid-event",
+        `bundle-invalid-event:${serializeError(bundle.error)}`,
+      );
+    }
     return invalidHarness("bundle-harness-error", "bundle", bundle.error);
   }
 

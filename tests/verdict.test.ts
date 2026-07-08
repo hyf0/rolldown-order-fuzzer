@@ -92,6 +92,25 @@ describe("classifyVerdict", () => {
     });
   });
 
+  test("classifies a bundle-only invalid event as a compiler mismatch", () => {
+    expect(
+      classifyVerdict(ok([event("entry", 1)]), {
+        version: 1,
+        status: "harness-error",
+        events: [],
+        error: {
+          name: "InvalidExecutionEvent",
+          message: "Execution event value must be a primitive JSON value",
+        },
+      }),
+    ).toEqual({
+      kind: "mismatch",
+      reason: "bundle-invalid-event",
+      signature:
+        'bundle-invalid-event:["InvalidExecutionEvent","Execution event value must be a primitive JSON value"]',
+    });
+  });
+
   test("classifies normalized error mismatches", () => {
     expect(
       classifyVerdict(

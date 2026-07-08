@@ -108,6 +108,7 @@ export interface ObservedRuntimeIdentity {
   readonly packageContentFiles: readonly string[];
   readonly fuzzerLockfilePath: string | null;
   readonly fuzzerLockfileSha256: string | null;
+  readonly runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[];
   readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
   readonly napiRsNativeLibrary: ObservedNativeLibraryOverrideIdentity;
 }
@@ -280,6 +281,7 @@ export async function inspectRolldownRuntimeIdentity(
   let packageJsonPath: string | null = null;
   let packageContentSha256: string | null = null;
   let packageContentFiles: readonly string[] = [];
+  let runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[] = [];
   let optionalBindingPackages: readonly ObservedBindingPackageIdentity[] = [];
 
   try {
@@ -303,6 +305,10 @@ export async function inspectRolldownRuntimeIdentity(
         const packageContent = await hashPackageContents(packageInfo.rootPath);
         packageContentSha256 = packageContent.sha256;
         packageContentFiles = packageContent.files;
+        runtimeDependencyPackages = await inspectPackageDependencies(
+          packageInfo,
+          packageInfo.runtimeDependencyNames,
+        );
         optionalBindingPackages = await inspectOptionalBindingPackages(packageInfo);
       }
     }
@@ -329,6 +335,7 @@ export async function inspectRolldownRuntimeIdentity(
     packageContentFiles,
     fuzzerLockfilePath: lockfile.path,
     fuzzerLockfileSha256: lockfile.sha256,
+    runtimeDependencyPackages,
     optionalBindingPackages,
     napiRsNativeLibrary,
   };
@@ -461,6 +468,7 @@ interface PackageInfo {
   readonly rootPath: string;
   readonly packageJsonPath: string;
   readonly version: string | null;
+  readonly runtimeDependencyNames: readonly string[];
   readonly optionalBindingNames: readonly string[];
 }
 
@@ -470,6 +478,7 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
     try {
       const packageJsonPath = join(directory, "package.json");
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
+        readonly dependencies?: unknown;
         readonly optionalDependencies?: unknown;
         readonly version?: unknown;
       };
@@ -477,6 +486,7 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
         rootPath: await realpath(directory),
         packageJsonPath: await realpath(packageJsonPath),
         version: typeof packageJson.version === "string" ? packageJson.version : null,
+        runtimeDependencyNames: readDependencyNames(packageJson.dependencies),
         optionalBindingNames: readOptionalBindingNames(packageJson.optionalDependencies),
       };
     } catch {}
@@ -490,20 +500,29 @@ async function findNearestPackageInfo(startDirectory: string): Promise<PackageIn
 }
 
 function readOptionalBindingNames(value: unknown): readonly string[] {
+  return readDependencyNames(value).filter((name) => name.startsWith("@rolldown/binding-"));
+}
+
+function readDependencyNames(value: unknown): readonly string[] {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return [];
   }
-  return Object.keys(value)
-    .filter((name) => name.startsWith("@rolldown/binding-"))
-    .sort();
+  return Object.keys(value).sort();
 }
 
 async function inspectOptionalBindingPackages(
   packageInfo: PackageInfo,
 ): Promise<readonly ObservedBindingPackageIdentity[]> {
+  return inspectPackageDependencies(packageInfo, packageInfo.optionalBindingNames);
+}
+
+async function inspectPackageDependencies(
+  packageInfo: PackageInfo,
+  dependencyNames: readonly string[],
+): Promise<readonly ObservedBindingPackageIdentity[]> {
   const requireFromPackage = createRequire(packageInfo.packageJsonPath);
   const identities: ObservedBindingPackageIdentity[] = [];
-  for (const name of packageInfo.optionalBindingNames) {
+  for (const name of dependencyNames) {
     try {
       const packageJsonPath = await realpath(requireFromPackage.resolve(`${name}/package.json`));
       const packageRootPath = await realpath(dirname(packageJsonPath));

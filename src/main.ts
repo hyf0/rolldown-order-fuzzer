@@ -921,7 +921,8 @@ function formatCaseResult(
 function formatRuntimeIdentity(identity: ObservedRuntimeIdentity): string {
   const packageHash = identity.packageContentSha256 ?? identity.resolvedEntrySha256 ?? "unresolved";
   const nativeHash = identity.napiRsNativeLibrary.sha256 ?? "none";
-  return `identity node=${identity.processVersion}-${identity.platform}-${identity.arch} package=${packageHash} native=${nativeHash}`;
+  const runtimeHash = createHash("sha256").update(canonicalJsonStringify(identity)).digest("hex");
+  return `identity node=${identity.processVersion}-${identity.platform}-${identity.arch} package=${packageHash} native=${nativeHash} runtime=${runtimeHash}`;
 }
 
 function readArgumentValue(argv: readonly string[], index: number, argument: string): string {

@@ -491,6 +491,7 @@ describe("runCampaign", () => {
         fuzzerLockfileSha256: createHash("sha256")
           .update(await readFile(fileURLToPath(new URL("../package-lock.json", import.meta.url))))
           .digest("hex"),
+        runtimeDependencyPackages: [],
         optionalBindingPackages: [],
         napiRsNativeLibrary: {
           requested: null,
@@ -1420,6 +1421,7 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     packageContentFiles: [],
     fuzzerLockfilePath: null,
     fuzzerLockfileSha256: null,
+    runtimeDependencyPackages: [],
     optionalBindingPackages: [],
     napiRsNativeLibrary: {
       requested: null,

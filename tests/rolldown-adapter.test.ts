@@ -375,6 +375,42 @@ describe("withRolldownBuild", () => {
     );
   });
 
+  test("tracks direct runtime dependency contents", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-runtime-dependency-"));
+    const dependencyDirectory = join(directory, "node_modules", "dependency");
+    const dependencyPath = join(dependencyDirectory, "index.js");
+    const packagePath = join(directory, "index.mjs");
+    await mkdir(dependencyDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "package.json"),
+      `${JSON.stringify({
+        type: "module",
+        version: "1.0.0",
+        dependencies: { dependency: "1.0.0" },
+      })}\n`,
+    );
+    await writeFile(
+      join(dependencyDirectory, "package.json"),
+      `${JSON.stringify({ name: "dependency", version: "1.0.0", main: "index.js" })}\n`,
+    );
+    await writeFile(packagePath, 'import "dependency"; export const rolldown = () => {};\n');
+
+    try {
+      await writeFile(dependencyPath, "module.exports = 1;\n");
+      const first = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
+      await writeFile(dependencyPath, "module.exports = 2;\n");
+      const second = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
+
+      expect(first.packageContentSha256).toBe(second.packageContentSha256);
+      expect(first.runtimeDependencyPackages).toHaveLength(1);
+      expect(first.runtimeDependencyPackages[0]?.contentSha256).not.toBe(
+        second.runtimeDependencyPackages[0]?.contentSha256,
+      );
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("classifies output consumer failures before cleaning build artifacts", async () => {
     const program = singleEntryProgram();
     let temporaryDirectory = "";
