@@ -531,18 +531,18 @@ describe("withRolldownBuild", () => {
   });
 
   test("hashes NODE_OPTIONS hook files", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "rolldown-node-options-"));
+    const directory = await mkdtemp(join(tmpdir(), "rolldown node options "));
     const hookPath = join(directory, "hook.cjs");
     const previousNodeOptions = process.env.NODE_OPTIONS;
 
     try {
-      process.env.NODE_OPTIONS = `--require ${hookPath}`;
+      process.env.NODE_OPTIONS = `--require="${hookPath}"`;
       await writeFile(hookPath, "module.exports = 1;\n");
       const first = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
       await writeFile(hookPath, "module.exports = 2;\n");
       const second = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
 
-      expect(first.nodeOptions).toBe(`--require ${hookPath}`);
+      expect(first.nodeOptions).toBe(`--require="${hookPath}"`);
       expect(first.nodeOptionFiles).toHaveLength(1);
       expect(first.nodeOptionFiles[0]?.sha256).not.toBe(second.nodeOptionFiles[0]?.sha256);
     } finally {

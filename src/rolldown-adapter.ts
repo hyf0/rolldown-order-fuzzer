@@ -866,15 +866,40 @@ async function inspectExecArgvFiles(
 }
 
 function splitNodeOptions(value: string): string[] {
-  return (
-    value
-      .match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)
-      ?.map((item) =>
-        (item.startsWith('"') && item.endsWith('"')) || (item.startsWith("'") && item.endsWith("'"))
-          ? item.slice(1, -1)
-          : item,
-      ) ?? []
-  );
+  const result: string[] = [];
+  let current = "";
+  let quote: '"' | "'" | null = null;
+  let escaped = false;
+  for (const character of value) {
+    if (escaped) {
+      current += character;
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (quote !== null) {
+      if (character === quote) {
+        quote = null;
+      } else {
+        current += character;
+      }
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (/\s/.test(character)) {
+      if (current.length > 0) {
+        result.push(current);
+        current = "";
+      }
+    } else {
+      current += character;
+    }
+  }
+  if (escaped) {
+    current += "\\";
+  }
+  if (current.length > 0) {
+    result.push(current);
+  }
+  return result;
 }
 
 function platformFingerprint(): unknown {
