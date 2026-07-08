@@ -29,6 +29,7 @@ export interface TraceChildManualChunkGroup {
 
 export interface TraceChildRequest {
   readonly version: typeof TRACE_CHILD_PROTOCOL_VERSION;
+  readonly collectOrderTrace: boolean;
   readonly packageSpecifier: string;
   readonly input: Readonly<Record<string, string>>;
   readonly preserveEntrySignatures: "allow-extension";
@@ -84,6 +85,9 @@ export function parseTraceChildRequest(value: unknown): TraceChildRequest {
     request.packageSpecifier,
     "traced build packageSpecifier",
   );
+  if (typeof request.collectOrderTrace !== "boolean") {
+    throw new TypeError("traced build collectOrderTrace must be boolean");
+  }
   const inputRecord = requireRecord(request.input, "traced build input");
   const input = Object.fromEntries(
     Object.entries(inputRecord).map(([name, path]) => [
@@ -142,6 +146,7 @@ export function parseTraceChildRequest(value: unknown): TraceChildRequest {
   }
   return {
     version: TRACE_CHILD_PROTOCOL_VERSION,
+    collectOrderTrace: request.collectOrderTrace,
     packageSpecifier,
     input,
     preserveEntrySignatures: "allow-extension",
@@ -248,11 +253,12 @@ export async function runTraceChild(request: TraceChildRequest): Promise<TraceCh
   let output: RolldownOutput | undefined;
   let buildError: unknown;
   try {
-    bundle = await (loaded.rolldown as RolldownFunction)({
+    const inputOptions: InputOptions = {
       input: request.input,
       preserveEntrySignatures: request.preserveEntrySignatures,
-      devtools: { sessionId: requestedSessionId },
-    });
+      ...(request.collectOrderTrace ? { devtools: { sessionId: requestedSessionId } } : {}),
+    };
+    bundle = await (loaded.rolldown as RolldownFunction)(inputOptions);
     output = await bundle.write(createOutputOptions(request));
   } catch (error) {
     buildError = error;
@@ -265,11 +271,13 @@ export async function runTraceChild(request: TraceChildRequest): Promise<TraceCh
     }
   }
 
-  let orderTrace: StrictExecutionOrderPlanReady | null;
-  try {
-    orderTrace = await collectOrderTrace(request, requestedSessionId);
-  } catch (error) {
-    return childFailure("harness-error", "collect-order-trace", error, null);
+  let orderTrace: StrictExecutionOrderPlanReady | null = null;
+  if (request.collectOrderTrace) {
+    try {
+      orderTrace = await collectOrderTrace(request, requestedSessionId);
+    } catch (error) {
+      return childFailure("harness-error", "collect-order-trace", error, null);
+    }
   }
 
   if (buildError !== undefined) {

@@ -8,6 +8,7 @@ import {
   readdir,
   realpath,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ import { executeManifest } from "../src/execute.ts";
 import { generateCase } from "../src/generate.ts";
 import type { ProgramModel } from "../src/model.ts";
 import {
+  inspectRolldownRuntimeIdentity,
   traceChildExecArgv,
   withRolldownBuild,
   type RolldownAdapterResult,
@@ -325,19 +327,19 @@ describe("withRolldownBuild", () => {
 
   test("classifies invalid Rolldown output after closing and cleaning up", async () => {
     const program = singleEntryProgram();
-    const state = globalThis as typeof globalThis & {
-      __rolldownAdapterCloseCount?: number;
-      __rolldownAdapterInputPath?: string;
-    };
-    delete state.__rolldownAdapterCloseCount;
-    delete state.__rolldownAdapterInputPath;
+    let closeMarker: { readonly inputPath: string } | undefined;
+    let temporaryDirectory = "";
 
     await withTemporaryModule(
       [
+        'import { writeFile } from "node:fs/promises";',
+        'import { join } from "node:path";',
+        "",
+        "let outputDirectory;",
         "export async function rolldown(options) {",
-        "  globalThis.__rolldownAdapterInputPath = Object.values(options.input)[0];",
         "  return {",
-        "    async write() {",
+        "    async write(outputOptions) {",
+        "      outputDirectory = outputOptions.dir;",
         "      return {",
         "        output: [{",
         '          type: "chunk",',
@@ -349,8 +351,10 @@ describe("withRolldownBuild", () => {
         "      };",
         "    },",
         "    async close() {",
-        "      globalThis.__rolldownAdapterCloseCount =",
-        "        (globalThis.__rolldownAdapterCloseCount ?? 0) + 1;",
+        "      await writeFile(",
+        '        join(outputDirectory, "close-marker.json"),',
+        "        JSON.stringify({ inputPath: Object.values(options.input)[0] }),",
+        "      );",
         "    },",
         "  };",
         "}",
@@ -363,7 +367,16 @@ describe("withRolldownBuild", () => {
           async (): Promise<never> => {
             throw new Error("build callback must not run");
           },
-          { packageSpecifier, collectOrderTrace: false },
+          {
+            packageSpecifier,
+            collectOrderTrace: false,
+            onFailureArtifacts: async (_failure, artifacts) => {
+              temporaryDirectory = artifacts.temporaryDirectory;
+              closeMarker = JSON.parse(
+                await readFile(join(artifacts.bundleDirectory, "close-marker.json"), "utf8"),
+              ) as { readonly inputPath: string };
+            },
+          },
         );
 
         expect(result).toMatchObject({
@@ -377,14 +390,8 @@ describe("withRolldownBuild", () => {
       },
     );
 
-    expect(state.__rolldownAdapterCloseCount).toBe(1);
-    const inputPath = state.__rolldownAdapterInputPath;
-    expect(inputPath).toBeTypeOf("string");
-    if (inputPath !== undefined) {
-      await expect(access(dirname(dirname(inputPath)))).rejects.toMatchObject({ code: "ENOENT" });
-    }
-    delete state.__rolldownAdapterCloseCount;
-    delete state.__rolldownAdapterInputPath;
+    expect(closeMarker?.inputPath.replaceAll("\\", "/")).toContain("/source/");
+    await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   test("never selects a non-entry chunk as an emitted entry", async () => {
@@ -733,6 +740,7 @@ describe("withRolldownBuild", () => {
       null,
       {},
       { ...valid, version: 2 },
+      { ...valid, collectOrderTrace: "yes" },
       { ...valid, packageSpecifier: "" },
       { ...valid, input: [] },
       { ...valid, input: { main: 1 } },
@@ -893,6 +901,52 @@ describe("withRolldownBuild", () => {
     expect(callbackRan).toBe(false);
   });
 
+  test("rejects escaped output when trace collection is disabled", async () => {
+    const program = singleEntryProgram();
+    let callbackRan = false;
+
+    await withTemporaryModule(
+      [
+        "export async function rolldown(options) {",
+        "  return {",
+        "    async write() {",
+        "      return {",
+        "        output: [{",
+        '          type: "chunk",',
+        '          fileName: "../source/module-0000.mjs",',
+        '          name: "__entry_0000",',
+        "          isEntry: true,",
+        "          facadeModuleId: Object.values(options.input)[0],",
+        "        }],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (): Promise<never> => {
+            callbackRan = true;
+            throw new Error("escaped opt-out callback must not run");
+          },
+          { packageSpecifier, collectOrderTrace: false },
+        );
+
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: { name: "TypeError" },
+        });
+      },
+    );
+
+    expect(callbackRan).toBe(false);
+  });
+
   test("forwards safe TypeScript execArgv without inspector conflicts", () => {
     expect(
       traceChildExecArgv([
@@ -905,6 +959,59 @@ describe("withRolldownBuild", () => {
         "process.exit()",
       ]),
     ).toEqual(["--conditions=trace-child", "--import", "/tmp/register.mjs"]);
+  });
+
+  test("hashes an absolute native override despite ambiguous binding loaders", async () => {
+    const packageRoot = await mkdtemp(join(tmpdir(), "rolldown-absolute-override-"));
+    const targetRoot = await mkdtemp(join(tmpdir(), "rolldown-absolute-target-"));
+    const entryPath = join(packageRoot, "dist/index.mjs");
+    const firstLoader = join(packageRoot, "dist/shared/binding-first.mjs");
+    const secondLoader = join(packageRoot, "dist/shared/binding-second.mjs");
+    const overrideLink = join(packageRoot, "dist/shared/override.node");
+    const overrideTarget = join(targetRoot, "override.node");
+    const previousOverride = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;
+
+    try {
+      await mkdir(dirname(firstLoader), { recursive: true });
+      await Promise.all([
+        writeFile(
+          join(packageRoot, "package.json"),
+          `${JSON.stringify({ type: "module", version: "1.0.0" })}\n`,
+        ),
+        writeFile(entryPath, "export const rolldown = true;\n"),
+        writeFile(firstLoader, "export const first = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\n"),
+        writeFile(secondLoader, "export const second = process.env.NAPI_RS_NATIVE_LIBRARY_PATH;\n"),
+        writeFile(overrideTarget, Buffer.from([0, 1, 2, 3])),
+      ]);
+      await symlink(overrideTarget, overrideLink);
+      process.env.NAPI_RS_NATIVE_LIBRARY_PATH = overrideLink;
+
+      const first = await inspectRolldownRuntimeIdentity(pathToFileURL(entryPath).href);
+      await writeFile(overrideTarget, Buffer.from([3, 2, 1, 0]));
+      const changed = await inspectRolldownRuntimeIdentity(pathToFileURL(entryPath).href);
+      const candidates = [await realpath(firstLoader), await realpath(secondLoader)].sort();
+
+      expect(first.napiRsNativeLibrary).toEqual({
+        requested: overrideLink,
+        loaderPath: null,
+        loaderCandidates: candidates,
+        resolvedPath: overrideLink,
+        realPath: await realpath(overrideLink),
+        sha256: expect.stringMatching(/^[a-f0-9]{64}$/) as unknown as string,
+      });
+      expect(changed.napiRsNativeLibrary.sha256).not.toBe(first.napiRsNativeLibrary.sha256);
+      expect(changed).not.toEqual(first);
+    } finally {
+      if (previousOverride === undefined) {
+        delete process.env.NAPI_RS_NATIVE_LIBRARY_PATH;
+      } else {
+        process.env.NAPI_RS_NATIVE_LIBRARY_PATH = previousOverride;
+      }
+      await Promise.all([
+        rm(packageRoot, { recursive: true, force: true }),
+        rm(targetRoot, { recursive: true, force: true }),
+      ]);
+    }
   });
 
   test("times out and cleans a stalled traced build child", async () => {
@@ -963,6 +1070,59 @@ describe("withRolldownBuild", () => {
 
     expect(callbackRan).toBe(false);
     await expect(access(temporaryDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("times out a stalled child when trace collection is disabled", async () => {
+    const program = singleEntryProgram();
+    let callbackRan = false;
+
+    await withTemporaryModule(
+      [
+        "await new Promise((resolve) => setTimeout(resolve, 200));",
+        "export async function rolldown(options) {",
+        "  return {",
+        "    async write() {",
+        "      return {",
+        "        output: [{",
+        '          type: "chunk",',
+        '          fileName: "entries/__entry_0000.js",',
+        '          name: "__entry_0000",',
+        "          isEntry: true,",
+        "          facadeModuleId: Object.values(options.input)[0],",
+        "        }],",
+        "      };",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (): Promise<never> => {
+            callbackRan = true;
+            throw new Error("timed out opt-out callback must not run");
+          },
+          {
+            packageSpecifier,
+            collectOrderTrace: false,
+            traceChildTimeoutMs: 25,
+          },
+        );
+
+        expect(result).toMatchObject({
+          status: "harness-error",
+          stage: "build",
+          error: {
+            message: "Traced build child timed out after 25ms",
+          },
+        });
+      },
+    );
+
+    expect(callbackRan).toBe(false);
   });
 
   test("canonicalizes trace metadata and module IDs across temporary build roots", async () => {
@@ -1589,6 +1749,7 @@ async function sessionDirectoryNames(root: string): Promise<string[]> {
 function validTraceChildRequest(): TraceChildRequest {
   return {
     version: TRACE_CHILD_PROTOCOL_VERSION,
+    collectOrderTrace: true,
     packageSpecifier: "rolldown",
     input: { main: "/tmp/source/entry.mjs" },
     preserveEntrySignatures: "allow-extension",

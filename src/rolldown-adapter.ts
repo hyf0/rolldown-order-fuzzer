@@ -14,16 +14,8 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-
-import type {
-  CodeSplittingGroup,
-  InputOptions,
-  OutputOptions,
-  RolldownBuild,
-  RolldownOutput,
-} from "rolldown";
 
 import type { ProgramModel, ScheduleOperation } from "./model.ts";
 import type { StrictExecutionOrderPlanReady } from "./order-trace.ts";
@@ -212,33 +204,17 @@ export async function withRolldownBuild<T>(
       );
     }
 
-    let built: BuiltRolldown | FailedRolldownBuild;
-    if (collectOrderTrace) {
-      built = await buildWithTraceChild(
-        program,
-        rendered,
-        entryInputNames,
-        canonicalSourceDirectory,
-        bundleDirectory,
-        temporaryDirectory,
-        packageSpecifier,
-        traceChildTimeoutMs,
-      );
-    } else {
-      const loaded = await loadRolldown(packageSpecifier);
-      if (loaded.status !== "ok") {
-        return await reportFailure(loaded);
-      }
-      built = await buildWithRolldown(
-        loaded.rolldown,
-        program,
-        rendered,
-        entryInputNames,
-        canonicalSourceDirectory,
-        bundleDirectory,
-        packageSpecifier,
-      );
-    }
+    const built = await buildWithTraceChild(
+      program,
+      rendered,
+      entryInputNames,
+      canonicalSourceDirectory,
+      bundleDirectory,
+      temporaryDirectory,
+      packageSpecifier,
+      collectOrderTrace,
+      traceChildTimeoutMs,
+    );
     orderTrace = built.orderTrace;
     if (built.status === "failed") {
       return await reportFailure(built.failure);
@@ -358,6 +334,30 @@ async function inspectNativeLibraryOverride(
       ? []
       : await findRuntimeBindingLoaderCandidates(resolvedEntryPath, packageRootPath);
   const loaderPath = loaderCandidates.length === 1 ? (loaderCandidates[0] ?? null) : null;
+  if (requested !== null && isAbsolute(requested)) {
+    try {
+      const realPath = await realpath(requested);
+      return {
+        requested,
+        loaderPath: null,
+        loaderCandidates,
+        resolvedPath: requested,
+        realPath,
+        sha256: createHash("sha256")
+          .update(await readFile(realPath))
+          .digest("hex"),
+      };
+    } catch {
+      return {
+        requested,
+        loaderPath: null,
+        loaderCandidates,
+        resolvedPath: null,
+        realPath: null,
+        sha256: null,
+      };
+    }
+  }
   if (requested === null || loaderPath === null) {
     return {
       requested,
@@ -625,13 +625,6 @@ async function inspectFuzzerLockfile(): Promise<{
   return { path: null, sha256: null };
 }
 
-type RolldownFunction = (inputOptions: InputOptions) => Promise<RolldownBuild>;
-
-interface LoadedRolldown {
-  readonly status: "ok";
-  readonly rolldown: RolldownFunction;
-}
-
 interface BuiltRolldown {
   readonly status: "ok";
   readonly output: readonly TraceChildOutputFile[];
@@ -656,31 +649,6 @@ async function materializeRenderedProgram(
   }
 }
 
-async function loadRolldown(
-  packageSpecifier: string,
-): Promise<LoadedRolldown | FailedRolldownAdapterResult> {
-  let loaded: unknown;
-  try {
-    loaded = await import(packageSpecifier);
-  } catch (error) {
-    return failure("harness-error", "load-package", packageSpecifier, error);
-  }
-
-  if (!isRecord(loaded) || typeof loaded.rolldown !== "function") {
-    return failure(
-      "harness-error",
-      "load-package",
-      packageSpecifier,
-      new TypeError(`Rolldown package ${JSON.stringify(packageSpecifier)} has no rolldown export`),
-    );
-  }
-
-  return {
-    status: "ok",
-    rolldown: loaded.rolldown as RolldownFunction,
-  };
-}
-
 async function buildWithTraceChild(
   program: ProgramModel,
   rendered: RenderedProgram,
@@ -689,12 +657,14 @@ async function buildWithTraceChild(
   bundleDirectory: string,
   temporaryDirectory: string,
   packageSpecifier: string,
+  collectOrderTrace: boolean,
   timeoutMs: number,
 ): Promise<BuiltRolldown | FailedRolldownBuild> {
   const requestPath = join(temporaryDirectory, "trace-request.json");
   const responsePath = join(temporaryDirectory, "trace-response.json");
   const request: TraceChildRequest = {
     version: TRACE_CHILD_PROTOCOL_VERSION,
+    collectOrderTrace,
     packageSpecifier,
     input: Object.fromEntries(
       program.entries.map((entry) => [
@@ -933,123 +903,12 @@ export function traceChildExecArgv(execArgv: readonly string[]): readonly string
   return result;
 }
 
-async function buildWithRolldown(
-  rolldown: RolldownFunction,
-  program: ProgramModel,
-  rendered: RenderedProgram,
-  entryInputNames: ReadonlyMap<string, string>,
-  sourceDirectory: string,
-  bundleDirectory: string,
-  packageSpecifier: string,
-): Promise<BuiltRolldown | FailedRolldownBuild> {
-  let bundle: RolldownBuild | undefined;
-  let output: RolldownOutput | undefined;
-  let buildError: unknown;
-  const inputOptions: InputOptions = {
-    input: Object.fromEntries(
-      program.entries.map((entry) => [
-        requiredEntryInputName(entryInputNames, entry.name),
-        resolve(sourceDirectory, requiredPath(rendered.entryPaths, entry.name, "entry")),
-      ]),
-    ),
-    preserveEntrySignatures: ROLLDOWN_BUILD_OPTIONS.preserveEntrySignatures,
-  };
-
-  try {
-    bundle = await rolldown(inputOptions);
-    output = await bundle.write(
-      createOutputOptions(program, rendered, sourceDirectory, bundleDirectory),
-    );
-  } catch (error) {
-    buildError = error;
-  }
-
-  if (bundle !== undefined) {
-    try {
-      await bundle.close();
-    } catch (error) {
-      buildError ??= error;
-    }
-  }
-
-  if (buildError !== undefined) {
-    return {
-      status: "failed",
-      failure: failure("build-error", "build", packageSpecifier, buildError),
-      orderTrace: null,
-    };
-  }
-  if (output === undefined) {
-    return {
-      status: "failed",
-      failure: failure(
-        "build-error",
-        "build",
-        packageSpecifier,
-        new Error("Rolldown build completed without output"),
-      ),
-      orderTrace: null,
-    };
-  }
-
-  return {
-    status: "ok",
-    output: output.output.map(serializeOutputFile),
-    orderTrace: null,
-  };
-}
-
-function createOutputOptions(
-  program: ProgramModel,
-  rendered: RenderedProgram,
-  sourceDirectory: string,
-  bundleDirectory: string,
-): OutputOptions {
-  const groups = (program.manualChunkGroups ?? []).map((group): CodeSplittingGroup => {
-    const paths = new Set(
-      group.moduleIds.map((moduleId) =>
-        resolve(sourceDirectory, requiredPath(rendered.modulePaths, moduleId, "module")),
-      ),
-    );
-    return {
-      name: group.name,
-      test: (moduleId) => paths.has(resolve(moduleId)),
-      includeDependenciesRecursively: false,
-    };
-  });
-
-  return {
-    dir: bundleDirectory,
-    format: ROLLDOWN_BUILD_OPTIONS.format,
-    strictExecutionOrder: ROLLDOWN_BUILD_OPTIONS.strictExecutionOrder,
-    entryFileNames: ROLLDOWN_BUILD_OPTIONS.entryFileNames,
-    chunkFileNames: ROLLDOWN_BUILD_OPTIONS.chunkFileNames,
-    assetFileNames: ROLLDOWN_BUILD_OPTIONS.assetFileNames,
-    codeSplitting: groups.length === 0 ? true : { groups },
-    cleanDir: ROLLDOWN_BUILD_OPTIONS.cleanDir,
-    minify: ROLLDOWN_BUILD_OPTIONS.minify,
-  };
-}
-
 type OutputChunkMetadata = TraceChildOutputFile & {
   readonly type: "chunk";
   readonly name: string;
   readonly isEntry: true;
   readonly facadeModuleId: string | null;
 };
-
-function serializeOutputFile(output: RolldownOutput["output"][number]): TraceChildOutputFile {
-  if (output.type === "asset") {
-    return { type: "asset", fileName: output.fileName };
-  }
-  return {
-    type: "chunk",
-    fileName: output.fileName,
-    name: output.name,
-    isEntry: output.isEntry,
-    facadeModuleId: output.facadeModuleId,
-  };
-}
 
 function isOutputChunkMetadata(output: TraceChildOutputFile): output is OutputChunkMetadata {
   return (
@@ -1228,8 +1087,4 @@ function describeValue(value: unknown): string {
   } catch {
     return "<unprintable thrown value>";
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
