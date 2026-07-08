@@ -493,6 +493,8 @@ describe("runCampaign", () => {
           .digest("hex"),
         runtimeDependencyPackages: [],
         optionalBindingPackages: [],
+        napiRsForceWasi: null,
+        napiRsEnforceVersionCheck: null,
         napiRsNativeLibrary: {
           requested: null,
           loaderPath: null,
@@ -1423,6 +1425,8 @@ function testRuntimeIdentity(requestedPackageSpecifier = "rolldown"): ObservedRu
     fuzzerLockfileSha256: null,
     runtimeDependencyPackages: [],
     optionalBindingPackages: [],
+    napiRsForceWasi: null,
+    napiRsEnforceVersionCheck: null,
     napiRsNativeLibrary: {
       requested: null,
       loaderPath: null,

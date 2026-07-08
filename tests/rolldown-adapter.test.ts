@@ -411,6 +411,60 @@ describe("withRolldownBuild", () => {
     }
   });
 
+  test("records NAPI binding-selection environment", async () => {
+    const previousForceWasi = process.env.NAPI_RS_FORCE_WASI;
+    const previousVersionCheck = process.env.NAPI_RS_ENFORCE_VERSION_CHECK;
+
+    try {
+      process.env.NAPI_RS_FORCE_WASI = "true";
+      process.env.NAPI_RS_ENFORCE_VERSION_CHECK = "error";
+      const identity = await inspectRolldownRuntimeIdentity(import.meta.resolve("rolldown"));
+
+      expect(identity.napiRsForceWasi).toBe("true");
+      expect(identity.napiRsEnforceVersionCheck).toBe("error");
+    } finally {
+      if (previousForceWasi === undefined) {
+        delete process.env.NAPI_RS_FORCE_WASI;
+      } else {
+        process.env.NAPI_RS_FORCE_WASI = previousForceWasi;
+      }
+      if (previousVersionCheck === undefined) {
+        delete process.env.NAPI_RS_ENFORCE_VERSION_CHECK;
+      } else {
+        process.env.NAPI_RS_ENFORCE_VERSION_CHECK = previousVersionCheck;
+      }
+    }
+  });
+
+  test("hashes source files for large packages", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "rolldown-large-package-"));
+    const sourceDirectory = join(directory, "src");
+    const packagePath = join(directory, "index.mjs");
+    await mkdir(sourceDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "package.json"),
+      `${JSON.stringify({ type: "module", version: "1.0.0" })}\n`,
+    );
+    await writeFile(packagePath, 'import "./src/runtime.js"; export const rolldown = () => {};\n');
+    await Promise.all(
+      Array.from({ length: 512 }, (_, index) =>
+        writeFile(join(directory, `filler-${index}.txt`), String(index)),
+      ),
+    );
+
+    try {
+      await writeFile(join(sourceDirectory, "runtime.js"), "export const value = 1;\n");
+      const first = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
+      await writeFile(join(sourceDirectory, "runtime.js"), "export const value = 2;\n");
+      const second = await inspectRolldownRuntimeIdentity(pathToFileURL(packagePath).href);
+
+      expect(first.packageContentFiles).toContain("src/runtime.js");
+      expect(first.packageContentSha256).not.toBe(second.packageContentSha256);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("classifies output consumer failures before cleaning build artifacts", async () => {
     const program = singleEntryProgram();
     let temporaryDirectory = "";

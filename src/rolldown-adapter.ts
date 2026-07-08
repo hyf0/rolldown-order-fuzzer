@@ -110,6 +110,8 @@ export interface ObservedRuntimeIdentity {
   readonly fuzzerLockfileSha256: string | null;
   readonly runtimeDependencyPackages: readonly ObservedBindingPackageIdentity[];
   readonly optionalBindingPackages: readonly ObservedBindingPackageIdentity[];
+  readonly napiRsForceWasi: string | null;
+  readonly napiRsEnforceVersionCheck: string | null;
   readonly napiRsNativeLibrary: ObservedNativeLibraryOverrideIdentity;
 }
 
@@ -337,6 +339,8 @@ export async function inspectRolldownRuntimeIdentity(
     fuzzerLockfileSha256: lockfile.sha256,
     runtimeDependencyPackages,
     optionalBindingPackages,
+    napiRsForceWasi: process.env.NAPI_RS_FORCE_WASI ?? null,
+    napiRsEnforceVersionCheck: process.env.NAPI_RS_ENFORCE_VERSION_CHECK ?? null,
     napiRsNativeLibrary,
   };
 }
@@ -632,6 +636,7 @@ function isRuntimeRelevantPackageFile(file: PackageFile): boolean {
     file.path === "bin" ||
     file.path.startsWith("bin/") ||
     file.path.startsWith("dist/") ||
+    file.path.startsWith("src/") ||
     file.path.endsWith(".node")
   );
 }
