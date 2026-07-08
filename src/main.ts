@@ -445,7 +445,7 @@ async function requireCompleteExistingArtifact(
   const actualTree = await inspectArtifactTree(artifactDirectory).catch(() => null);
   if (
     actualTree === null ||
-    actualTree.hasSymlink ||
+    actualTree.hasInvalidEntry ||
     actualTree.files.join("\0") !== expectedFilePaths.join("\0") ||
     actualTree.directories.join("\0") !== expectedDirectoryPaths.join("\0")
   ) {
@@ -470,12 +470,12 @@ async function requireCompleteExistingArtifact(
 async function inspectArtifactTree(root: string): Promise<{
   readonly files: string[];
   readonly directories: string[];
-  readonly hasSymlink: boolean;
+  readonly hasInvalidEntry: boolean;
 }> {
   const files: string[] = [];
   const directories: string[] = [];
   const pending = [{ directory: root, relativePath: "" }];
-  let hasSymlink = false;
+  let hasInvalidEntry = false;
   while (pending.length > 0) {
     const current = pending.pop();
     if (current === undefined) {
@@ -486,7 +486,7 @@ async function inspectArtifactTree(root: string): Promise<{
       const relativePath =
         current.relativePath.length === 0 ? entry.name : `${current.relativePath}/${entry.name}`;
       if (entry.isSymbolicLink()) {
-        hasSymlink = true;
+        hasInvalidEntry = true;
       } else if (entry.isDirectory()) {
         directories.push(relativePath);
         pending.push({
@@ -495,12 +495,14 @@ async function inspectArtifactTree(root: string): Promise<{
         });
       } else if (entry.isFile()) {
         files.push(relativePath);
+      } else {
+        hasInvalidEntry = true;
       }
     }
   }
   files.sort();
   directories.sort();
-  return { files, directories, hasSymlink };
+  return { files, directories, hasInvalidEntry };
 }
 
 function caseIndexFromIdentity(identity: FailureArtifactIdentity): number {
