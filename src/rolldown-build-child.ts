@@ -26,6 +26,7 @@ export interface BuildChildRequest {
   readonly packageSpecifier: string;
   readonly input: Readonly<Record<string, string>>;
   readonly preserveEntrySignatures: "allow-extension";
+  readonly onDemandWrapping: boolean;
   readonly bundleDirectory: string;
   readonly manualChunkGroups: readonly BuildChildManualChunkGroup[];
   readonly output: {
@@ -108,11 +109,15 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
   ) {
     throw new TypeError("build output constants are invalid");
   }
+  if (typeof request.onDemandWrapping !== "boolean") {
+    throw new TypeError("build onDemandWrapping must be a boolean");
+  }
   return {
     version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier,
     input,
     preserveEntrySignatures: "allow-extension",
+    onDemandWrapping: request.onDemandWrapping,
     bundleDirectory,
     manualChunkGroups,
     output: {
@@ -198,6 +203,7 @@ export async function runBuildChild(request: BuildChildRequest): Promise<BuildCh
     const inputOptions: InputOptions = {
       input: request.input,
       preserveEntrySignatures: request.preserveEntrySignatures,
+      experimental: { onDemandWrapping: request.onDemandWrapping },
     };
     bundle = await (loaded.rolldown as RolldownFunction)(inputOptions);
     output = await bundle.write(createOutputOptions(request));

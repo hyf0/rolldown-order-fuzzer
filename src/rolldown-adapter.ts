@@ -64,6 +64,7 @@ export const ROLLDOWN_BUILD_OPTIONS = {
 
 export interface RolldownAdapterOptions {
   readonly packageSpecifier?: string;
+  readonly onDemandWrapping?: boolean;
   readonly buildChildTimeoutMs?: number;
   readonly onFailureArtifacts?: (
     failure: FailedRolldownAdapterResult,
@@ -157,6 +158,7 @@ export async function withRolldownBuild<T>(
   options: RolldownAdapterOptions = {},
 ): Promise<RolldownAdapterResult<T>> {
   const packageSpecifier = options.packageSpecifier ?? process.env.ROLLDOWN_PACKAGE ?? "rolldown";
+  const onDemandWrapping = options.onDemandWrapping ?? true;
   const runtimeIdentity = await inspectRolldownRuntimeIdentity(packageSpecifier);
   const buildChildTimeoutMs = options.buildChildTimeoutMs ?? DEFAULT_BUILD_CHILD_TIMEOUT_MS;
   if (!Number.isFinite(buildChildTimeoutMs) || buildChildTimeoutMs <= 0) {
@@ -206,6 +208,7 @@ export async function withRolldownBuild<T>(
       bundleDirectory,
       temporaryDirectory,
       packageSpecifier,
+      onDemandWrapping,
       buildChildTimeoutMs,
     );
     if (built.status === "failed") {
@@ -653,6 +656,7 @@ async function buildWithChild(
   bundleDirectory: string,
   temporaryDirectory: string,
   packageSpecifier: string,
+  onDemandWrapping: boolean,
   timeoutMs: number,
 ): Promise<BuiltRolldown | FailedRolldownBuild> {
   const requestPath = join(temporaryDirectory, "build-request.json");
@@ -667,6 +671,7 @@ async function buildWithChild(
       ]),
     ),
     preserveEntrySignatures: ROLLDOWN_BUILD_OPTIONS.preserveEntrySignatures,
+    onDemandWrapping,
     bundleDirectory,
     manualChunkGroups: (program.manualChunkGroups ?? []).map((group) => ({
       name: group.name,

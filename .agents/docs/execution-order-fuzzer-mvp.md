@@ -64,7 +64,7 @@ Spawn failures, abnormal runner exits, and invalid/missing result files are harn
 
 ### Rolldown adapter
 
-The adapter dynamically imports a configurable Rolldown package specifier. `ROLLDOWN_PACKAGE` defaults to `rolldown` and may point at an absolute file URL or preview package.
+The adapter dynamically imports a configurable Rolldown package specifier. Builds run with `experimental.onDemandWrapping: true` by default (the selective analysis under test); `--wrap-all` disables it to exercise Rolldown's default wrap-all strict mode, and campaigns should stay green in both. `ROLLDOWN_PACKAGE` defaults to `rolldown` and may point at an absolute file URL or preview package.
 
 It builds named entries with:
 

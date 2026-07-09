@@ -26,6 +26,7 @@ The CLI accepts:
 - `--seed N`: initial unsigned 32-bit seed; defaults to `1`.
 - `--cases N`: positive case count; defaults to `1`.
 - `--case-size N`: generation size from 1 through 16; defaults to `4`. Larger sizes grow the random graphs.
+- `--wrap-all`: build with `experimental.onDemandWrapping` disabled, exercising Rolldown's default wrap-all strict mode; the default fuzzes the on-demand analysis.
 - `--rolldown-package SPECIFIER`: package specifier or file URL; defaults to `ROLLDOWN_PACKAGE`, then `rolldown`.
 - `--out-dir DIRECTORY`: failure artifact root; defaults to `failures`.
 - `--continue-on-fail`: run every requested case.

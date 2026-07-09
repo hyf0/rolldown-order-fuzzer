@@ -288,6 +288,40 @@ describe("withRolldownBuild", () => {
     },
   );
 
+  test("forwards the wrapping mode to the Rolldown input options", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-adapter-mode-"));
+    const packagePath = join(directory, "rolldown.mjs");
+    const capturePath = join(directory, "captured.json");
+    await writeFile(
+      packagePath,
+      [
+        "import fs from 'node:fs';",
+        "export async function rolldown(inputOptions) {",
+        `  fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify(inputOptions.experimental));`,
+        "  throw new Error('capture-only');",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    const program = singleEntryProgram();
+
+    try {
+      for (const onDemandWrapping of [false, true]) {
+        await withRolldownBuild(
+          program,
+          renderProgram(program),
+          async (): Promise<never> => {
+            throw new Error("build callback must not run");
+          },
+          { packageSpecifier: pathToFileURL(packagePath).href, onDemandWrapping },
+        );
+        expect(JSON.parse(await readFile(capturePath, "utf8"))).toEqual({ onDemandWrapping });
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   test("reports an invalid configurable package specifier as a harness error", async () => {
     const program = singleEntryProgram();
     const originalPackageSpecifier = process.env.ROLLDOWN_PACKAGE;
@@ -1131,6 +1165,7 @@ function validBuildChildRequest(): BuildChildRequest {
     packageSpecifier: "rolldown",
     input: { main: "/tmp/source/entry.mjs" },
     preserveEntrySignatures: "allow-extension",
+    onDemandWrapping: true,
     bundleDirectory: "/tmp/bundle",
     manualChunkGroups: [{ name: "shared", modulePaths: ["/tmp/source/shared.mjs"] }],
     output: {

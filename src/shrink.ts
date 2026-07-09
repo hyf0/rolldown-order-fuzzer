@@ -171,6 +171,7 @@ async function run(program: ProgramModel, options: ShrinkOptions): Promise<strin
     seed: 0,
     cases: 1,
     caseSize: DEFAULT_CASE_SIZE,
+    onDemandWrapping: true,
     rolldownPackage: options.rolldownPackage,
     outDir: "failures",
     continueOnFail: false,

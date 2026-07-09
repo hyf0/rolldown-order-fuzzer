@@ -29,12 +29,13 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 7 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 8 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
   readonly cases: number;
   readonly caseSize: number;
+  readonly onDemandWrapping: boolean;
   readonly rolldownPackage: string;
   readonly outDir: string;
   readonly continueOnFail: boolean;
@@ -132,18 +133,20 @@ const DEFAULT_OPTIONS: CampaignOptions = {
   seed: 1,
   cases: 1,
   caseSize: DEFAULT_CASE_SIZE,
+  onDemandWrapping: true,
   rolldownPackage: process.env.ROLLDOWN_PACKAGE ?? "rolldown",
   outDir: "failures",
   continueOnFail: false,
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--wrap-all] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
   let cases = DEFAULT_OPTIONS.cases;
   let caseSize = DEFAULT_OPTIONS.caseSize;
+  let onDemandWrapping = DEFAULT_OPTIONS.onDemandWrapping;
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
   let outDir = DEFAULT_OPTIONS.outDir;
   let continueOnFail = DEFAULT_OPTIONS.continueOnFail;
@@ -161,6 +164,9 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
         break;
       case "--case-size":
         caseSize = parseCaseSize(readArgumentValue(argv, ++index, argument), argument);
+        break;
+      case "--wrap-all":
+        onDemandWrapping = false;
         break;
       case "--rolldown-package":
         rolldownPackage = readNonEmptyValue(argv, ++index, argument);
@@ -186,7 +192,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   }
   validateSeedRange(seed, cases);
 
-  return { seed, cases, caseSize, rolldownPackage, outDir, continueOnFail };
+  return { seed, cases, caseSize, onDemandWrapping, rolldownPackage, outDir, continueOnFail };
 }
 
 export async function runCampaign(
@@ -757,6 +763,7 @@ async function buildAndExecuteBundle(
     }),
     {
       packageSpecifier: options.rolldownPackage,
+      onDemandWrapping: options.onDemandWrapping,
       onFailureArtifacts: async (_failure, artifacts) => {
         failureArtifacts = {
           bundleManifest: artifacts.manifest ?? null,
@@ -871,6 +878,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
     seed: result.generated.seed,
     cases: 1,
     caseSize: result.generated.size,
+    onDemandWrapping: result.options.onDemandWrapping,
     rolldownPackage: result.options.rolldownPackage,
     outDir: result.options.outDir,
     continueOnFail: false,
@@ -887,6 +895,7 @@ function createReplayMetadata(result: CampaignCaseResult): {
       "1",
       "--case-size",
       String(options.caseSize),
+      ...(options.onDemandWrapping ? [] : ["--wrap-all"]),
       "--rolldown-package",
       options.rolldownPackage,
       "--out-dir",

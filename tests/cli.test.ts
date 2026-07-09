@@ -44,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 7", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(7);
+  test("uses artifact schema version 8", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(8);
   });
 
   test("parses the complete campaign option set", () => {
@@ -67,6 +67,7 @@ describe("parseCliArgs", () => {
       seed: 4_294_967_295,
       cases: 12,
       caseSize: 9,
+      onDemandWrapping: true,
       rolldownPackage: "file:///tmp/rolldown.mjs",
       outDir: "artifacts",
       continueOnFail: true,
@@ -90,6 +91,7 @@ describe("parseCliArgs", () => {
     expect(() => parseCliArgs(["--case-size", "17"])).toThrowError(
       "--case-size must be an integer from 1 through 16",
     );
+    expect(parseCliArgs(["--wrap-all"])).toMatchObject({ onDemandWrapping: false });
     expect(() => parseCliArgs(["--out-dir", ""])).toThrowError("--out-dir must not be empty");
     expect(() => parseCliArgs(["--out-dir", "--continue-on-fail"])).toThrowError(
       "Missing value for --out-dir",
@@ -1033,6 +1035,7 @@ describe("writeFailureArtifacts", () => {
           seed: generated.seed,
           cases: 1,
           caseSize: generated.size,
+          onDemandWrapping: true,
           rolldownPackage: options.rolldownPackage,
           outDir: directory,
           continueOnFail: false,
@@ -1366,6 +1369,7 @@ function campaignOptions(overrides: Partial<CampaignOptions> = {}): CampaignOpti
     seed: 100,
     cases: 1,
     caseSize: DEFAULT_CASE_SIZE,
+    onDemandWrapping: true,
     rolldownPackage: "rolldown",
     outDir: "failures",
     continueOnFail: false,
