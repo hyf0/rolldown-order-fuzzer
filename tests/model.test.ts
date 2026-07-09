@@ -138,6 +138,78 @@ describe("validateProgramModel", () => {
     expect(validateProgramModel(program)).toEqual([]);
   });
 
+  test("accepts a side-effect-free transitive value module", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "flagged",
+              importedName: "w",
+              localName: "flaggedW",
+            },
+          ],
+          events: [
+            { module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "flaggedW" }] },
+          ],
+        },
+        {
+          id: "flagged",
+          format: "esm",
+          sideEffectFree: true,
+          dependencies: [
+            { kind: "esm-value-import", target: "source", importedName: "v", localName: "sourceV" },
+          ],
+          events: [],
+        },
+        {
+          id: "source",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "source", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("rejects a side-effect-free module that emits events, is CJS, or carries non-value dependencies", () => {
+    const program = {
+      modules: [
+        {
+          id: "flagged-cjs",
+          format: "cjs",
+          sideEffectFree: true,
+          dependencies: [{ kind: "cjs-require", target: "leaf" }],
+          events: [{ module: "flagged-cjs", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "flagged-esm",
+          format: "esm",
+          sideEffectFree: true,
+          dependencies: [{ kind: "esm-side-effect-import", target: "leaf" }],
+          events: [],
+        },
+        { id: "leaf", format: "cjs", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "flagged-esm" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      "modules[0]: a side-effect-free module must be ESM, received cjs",
+      "modules[0]: a side-effect-free module must not emit events; its events can be legally dropped under sideEffects:false",
+      "modules[0].dependencies[0]: a side-effect-free module may only carry esm-value-import dependencies, received cjs-require",
+      "modules[1].dependencies[0]: a side-effect-free module may only carry esm-value-import dependencies, received esm-side-effect-import",
+    ]);
+  });
+
   test("rejects event reads that do not resolve to a readable binding", () => {
     const program = {
       modules: [

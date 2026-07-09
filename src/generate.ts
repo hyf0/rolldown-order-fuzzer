@@ -436,14 +436,80 @@ function buildRandomMixed(
 
   const manualChunkGroups = buildRandomManualGroups(rng, drafts);
 
+  // Flag a minority of eligible modules with `sideEffects: false` package metadata. Flagged modules
+  // emit no events (their events are stripped), so the bundler's legal DCE cannot silently drop an
+  // observed side effect; only their folded value survives downstream. The rolls come last so the
+  // rest of a given seed's structure is unchanged.
+  const flagged = chooseSideEffectFreeModules(rng, modules, entries);
+  const finalModules =
+    flagged.size === 0
+      ? modules
+      : modules.map(
+          (module): ModuleModel =>
+            flagged.has(module.id) ? { ...module, events: [], sideEffectFree: true } : module,
+        );
+
   return {
     program: {
-      modules,
+      modules: finalModules,
       entries,
       schedule,
       ...(manualChunkGroups.length > 0 ? { manualChunkGroups } : {}),
     },
   };
+}
+
+/// Choose a meaningful minority of leaf, value-contributing ESM modules to carry `sideEffects:false`
+/// package metadata. Eligibility keeps the oracle sound: a flagged module is ESM, is read by some
+/// module through a value edge (so it is not trivially droppable and invisible), is not an entry,
+/// and is a leaf with no dependencies. A leaf has no upstream side effects, so however the bundler
+/// legally drops it or its initializer under the flag, the observable event stream is unchanged, and
+/// any divergence (a dropped-but-referenced binding, over-aggressive DCE removing needed value code)
+/// is a real bug (rolldown #9961, #10123). The caller strips a flagged module's events so it emits
+/// none, matching the validated no-events invariant. The richer transitive #9961 shape (a flagged
+/// module that itself reads upstream) is covered by a handwritten test rather than generated,
+/// because its soundness needs the folded value to reach a kept event.
+function chooseSideEffectFreeModules(
+  rng: SeededRng,
+  modules: readonly ModuleModel[],
+  entries: readonly EntryModel[],
+): ReadonlySet<string> {
+  const flagged = new Set<string>();
+  const valueReadTargets = new Set<string>();
+  for (const module of modules) {
+    for (const dependency of module.dependencies) {
+      if (
+        dependency.kind === "esm-value-import" ||
+        (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined)
+      ) {
+        valueReadTargets.add(dependency.target);
+      }
+    }
+  }
+  const entryIds = new Set(entries.map((entry) => entry.moduleId));
+  const eligible = modules.filter(
+    (module) =>
+      module.format === "esm" &&
+      module.dependencies.length === 0 &&
+      !entryIds.has(module.id) &&
+      valueReadTargets.has(module.id),
+  );
+  // Flag in a meaningful minority of eligible cases, then a minority of that case's eligible modules.
+  if (eligible.length === 0 || !rng.boolean()) {
+    return flagged;
+  }
+  for (const module of eligible) {
+    if (rng.boolean()) {
+      flagged.add(module.id);
+    }
+  }
+  if (flagged.size === 0) {
+    const fallback = eligible[rng.integer(eligible.length)];
+    if (fallback !== undefined) {
+      flagged.add(fallback.id);
+    }
+  }
+  return flagged;
 }
 
 /// Entries evaluate once each in random order; available dynamic-import triggers are
@@ -673,6 +739,12 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     program.modules.some((module) => module.events.some((event) => (event.reads?.length ?? 0) > 0))
   ) {
     tags.add("variation:value-read");
+  }
+
+  // A module carries `sideEffects: false` package metadata: the primary dead-code-elimination
+  // versus execution-order trigger. Flagged modules emit no events and contribute only values.
+  if (program.modules.some((module) => module.sideEffectFree === true)) {
+    tags.add("variation:side-effect-free-metadata");
   }
 
   const template = deriveTemplateName(program, tags, hasOverlappingEntries, esmCarriersByCjsTarget);

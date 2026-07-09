@@ -114,6 +114,17 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
       }
     }
   }
+  // Unflag a side-effect-free module (drop its `sideEffects: false` metadata). When the failure does
+  // not depend on the flag this simplifies the case; the greedy pass keeps it only if the failure
+  // kind is preserved, which also tells whether the metadata is load-bearing for the bug.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.sideEffectFree !== true) {
+      continue;
+    }
+    const unflagged = { ...module };
+    delete (unflagged as { sideEffectFree?: true }).sideEffectFree;
+    yield editModule(program, moduleIndex, unflagged);
+  }
 }
 
 function withoutReads(event: EventRecord): EventRecord {

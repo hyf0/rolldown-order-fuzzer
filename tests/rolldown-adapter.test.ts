@@ -32,6 +32,7 @@ import {
 } from "../src/rolldown-adapter.ts";
 import { renderProgram } from "../src/render.ts";
 import {
+  looksLikePanic,
   parseBuildChildRequest,
   parseBuildChildResponse,
   runBuildChildFromUnknown,
@@ -320,6 +321,158 @@ describe("withRolldownBuild", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  test("builds and round-trips a #9961-shaped side-effect-free value module", async () => {
+    // source (side-effectful) -> flagged (value only, no events) -> entry (folds the flagged value
+    // into an event). Under strictExecutionOrder + sideEffects:false the bundler may drop the
+    // flagged initializer; if it wrongly does so the folded number diverges or the binding is
+    // undefined. On a correct build source and bundle match.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "flagged",
+              importedName: "w",
+              localName: "flaggedW",
+            },
+          ],
+          events: [
+            { module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "flaggedW" }] },
+          ],
+        },
+        {
+          id: "flagged",
+          format: "esm",
+          sideEffectFree: true,
+          dependencies: [
+            { kind: "esm-value-import", target: "source", importedName: "v", localName: "sourceV" },
+          ],
+          events: [],
+        },
+        {
+          id: "source",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "source", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    const rendered = renderProgram(program);
+
+    const result = await withRolldownBuild(program, rendered, async (artifacts) => {
+      const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+        readFile(join(artifacts.sourceDirectory, "side-effect-free/package.json"), "utf8"),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        sourceEvents: sourceOutcome.events.map((e) => [e.module, e.value]),
+        packageJson,
+      };
+    });
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      sourceEvents: [
+        ["source", 7],
+        ["entry", 8],
+      ],
+      packageJson: '{\n  "sideEffects": false\n}\n',
+    });
+  });
+
+  test("recognizes panic-shaped build errors and rejects ordinary ones", () => {
+    expect(looksLikePanic({ name: "Error", message: "panicked at 'oops', crates/x.rs:1:1" })).toBe(
+      true,
+    );
+    expect(looksLikePanic({ name: "RolldownBuildPanic", message: "anything at all" })).toBe(true);
+    expect(
+      looksLikePanic({
+        name: "Error",
+        message: "Rolldown build process crashed with signal SIGSEGV",
+      }),
+    ).toBe(true);
+    expect(looksLikePanic({ name: "Error", message: "fatal runtime error: stack overflow" })).toBe(
+      true,
+    );
+    expect(looksLikePanic({ name: "Error", message: "Could not resolve './missing'" })).toBe(false);
+    expect(looksLikePanic({ name: "RollupError", message: "Unexpected token (1:5)" })).toBe(false);
+  });
+
+  test("classifies a Rust-panic-shaped build error as a build-failure panic", async () => {
+    await withTemporaryModule(
+      [
+        "export async function rolldown() {",
+        "  throw new Error(\"panicked at 'entered unreachable code', crates/rolldown/src/x.rs:1:1\");",
+        "}",
+        "",
+      ].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          singleEntryProgram(),
+          renderProgram(singleEntryProgram()),
+          async (): Promise<never> => {
+            throw new Error("panic build callback must not run");
+          },
+          { packageSpecifier },
+        );
+
+        expect(result).toMatchObject({ status: "build-error", stage: "build", panic: true });
+      },
+    );
+  });
+
+  test("reclassifies a build-time process crash as a build-failure panic, not a harness error", async () => {
+    await withTemporaryModule(
+      ["export async function rolldown() {", "  process.exit(134);", "}", ""].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          singleEntryProgram(),
+          renderProgram(singleEntryProgram()),
+          async (): Promise<never> => {
+            throw new Error("crash build callback must not run");
+          },
+          { packageSpecifier },
+        );
+
+        expect(result).toMatchObject({
+          status: "build-error",
+          stage: "build",
+          panic: true,
+          error: { name: "RolldownBuildPanic" },
+        });
+        if (result.status !== "ok") {
+          expect(result.error.message).toContain("crashed with exit code 134");
+        }
+      },
+    );
+  });
+
+  test("keeps a crash before the package loads as a harness error", async () => {
+    await withTemporaryModule(
+      ["process.exit(3);", "export async function rolldown() {}", ""].join("\n"),
+      async (packageSpecifier) => {
+        const result = await withRolldownBuild(
+          singleEntryProgram(),
+          renderProgram(singleEntryProgram()),
+          async (): Promise<never> => {
+            throw new Error("startup crash callback must not run");
+          },
+          { packageSpecifier },
+        );
+
+        expect(result).toMatchObject({ status: "harness-error", stage: "build" });
+        expect(result.status === "ok" ? undefined : result.panic).toBeUndefined();
+      },
+    );
   });
 
   test("reports an invalid configurable package specifier as a harness error", async () => {

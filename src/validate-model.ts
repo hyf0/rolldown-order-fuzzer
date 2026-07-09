@@ -108,6 +108,8 @@ function validateModules(
   errors: string[],
 ): void {
   for (const [moduleIndex, module] of modules.entries()) {
+    validateSideEffectFreeModule(module, moduleIndex, errors);
+
     const localBindings = new Set<string>();
     // Each readable binding maps its local name to the member read off it: `undefined` for an ESM
     // value-import (read directly), or the required export name for a CJS readable require.
@@ -157,6 +159,40 @@ function validateModules(
       }
 
       validateEventReads(event, eventPath, readableBindings, errors);
+    }
+  }
+}
+
+/// A `sideEffects: false` module is a user promise the bundler may act on with aggressive dead-code
+/// elimination. To keep the oracle sound, such a module must contribute ONLY values and never emit
+/// an observable event: an emitted event could be legally dropped in the bundle while the source
+/// still emits it. It must also be ESM whose every dependency is a value edge (an `esm-value-import`
+/// the renderer folds into the module's exported value); a side-effect import, dynamic-import
+/// registration, or bare/interop require would be droppable under the flag and could reorder or drop
+/// another module's events. See the `sideEffectFree` doc in model.ts.
+function validateSideEffectFreeModule(
+  module: ModuleModel,
+  moduleIndex: number,
+  errors: string[],
+): void {
+  if (module.sideEffectFree !== true) {
+    return;
+  }
+
+  const path = `modules[${moduleIndex}]`;
+  if (module.format !== "esm") {
+    errors.push(`${path}: a side-effect-free module must be ESM, received ${module.format}`);
+  }
+  if (module.events.length > 0) {
+    errors.push(
+      `${path}: a side-effect-free module must not emit events; its events can be legally dropped under sideEffects:false`,
+    );
+  }
+  for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
+    if (dependency.kind !== "esm-value-import") {
+      errors.push(
+        `${path}.dependencies[${dependencyIndex}]: a side-effect-free module may only carry esm-value-import dependencies, received ${dependency.kind}`,
+      );
     }
   }
 }

@@ -27,6 +27,7 @@ import type { RenderedProgram } from "./render.ts";
 import {
   parseBuildChildResponse,
   BUILD_CHILD_PROTOCOL_VERSION,
+  BUILD_PHASE_PACKAGE_LOADED,
   type BuildChildRequest,
   type BuildChildResponse,
   type BuildChildOutputFile,
@@ -145,6 +146,10 @@ export interface FailedRolldownAdapterResult {
     | "consume-output";
   readonly packageSpecifier: string;
   readonly error: NormalizedError;
+  /// A genuine Rolldown build panic (a Rust panic / napi fatal surfaced as a thrown error, or a
+  /// process crash after the package loaded) rather than an ordinary build error. It always carries
+  /// `status: "build-error"` — a failing verdict — so a panic never counts as a harness discard.
+  readonly panic?: boolean;
 }
 
 export type RolldownAdapterResult<T> =
@@ -661,6 +666,7 @@ async function buildWithChild(
 ): Promise<BuiltRolldown | FailedRolldownBuild> {
   const requestPath = join(temporaryDirectory, "build-request.json");
   const responsePath = join(temporaryDirectory, "build-response.json");
+  const phasePath = join(temporaryDirectory, "build-phase.json");
   const request: BuildChildRequest = {
     version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier,
@@ -695,6 +701,7 @@ async function buildWithChild(
     temporaryDirectory,
     requestPath,
     responsePath,
+    phasePath,
     timeoutMs,
   );
   if (childResult.status === "spawn-error") {
@@ -715,17 +722,35 @@ async function buildWithChild(
     };
   }
   if (childResult.code !== 0 || childResult.signal !== null) {
+    const descriptor =
+      childResult.signal === null
+        ? `exit code ${String(childResult.code)}`
+        : `signal ${childResult.signal}`;
+    // A crash after the package loaded is a genuine Rolldown build panic (a Rust panic or napi fatal
+    // that aborts the process); a crash before it is harness misconfiguration. The phase marker,
+    // written by the child once the package imports, disambiguates the two.
+    if (await buildPackageLoaded(phasePath)) {
+      return {
+        status: "failed",
+        failure: {
+          status: "build-error",
+          stage: "build",
+          packageSpecifier,
+          error: {
+            name: "RolldownBuildPanic",
+            message: `Rolldown build process crashed with ${descriptor}`,
+          },
+          panic: true,
+        },
+      };
+    }
     return {
       status: "failed",
       failure: failure(
         "harness-error",
         "build",
         packageSpecifier,
-        new Error(
-          childResult.signal === null
-            ? `Build child exited with code ${String(childResult.code)}`
-            : `Build child exited with signal ${childResult.signal}`,
-        ),
+        new Error(`Build child crashed during startup with ${descriptor}`),
       ),
     };
   }
@@ -761,6 +786,7 @@ async function buildWithChild(
         stage: response.stage,
         packageSpecifier,
         error: response.error,
+        ...(response.panic === true ? { panic: true } : {}),
       },
     };
   }
@@ -768,6 +794,18 @@ async function buildWithChild(
     status: "ok",
     output: response.outputFiles,
   };
+}
+
+/// Whether the build child recorded that the Rolldown package imported cleanly. A crash after this
+/// marker is written is attributed to the build (a panic); a crash before it is a startup/harness
+/// problem. A missing or unreadable marker is treated as "not loaded".
+async function buildPackageLoaded(phasePath: string): Promise<boolean> {
+  try {
+    const parsed = JSON.parse(await readFile(phasePath, "utf8")) as { readonly phase?: unknown };
+    return parsed.phase === BUILD_PHASE_PACKAGE_LOADED;
+  } catch {
+    return false;
+  }
 }
 
 export type BuildChildProcessResult =
@@ -791,11 +829,18 @@ async function runBuildChildProcess(
   cwd: string,
   requestPath: string,
   responsePath: string,
+  phasePath: string,
   timeoutMs: number,
 ): Promise<BuildChildProcessResult> {
   const child = spawn(
     process.execPath,
-    [...buildChildExecArgv(process.execArgv), BUILD_CHILD_PATH, requestPath, responsePath],
+    [
+      ...buildChildExecArgv(process.execArgv),
+      BUILD_CHILD_PATH,
+      requestPath,
+      responsePath,
+      phasePath,
+    ],
     {
       cwd,
       detached: process.platform !== "win32",

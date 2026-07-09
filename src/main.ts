@@ -35,7 +35,7 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 10 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 11 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
@@ -67,7 +67,7 @@ export type CampaignBundleOutcome = ExecutionOutcome | BundleNotRunOutcome;
 
 export interface BuildFailureVerdict {
   readonly kind: "build-failure";
-  readonly reason: FailedRolldownAdapterResult["stage"];
+  readonly reason: FailedRolldownAdapterResult["stage"] | "panic";
   readonly signature: string;
 }
 
@@ -846,6 +846,18 @@ async function captureBundleFiles(
 }
 
 function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailureVerdict {
+  if (failure.panic === true) {
+    // A genuine Rolldown build panic: a distinct failing verdict (never a harness discard) with a
+    // normalized message identity, deduplicated across runs, producing artifacts like any failure.
+    return {
+      kind: "build-failure",
+      reason: "panic",
+      signature: `build-failure:panic:${JSON.stringify([
+        failure.error.name,
+        normalizeBuildFailureMessage(failure.error.message),
+      ])}`,
+    };
+  }
   return {
     kind: "build-failure",
     reason: failure.stage,

@@ -1,9 +1,9 @@
 /// <reference types="node" />
 
 import { execFile } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -825,6 +825,91 @@ describe("renderProgram", () => {
     });
   });
 
+  test("renders a #9961-shaped side-effect-free value module under a synthetic package, then round-trips", async () => {
+    // A flagged transitive value module: source (side-effectful) -> flagged (value only, no events)
+    // -> entry (folds the flagged value into an event). Its initialization order matters through the
+    // reads, so a dropped/reordered init would change the observed number or crash.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "flagged",
+              importedName: "w",
+              localName: "flaggedW",
+            },
+          ],
+          events: [
+            { module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "flaggedW" }] },
+          ],
+        },
+        {
+          id: "flagged",
+          format: "esm",
+          sideEffectFree: true,
+          dependencies: [
+            { kind: "esm-value-import", target: "source", importedName: "v", localName: "sourceV" },
+          ],
+          events: [],
+        },
+        {
+          id: "source",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "source", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(rendered.files.map((file) => file.path)).toEqual([
+      "module-0000.mjs",
+      "side-effect-free/module-0001.mjs",
+      "module-0002.mjs",
+      "side-effect-free/package.json",
+      "schedule.json",
+    ]);
+    expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
+      [
+        'import { w as flaggedW } from "./side-effect-free/module-0001.mjs";',
+        "",
+        'globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: 1 + flaggedW });',
+        "",
+      ].join("\n"),
+    );
+    // The flagged module renders inside the side-effect-free package, reads upstream through a
+    // parent-relative specifier, emits no events, and exports only its folded value.
+    expect(fileContents(rendered.files, "side-effect-free/module-0001.mjs")).toBe(
+      [
+        'import { v as sourceV } from "../module-0002.mjs";',
+        "",
+        "const __orderExport0 = 0 + sourceV;",
+        "export { __orderExport0 as w };",
+        "",
+      ].join("\n"),
+    );
+    expect(fileContents(rendered.files, "side-effect-free/package.json")).toBe(
+      '{\n  "sideEffects": false\n}\n',
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "source", phase: "evaluate", value: 7 },
+          { version: 1, module: "entry", phase: "evaluate", value: 8 },
+        ],
+      });
+    });
+  });
+
   test("binds a CJS require result and reads a member across interop, then round-trips", async () => {
     const program = {
       modules: [
@@ -909,7 +994,13 @@ async function withRenderedProgram(
   const directory = await mkdtemp(join(tmpdir(), "order-render-"));
 
   try {
-    await Promise.all(files.map((file) => writeFile(join(directory, file.path), file.contents)));
+    await Promise.all(
+      files.map(async (file) => {
+        const path = join(directory, file.path);
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, file.contents);
+      }),
+    );
     await run(directory);
   } finally {
     await rm(directory, { recursive: true, force: true });

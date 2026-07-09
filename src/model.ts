@@ -63,6 +63,16 @@ export type DependencyOperation = EsmDependencyOperation | CjsRequireOperation;
 interface ModuleModelBase {
   readonly id: string;
   readonly events: readonly EventRecord[];
+  /// When `true`, the module is rendered inside a synthetic package whose `package.json` asserts
+  /// `"sideEffects": false`, a user promise the bundler consumes (Node ignores it). Because the
+  /// bundler may then LEGALLY drop the module or its initializer, a flagged module must contribute
+  /// ONLY values — a demanded export folded downstream — and MUST NOT emit `__orderEvent` records:
+  /// an emitted event could be dropped in the bundle while the source still emits it, a false
+  /// differential failure. With no events, however the bundler DCEs the module the observed event
+  /// stream is unchanged, so any divergence (a dropped-but-referenced binding, a wrong folded value,
+  /// a reordering) is a real bug. `validate-model.ts` enforces the no-events invariant; the flag is
+  /// only valid on ESM modules whose dependencies are all value edges (see validate-model.ts).
+  readonly sideEffectFree?: true;
 }
 
 export interface EsmModuleModel extends ModuleModelBase {

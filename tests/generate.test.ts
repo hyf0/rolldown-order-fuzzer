@@ -125,6 +125,60 @@ describe("generateCase", () => {
     expect(valueRead / randomTotal).toBeGreaterThan(0.3);
   });
 
+  test("random-mixed flags a minority of sound side-effect-free value modules", () => {
+    let randomTotal = 0;
+    let flaggedCases = 0;
+    for (let seed = 0; seed < 3_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      randomTotal += 1;
+      const flaggedModules = generated.program.modules.filter(
+        (module) => module.sideEffectFree === true,
+      );
+      if (flaggedModules.length === 0) {
+        expect(generated.coverageTags).not.toContain("variation:side-effect-free-metadata");
+        continue;
+      }
+      flaggedCases += 1;
+      expect(generated.coverageTags).toContain("variation:side-effect-free-metadata");
+
+      const valueReadTargets = new Set(
+        generated.program.modules.flatMap((module) =>
+          module.dependencies.flatMap((dependency) =>
+            dependency.kind === "esm-value-import" ||
+            (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined)
+              ? [dependency.target]
+              : [],
+          ),
+        ),
+      );
+      const entryIds = new Set(generated.program.entries.map((entry) => entry.moduleId));
+      for (const module of flaggedModules) {
+        // Each flagged module is a sound value node: an ESM leaf with no events, read by someone,
+        // and never an entry — however the bundler DCEs it, the event stream is unchanged.
+        expect(module.format, `seed ${seed}: flagged ${module.id} not ESM`).toBe("esm");
+        expect(module.events, `seed ${seed}: flagged ${module.id} emits events`).toEqual([]);
+        expect(module.dependencies, `seed ${seed}: flagged ${module.id} is not a leaf`).toEqual([]);
+        expect(valueReadTargets.has(module.id), `seed ${seed}: flagged ${module.id} unread`).toBe(
+          true,
+        );
+        expect(entryIds.has(module.id), `seed ${seed}: flagged ${module.id} is an entry`).toBe(
+          false,
+        );
+      }
+      expect(flaggedModules.length).toBeLessThan(generated.program.modules.length);
+      expect(validateProgramModel(generated.program)).toEqual([]);
+    }
+
+    expect(randomTotal).toBeGreaterThan(0);
+    // A meaningful minority of random-mixed cases carry the metadata, not almost none and not most.
+    const density = flaggedCases / randomTotal;
+    expect(density).toBeGreaterThan(0.05);
+    expect(density).toBeLessThan(0.5);
+  });
+
   test("value reads never target a module on a cycle", () => {
     for (let seed = 0; seed < 2_000; seed += 1) {
       const generated = generateCase(seed, 8);

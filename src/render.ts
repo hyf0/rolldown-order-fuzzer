@@ -1,3 +1,7 @@
+/// <reference types="node" />
+
+import { posix } from "node:path";
+
 import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
 import { readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
@@ -22,6 +26,14 @@ export interface RenderedProgram {
 
 const SCHEDULE_PATH = "schedule.json";
 
+/// Flagged (`sideEffectFree`) modules render under this directory, which carries a `package.json`
+/// asserting `"sideEffects": false`. Rolldown resolves the nearest `package.json` per module and
+/// honors the flag for files below this root (verified empirically), while the source tree stays
+/// executable because `.mjs`/`.cjs` files ignore `package.json`. Root modules have no such
+/// `package.json`, so the bundler keeps their side effects by default.
+const SIDE_EFFECT_FREE_DIRECTORY = "side-effect-free";
+const SIDE_EFFECT_FREE_PACKAGE_JSON = '{\n  "sideEffects": false\n}\n';
+
 export function renderProgram(program: ProgramModel): RenderedProgram {
   const validationErrors = validateProgramModel(program);
   if (validationErrors.length > 0) {
@@ -33,7 +45,10 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
   }
 
   const modulePaths = new Map(
-    program.modules.map((module, index) => [module.id, modulePath(index, module.format)]),
+    program.modules.map((module, index) => [
+      module.id,
+      modulePath(index, module.format, module.sideEffectFree === true),
+    ]),
   );
   const requestedExports = collectRequestedExports(program);
   const files: RenderedFile[] = [];
@@ -43,6 +58,14 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
     files.push({
       path,
       contents: renderModule(module, modulePaths, requestedExports.get(module.id) ?? []),
+    });
+  }
+
+  // A single synthetic package.json marks every flagged module's directory as side-effect-free.
+  if (program.modules.some((module) => module.sideEffectFree === true)) {
+    files.push({
+      path: `${SIDE_EFFECT_FREE_DIRECTORY}/package.json`,
+      contents: SIDE_EFFECT_FREE_PACKAGE_JSON,
     });
   }
 
@@ -68,9 +91,18 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
   };
 }
 
-function modulePath(index: number, format: ModuleFormat): string {
+function modulePath(index: number, format: ModuleFormat, sideEffectFree: boolean): string {
   const extension = format === "esm" ? "mjs" : "cjs";
-  return `module-${String(index).padStart(4, "0")}.${extension}`;
+  const base = `module-${String(index).padStart(4, "0")}.${extension}`;
+  return sideEffectFree ? `${SIDE_EFFECT_FREE_DIRECTORY}/${base}` : base;
+}
+
+/// A relative import specifier from one rendered module to another, honoring the side-effect-free
+/// subdirectory. Root-to-root keeps the historical `./module-NNNN.ext` form; crossing the
+/// side-effect-free boundary yields `./side-effect-free/…` or `../…`.
+function importSpecifier(fromPath: string, toPath: string): string {
+  const specifier = posix.relative(posix.dirname(fromPath), toPath);
+  return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
 
 function collectRequestedExports(program: ProgramModel): ReadonlyMap<string, readonly string[]> {
@@ -105,22 +137,23 @@ function renderModule(
   requestedExports: readonly string[],
 ): string {
   const readable = readableBindingsOf(module.dependencies);
+  const selfPath = getRequiredPath(modulePaths, module.id);
 
   if (module.format === "cjs") {
     const requireLines: string[] = [];
     const dynamicRegistrationLines: string[] = [];
     for (const dependency of module.dependencies) {
-      const targetPath = getRequiredPath(modulePaths, dependency.target);
+      const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
       if (dependency.kind === "esm-dynamic-import") {
         // `import()` is legal inside CommonJS in Node.
         dynamicRegistrationLines.push(
-          `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("./${targetPath}");`,
+          `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`,
         );
       } else if (dependency.resultBinding !== undefined) {
         // Bind the require result so the target's exports can be read into events and exports.
-        requireLines.push(`const ${dependency.resultBinding} = require("./${targetPath}");`);
+        requireLines.push(`const ${dependency.resultBinding} = require("${specifier}");`);
       } else {
-        requireLines.push(`require("./${targetPath}");`);
+        requireLines.push(`require("${specifier}");`);
       }
     }
 
@@ -145,17 +178,17 @@ function renderModule(
   const dynamicRegistrationLines: string[] = [];
   const usedBindings = new Set<string>();
   for (const dependency of module.dependencies) {
-    const targetPath = getRequiredPath(modulePaths, dependency.target);
+    const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
     if (dependency.kind === "esm-side-effect-import") {
-      importLines.push(`import "./${targetPath}";`);
+      importLines.push(`import "${specifier}";`);
     } else if (dependency.kind === "esm-value-import") {
       usedBindings.add(dependency.localName);
       importLines.push(
-        `import { ${dependency.importedName} as ${dependency.localName} } from "./${targetPath}";`,
+        `import { ${dependency.importedName} as ${dependency.localName} } from "${specifier}";`,
       );
     } else {
       dynamicRegistrationLines.push(
-        `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("./${targetPath}");`,
+        `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`,
       );
     }
   }

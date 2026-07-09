@@ -16,6 +16,28 @@ import type { NormalizedError } from "./protocol.ts";
 
 export const BUILD_CHILD_PROTOCOL_VERSION = 1 as const;
 
+/// Written by the child to its phase-marker file once the Rolldown package has imported cleanly, so
+/// the parent can tell a build-time crash (a genuine Rolldown panic) from a crash during package
+/// loading (harness misconfiguration). See rolldown-adapter.ts.
+export const BUILD_PHASE_PACKAGE_LOADED = "package-loaded" as const;
+
+const PANIC_MESSAGE_PATTERN =
+  /\bpanicked\b|\bpanic occurred\b|fatal runtime error|fatal error|\bSIGABRT\b|\bSIGSEGV\b|\bSIGILL\b|\bSIGBUS\b|\bSIGTRAP\b|process crashed|RolldownBuildPanic/i;
+
+/// A genuine Rolldown build panic — a Rust panic surfaced as a thrown error, a napi fatal, or a
+/// process crash — as opposed to an ordinary build error or a true harness misconfiguration. The
+/// parent gives such failures a distinct, deduplicated `build-failure:panic` verdict.
+export function looksLikePanic(error: NormalizedError): boolean {
+  return error.name === "RolldownBuildPanic" || PANIC_MESSAGE_PATTERN.test(error.message);
+}
+
+export interface BuildChildHooks {
+  /// Invoked after the Rolldown package imports and exposes a `rolldown` function, before the build
+  /// starts. The child uses it to write a phase marker; the parent reads that marker to attribute a
+  /// subsequent hard crash to the build rather than to package loading.
+  readonly onPackageLoaded?: () => void | Promise<void>;
+}
+
 export interface BuildChildManualChunkGroup {
   readonly name: string;
   readonly modulePaths: readonly string[];
@@ -60,6 +82,9 @@ export interface BuildChildFailure {
   readonly failureStatus: "harness-error" | "build-error";
   readonly stage: "load-package" | "build";
   readonly error: NormalizedError;
+  /// Set when the build error is a genuine Rolldown panic (see `looksLikePanic`). The parent maps it
+  /// to a distinct `build-failure:panic` verdict instead of a generic build failure.
+  readonly panic?: boolean;
 }
 
 export type BuildChildResponse = BuildChildSuccess | BuildChildFailure;
@@ -156,6 +181,9 @@ export function parseBuildChildResponse(
     if (response.stage !== "load-package" && response.stage !== "build") {
       throw new TypeError("build failure stage is invalid");
     }
+    if (response.panic !== undefined && typeof response.panic !== "boolean") {
+      throw new TypeError("build failure panic must be a boolean");
+    }
     const error = requireRecord(response.error, "build failure error");
     return {
       version: BUILD_CHILD_PROTOCOL_VERSION,
@@ -166,20 +194,27 @@ export function parseBuildChildResponse(
         name: requireNonEmptyString(error.name, "build failure error.name"),
         message: requireString(error.message, "build failure error.message"),
       },
+      ...(response.panic === true ? { panic: true } : {}),
     };
   }
   throw new TypeError(`Unsupported build response status: ${String(response.status)}`);
 }
 
-export async function runBuildChildFromUnknown(value: unknown): Promise<BuildChildResponse> {
+export async function runBuildChildFromUnknown(
+  value: unknown,
+  hooks: BuildChildHooks = {},
+): Promise<BuildChildResponse> {
   try {
-    return await runBuildChild(parseBuildChildRequest(value));
+    return await runBuildChild(parseBuildChildRequest(value), hooks);
   } catch (error) {
     return childFailure("harness-error", "build", error);
   }
 }
 
-export async function runBuildChild(request: BuildChildRequest): Promise<BuildChildResponse> {
+export async function runBuildChild(
+  request: BuildChildRequest,
+  hooks: BuildChildHooks = {},
+): Promise<BuildChildResponse> {
   let loaded: unknown;
   try {
     loaded = await import(request.packageSpecifier);
@@ -195,6 +230,10 @@ export async function runBuildChild(request: BuildChildRequest): Promise<BuildCh
       ),
     );
   }
+
+  // The package imported cleanly. Signal the parent so a subsequent hard crash (a Rust panic or napi
+  // fatal that aborts the process) is attributed to the build, not to package loading.
+  await hooks.onPackageLoaded?.();
 
   let bundle: RolldownBuild | undefined;
   let output: RolldownOutput | undefined;
@@ -341,12 +380,17 @@ function childFailure(
   stage: BuildChildFailure["stage"],
   error: unknown,
 ): BuildChildFailure {
+  const normalized = normalizeError(error);
+  // A build-time error whose shape matches a Rust panic / napi fatal is a genuine Rolldown panic;
+  // load-package and harness failures are never panics.
+  const panic = failureStatus === "build-error" && looksLikePanic(normalized);
   return {
     version: BUILD_CHILD_PROTOCOL_VERSION,
     status: "failure",
     failureStatus,
     stage,
-    error: normalizeError(error),
+    error: normalized,
+    ...(panic ? { panic: true } : {}),
   };
 }
 
@@ -421,6 +465,7 @@ function requireAbsolutePath(value: unknown, label: string): string {
 async function main(): Promise<void> {
   const requestPath = process.argv[2];
   const responsePath = process.argv[3];
+  const phasePath = process.argv[4];
   if (requestPath === undefined || responsePath === undefined) {
     process.exitCode = 2;
     return;
@@ -434,9 +479,20 @@ async function main(): Promise<void> {
   const response =
     value instanceof Error
       ? childFailure("harness-error", "build", value)
-      : await runBuildChildFromUnknown(value);
+      : await runBuildChildFromUnknown(
+          value,
+          phasePath === undefined
+            ? {}
+            : { onPackageLoaded: () => writeBuildPhaseMarker(phasePath) },
+        );
   await mkdir(dirname(responsePath), { recursive: true });
   await writeFile(responsePath, `${JSON.stringify(response)}\n`);
+}
+
+async function writeBuildPhaseMarker(phasePath: string): Promise<void> {
+  try {
+    await writeFile(phasePath, `${JSON.stringify({ phase: BUILD_PHASE_PACKAGE_LOADED })}\n`);
+  } catch {}
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

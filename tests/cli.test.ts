@@ -44,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 10", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(10);
+  test("uses artifact schema version 11", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(11);
   });
 
   test("parses and validates --format-regime", () => {
@@ -239,6 +239,51 @@ describe("runCampaign", () => {
     });
 
     expect(summary).toEqual({ casesRun: 1, passed: 0, failed: 1, exitCode: 2 });
+  });
+
+  test("classifies a Rolldown build panic as a failing verdict, not a harness discard", async () => {
+    const bundleOutcome = {
+      status: "not-run",
+      reason: "adapter-failure",
+      adapterFailure: {
+        status: "build-error",
+        stage: "build",
+        packageSpecifier: "rolldown",
+        panic: true,
+        error: {
+          name: "RolldownBuildPanic",
+          message: "Rolldown build process crashed with signal SIGABRT",
+        },
+      },
+    } as const satisfies BundleNotRunOutcome;
+
+    const verdict = classifyCampaignVerdict(ok([event("entry", 1)]), bundleOutcome);
+    expect(verdict).toEqual({
+      kind: "build-failure",
+      reason: "panic",
+      signature:
+        'build-failure:panic:["RolldownBuildPanic","Rolldown build process crashed with signal SIGABRT"]',
+    });
+
+    // A panic fails the campaign as a real bug (exit code 1), never as a harness error (exit code 2).
+    const generated = generateCase(100, DEFAULT_CASE_SIZE);
+    const summary = await runCampaign(campaignOptions(), {
+      executeCase: async () => ({
+        generated,
+        options: campaignOptions(),
+        rendered: renderProgram(generated.program),
+        sourceOutcome: ok([event("entry", 1)]),
+        bundleOutcome,
+        bundleManifest: null,
+        bundleFiles: [],
+        runtimeIdentity: testRuntimeIdentity(),
+        verdict,
+      }),
+      writeFailure: async () => "failure",
+      writeLine: () => {},
+    });
+
+    expect(summary).toEqual({ casesRun: 1, passed: 0, failed: 1, exitCode: 1 });
   });
 
   test("keeps source invalidity ahead of an adapter failure", () => {
@@ -971,7 +1016,16 @@ describe("writeFailureArtifacts", () => {
         expectedRenderedSourcePaths,
       );
       expect(expectedRenderedSourcePaths).not.toContain("runtime.cjs");
-      expect(expectedRenderedSourcePaths).toHaveLength(generated.program.modules.length + 1);
+      // One rendered file per module plus schedule.json, and a synthetic package.json when the case
+      // carries any side-effect-free module.
+      const sideEffectFreePackages = generated.program.modules.some(
+        (module) => module.sideEffectFree === true,
+      )
+        ? 1
+        : 0;
+      expect(expectedRenderedSourcePaths).toHaveLength(
+        generated.program.modules.length + 1 + sideEffectFreePackages,
+      );
       await expect(readJson(join(artifactDirectory, "model.json"))).resolves.toEqual(
         generated.program,
       );
