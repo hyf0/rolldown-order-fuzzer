@@ -83,11 +83,97 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
     errors,
   );
 
+  validateCycleValueFlow(program.modules, modulesById, errors);
+
   const entriesByName = collectEntries(program.entries, modulesById, errors);
   validateSchedule(program, entriesByName, modulesById, dynamicRegistrationOwners, errors);
   validateManualChunkGroups(program, modulesById, errors);
 
   return errors;
+}
+
+/// The modules each module can reach through SYNCHRONOUS dependency edges (everything except a
+/// dynamic import, which defers). A dependency `A -> B` closes a cycle exactly when `B` can
+/// synchronously reach `A`; the read across such an edge may observe a still-evaluating target.
+function computeSynchronousReachability(
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const reachability = new Map<string, ReadonlySet<string>>();
+  for (const start of modulesById.keys()) {
+    const reached = new Set<string>();
+    const pending: string[] = [start];
+    while (pending.length > 0) {
+      const moduleId = pending.pop();
+      if (moduleId === undefined) {
+        continue;
+      }
+      for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
+        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
+          continue;
+        }
+        reached.add(dependency.target);
+        pending.push(dependency.target);
+      }
+    }
+    reachability.set(start, reached);
+  }
+  return reachability;
+}
+
+/// Cycle value-flow soundness (Node-legal, TDZ-free, NaN-free). A read across a cycle-closing edge
+/// may run while its target is still evaluating, so it must be made TOTAL by construction:
+///
+/// - an ESM value read that closes a cycle must be a hoisted-function CALL import (`call: true`),
+///   the only form callable before the target's body has run — a plain `const`/`let` read hits TDZ;
+/// - an ESM namespace import may not close a cycle at all (any member read risks TDZ);
+/// - a readable CJS require that closes a cycle must be GUARDED (`guard: true`) so a partial export
+///   folds to a sentinel instead of NaN (a NaN would crash identically on both sides — a degenerate
+///   always-equal case the oracle must never rely on).
+///
+/// A hoisted-function call import must also target an ESM module (only an ESM `function` export is
+/// callable while the module is mid-evaluation). Forward (non-cycle) edges are unrestricted: a
+/// `call`/`guard` there is harmless, and a plain read is sound because the target is fully evaluated.
+function validateCycleValueFlow(
+  modules: readonly ModuleModel[],
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  errors: string[],
+): void {
+  const reachability = computeSynchronousReachability(modulesById);
+  for (const [moduleIndex, module] of modules.entries()) {
+    for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
+      const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
+      const target = modulesById.get(dependency.target);
+      const closesCycle = reachability.get(dependency.target)?.has(module.id) === true;
+
+      if (dependency.kind === "esm-value-import") {
+        if (dependency.call === true && target !== undefined && target.format !== "esm") {
+          errors.push(
+            `${path}: a hoisted-function call import must target an ESM module, target ${quote(dependency.target)} is ${target.format}`,
+          );
+        }
+        if (closesCycle && dependency.call !== true) {
+          errors.push(
+            `${path}: an ESM value import that closes a cycle must be a hoisted-function call import (call: true) to avoid TDZ`,
+          );
+        }
+      } else if (dependency.kind === "esm-namespace-import") {
+        if (closesCycle) {
+          errors.push(
+            `${path}: an ESM namespace import cannot close a cycle; a member read would hit TDZ`,
+          );
+        }
+      } else if (
+        dependency.kind === "cjs-require" &&
+        dependency.resultBinding !== undefined &&
+        closesCycle &&
+        dependency.guard !== true
+      ) {
+        errors.push(
+          `${path}: a readable require that closes a cycle must be guarded (guard: true) so a partial export folds to a sentinel instead of NaN`,
+        );
+      }
+    }
+  }
 }
 
 function collectModules(
@@ -370,6 +456,11 @@ function validateRequireBinding(
   errors: string[],
 ): void {
   if (dependency.resultBinding === undefined && dependency.readName === undefined) {
+    if (dependency.guard === true) {
+      errors.push(
+        `${path}: guard is only meaningful on a readable require (set resultBinding + readName)`,
+      );
+    }
     return;
   }
   if (dependency.resultBinding === undefined || dependency.readName === undefined) {

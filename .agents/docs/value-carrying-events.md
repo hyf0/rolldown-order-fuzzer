@@ -26,14 +26,16 @@ export. See [redesign-principles.md](./redesign-principles.md) and
 
 ## Invariants that must hold (do not break these)
 
-- **Reads are forward-only and never close a cycle.** A readable binding always targets a module
-  evaluated strictly before the reader, so a read never hits TDZ and never reads a partially
-  evaluated cyclic module. The generator enforces this structurally: value imports and readable
-  requires are only ever added on forward DAG edges; the single edge into a cycle ring's head is
-  created with `allowRead = false`, so no readable binding ever targets a ring member. Rings keep
-  side-effect/require edges only. The renderer cannot see cycle structure, so this must stay a
-  generator + model guarantee (validation does not re-derive cycles), matching the pre-existing
-  "value-import cycles are never generated" exclusion.
+- **A forward read never hits TDZ; a cycle read is made total by construction.** A forward readable
+  binding targets a module evaluated strictly before the reader, so it never hits TDZ and never reads
+  a partially evaluated module. Wave 1–3 kept ALL reads forward (rings carried side-effect/require
+  edges only). Wave 4 ([node-legal-cycles](./node-legal-cycles.md)) lets a read cross a cycle edge,
+  but only in a form that stays Node-legal and total: an ESM cycle edge folds a hoisted-function CALL
+  (`call: true`), and a CJS cycle edge folds a GUARDED partial read (`guard: true`). A plain value
+  read, a namespace read, or an unguarded require may still never close a cycle. This is now a
+  VALIDATED invariant, not only a generator convention: `validateCycleValueFlow` in `validate-model.ts`
+  derives cycle edges (synchronous reachability) and rejects the unsound forms — a deliberate revision
+  of the earlier "validation does not re-derive cycles" note.
 - **Folds stay finite and exact.** Bases are small (`< 2^20`); reads sum values that are themselves
   bounded folds over an acyclic graph of ≤ ~16 modules, so totals stay far below `2^53` — integer
   addition is exact and, since `minify:false` keeps `a + b + c` intact, source and bundle compute

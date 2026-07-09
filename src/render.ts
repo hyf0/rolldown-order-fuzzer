@@ -57,7 +57,12 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
     const path = getRequiredPath(modulePaths, module.id);
     files.push({
       path,
-      contents: renderModule(module, modulePaths, requestedExports.get(module.id) ?? []),
+      contents: renderModule(
+        module,
+        modulePaths,
+        requestedExports.names.get(module.id) ?? [],
+        requestedExports.callable.get(module.id) ?? new Set<string>(),
+      ),
     });
   }
 
@@ -105,13 +110,33 @@ function importSpecifier(fromPath: string, toPath: string): string {
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
 
+interface RequestedExports {
+  /// Per module, the export names it must expose (propagated through re-export chains).
+  readonly names: ReadonlyMap<string, readonly string[]>;
+  /// Per module, the subset of those names demanded as a CALLABLE function export (`export function
+  /// name() { … }`) by a hoisted-function call import. A call import only ever targets a cycle
+  /// member directly (never a barrel), so callable-ness is demanded on the definer and never
+  /// forwarded through a star re-export.
+  readonly callable: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
 /// The export names each module must expose, propagated through re-export (barrel) chains. A value
 /// import demands its imported name; a namespace import demands each read member; a readable require
 /// demands the name it reads; a named re-export always references (demands) its source on the target;
-/// a star re-export forwards any name demanded on the barrel down to its target. The result feeds
-/// both re-export statements and locally synthesized state-derived exports (see `localExportsFor`).
-function collectRequestedExports(program: ProgramModel): ReadonlyMap<string, readonly string[]> {
+/// a star re-export forwards any name demanded on the barrel down to its target. A call import also
+/// records its imported name as callable on the target. The result feeds re-export statements,
+/// locally synthesized state-derived exports, and callable function exports (see `localExportsFor`).
+function collectRequestedExports(program: ProgramModel): RequestedExports {
   const requestedExports = new Map<string, string[]>();
+  const callableExports = new Map<string, Set<string>>();
+  const markCallable = (target: string, name: string): void => {
+    const names = callableExports.get(target);
+    if (names === undefined) {
+      callableExports.set(target, new Set([name]));
+    } else {
+      names.add(name);
+    }
+  };
   const demand = (target: string, name: string): boolean => {
     const names = requestedExports.get(target);
     if (names === undefined) {
@@ -129,6 +154,9 @@ function collectRequestedExports(program: ProgramModel): ReadonlyMap<string, rea
     for (const dependency of module.dependencies) {
       if (dependency.kind === "esm-value-import") {
         demand(dependency.target, dependency.importedName);
+        if (dependency.call === true) {
+          markCallable(dependency.target, dependency.importedName);
+        }
       } else if (dependency.kind === "esm-namespace-import") {
         for (const member of dependency.readMembers) {
           demand(dependency.target, member);
@@ -176,7 +204,7 @@ function collectRequestedExports(program: ProgramModel): ReadonlyMap<string, rea
     }
   }
 
-  return requestedExports;
+  return { names: requestedExports, callable: callableExports };
 }
 
 /// The subset of a module's requested exports it must synthesize locally (a state-derived value):
@@ -200,6 +228,7 @@ function renderModule(
   module: ModuleModel,
   modulePaths: ReadonlyMap<string, string>,
   requestedExports: readonly string[],
+  callableExports: ReadonlySet<string>,
 ): string {
   const readable = readableBindingsOf(module.dependencies);
   const selfPath = getRequiredPath(modulePaths, module.id);
@@ -288,14 +317,27 @@ function renderModule(
     sections.push(renderEvents(module));
   }
   if (localExports.length > 0) {
-    sections.push(renderEsmExports(module, localExports, usedBindings, readable));
+    sections.push(renderEsmExports(module, localExports, usedBindings, readable, callableExports));
   }
 
   return renderSections(sections);
 }
 
+/// The sentinel a guarded cycle read folds to when it observes a not-yet-assigned (partial) CJS
+/// export. Any finite number works; it only has to keep the fold numeric so the event channel never
+/// rejects a NaN. A mis-timed export assignment then diverges as sentinel-vs-value rather than
+/// crashing identically on both sides. See the `guard` flag in model.ts.
+const PARTIAL_READ_SENTINEL = -1;
+
 function renderRead(read: ValueRead): string {
-  return read.member === undefined ? read.binding : `${read.binding}.${read.member}`;
+  const access = read.member === undefined ? read.binding : `${read.binding}.${read.member}`;
+  // A call read folds a hoisted function's return value; safe to call before the defining module's
+  // body has run (function declarations initialize first), so it never hits TDZ across a cycle edge.
+  const expression = read.call === true ? `${access}()` : access;
+  // A guarded read stays total when the target export is partial mid-cycle (undefined -> sentinel).
+  return read.guard === true
+    ? `(Number.isFinite(${expression}) ? ${expression} : ${PARTIAL_READ_SENTINEL})`
+    : expression;
 }
 
 /// A numeric fold: a constant base plus every read, as a JavaScript expression. Used for both
@@ -375,12 +417,22 @@ function renderEsmExports(
   requestedExports: readonly string[],
   usedBindings: Set<string>,
   readable: readonly ValueRead[],
+  callableExports: ReadonlySet<string>,
 ): string[] {
   const base = moduleStateBase(module);
   const lines: string[] = [];
   let candidateIndex = 0;
 
   for (const exportName of requestedExports) {
+    if (callableExports.has(exportName)) {
+      // A hoisted callable export returns a CONSTANT (the module's base), so it is safe to call
+      // before this module's body has run (even mid-cycle, up the stack). It deliberately does NOT
+      // fold the module's own reads: a callable that called its siblings would mutually recurse
+      // around the cycle. The value oracle rides on events and value exports, which fold reads.
+      lines.push(`export function ${exportName}() { return ${base}; }`);
+      continue;
+    }
+
     let bindingName: string;
     do {
       bindingName = `__orderExport${candidateIndex}`;

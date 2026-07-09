@@ -31,6 +31,7 @@ import {
   type BuildChildProcessLike,
 } from "../src/rolldown-adapter.ts";
 import { renderProgram } from "../src/render.ts";
+import { validateProgramModel } from "../src/validate-model.ts";
 import {
   looksLikePanic,
   parseBuildChildRequest,
@@ -596,6 +597,217 @@ describe("withRolldownBuild", () => {
       verdict: { kind: "pass", signature: "pass" },
       events: [["entry", 1]],
       packageJson: '{\n  "sideEffects": false\n}\n',
+    });
+  });
+
+  test("builds and round-trips a #9887-shaped ESM init cycle split across manual chunks", async () => {
+    // An ESM 3-cycle m0 -> m1 -> m2 -> m0 split across two manual chunk groups. Each member folds a
+    // CALL of the next member's hoisted `function` export while that member is mid-evaluation up the
+    // cycle stack — the wrapper is called before its declaration-form module body has finished. A
+    // mis-ordered cross-chunk init (the `init_X is not a function` family, rolldown #9887/#9946)
+    // would throw or fold a wrong number; on a correct build source and bundle match.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "m0" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "m0",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "m1",
+              importedName: "w1",
+              localName: "m0_w1",
+              call: true,
+            },
+          ],
+          events: [
+            {
+              module: "m0",
+              phase: "evaluate",
+              value: 10,
+              reads: [{ binding: "m0_w1", call: true }],
+            },
+          ],
+        },
+        {
+          id: "m1",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "m2",
+              importedName: "w2",
+              localName: "m1_w2",
+              call: true,
+            },
+          ],
+          events: [
+            {
+              module: "m1",
+              phase: "evaluate",
+              value: 20,
+              reads: [{ binding: "m1_w2", call: true }],
+            },
+          ],
+        },
+        {
+          id: "m2",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "m0",
+              importedName: "w0",
+              localName: "m2_w0",
+              call: true,
+            },
+          ],
+          events: [
+            {
+              module: "m2",
+              phase: "evaluate",
+              value: 30,
+              reads: [{ binding: "m2_w0", call: true }],
+            },
+          ],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      manualChunkGroups: [
+        { name: "g0", moduleIds: ["m0"] },
+        { name: "g1", moduleIds: ["m1", "m2"] },
+      ],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+    const rendered = renderProgram(program);
+    // The cycle-edge reads render as hoisted function calls and callable exports, not `const`.
+    expect(
+      rendered.files.some((file) => file.contents.includes("export function w1() { return 20; }")),
+    ).toBe(true);
+    expect(rendered.files.some((file) => file.contents.includes("10 + m0_w1()"))).toBe(true);
+
+    const result = await withRolldownBuild(program, rendered, async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+      };
+    });
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [
+        ["m2", 40],
+        ["m1", 50],
+        ["m0", 30],
+        ["entry", 1],
+      ],
+    });
+  });
+
+  test("builds and round-trips a #3529-shaped CJS partial-export cycle split across manual chunks", async () => {
+    // A CJS cycle a <-> b split across two manual chunk groups, consumed by an ESM entry. Each member
+    // requires the other back mid-evaluation and reads an export NOT YET ASSIGNED — a legal partial
+    // export that is `undefined`. A plain fold would be NaN (a both-sides crash the oracle must not
+    // rely on); the GUARD folds it to the sentinel -1 instead, so the partial read is observable. The
+    // entry post-cycle-reads both members' value exports. A mis-timed CJS init (rolldown #3529 family)
+    // would change a folded number; on a correct build source and bundle match.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "a", importedName: "va", localName: "e_va" },
+            { kind: "esm-value-import", target: "b", importedName: "vb", localName: "e_vb" },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "e_va" }, { binding: "e_vb" }],
+            },
+          ],
+        },
+        {
+          id: "a",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "b", resultBinding: "a_b", readName: "vb", guard: true },
+          ],
+          events: [
+            {
+              module: "a",
+              phase: "evaluate",
+              value: 100,
+              reads: [{ binding: "a_b", member: "vb", guard: true }],
+            },
+          ],
+        },
+        {
+          id: "b",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "a", resultBinding: "b_a", readName: "va", guard: true },
+          ],
+          events: [
+            {
+              module: "b",
+              phase: "evaluate",
+              value: 200,
+              reads: [{ binding: "b_a", member: "va", guard: true }],
+            },
+          ],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      manualChunkGroups: [
+        { name: "ga", moduleIds: ["a"] },
+        { name: "gb", moduleIds: ["b"] },
+      ],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+    const rendered = renderProgram(program);
+    // The cycle-edge read renders with the finite guard so a partial export folds to a sentinel.
+    expect(
+      rendered.files.some((file) =>
+        file.contents.includes("Number.isFinite(a_b.vb) ? a_b.vb : -1"),
+      ),
+    ).toBe(true);
+
+    const result = await withRolldownBuild(program, rendered, async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+      };
+    });
+
+    // b reads a.va while a is still evaluating (partial -> -1); a reads b.vb once b has finished.
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [
+        ["b", 199],
+        ["a", 299],
+        ["entry", 499],
+      ],
     });
   });
 

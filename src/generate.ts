@@ -41,9 +41,10 @@ export interface GeneratedCase {
 
 export const MAX_CASE_SIZE = 16;
 
-/// Upper bound on modules in a random-mixed program (DAG + optional ring + inserted barrels), so a
-/// case's rendered graph stays small enough to build and execute quickly and barrels never blow the
-/// budget. The DAG caps at 11 and a ring adds up to 3, leaving room for a couple of barrel modules.
+/// Upper bound on modules in a random-mixed program (DAG + optional cycle cluster + inserted
+/// barrels), so a case's rendered graph stays small enough to build and execute quickly. The DAG
+/// caps at 11; the cycle cluster (base ring + optional interlocking sub-cycle) is sized within
+/// `MAX_RANDOM_MODULES - dagCount - 2`, reserving two slots for barrel modules.
 const MAX_RANDOM_MODULES = 16;
 
 export function generateCase(
@@ -389,30 +390,146 @@ function buildRandomMixed(
     }
   }
 
-  if (ringCount > 0) {
+  // A single-format cycle cluster, richer than a bare ring: optional in-cycle value flow (ESM
+  // hoisted-function calls, CJS guarded partial reads), an optional chord, an optional interlocking
+  // second cycle sharing a hub, several external edges entering at different members, and post-cycle
+  // readers of cycle exports. Every value read across a cycle edge is a `call` (ESM) or `guard` (CJS)
+  // so it stays Node-legal, TDZ-free, and NaN-free (see `.agents/docs/node-legal-cycles.md`). The
+  // whole cluster is one format, so Node's require-of-evaluating-ESM error stays out.
+  let cycleMemberIds: ReadonlySet<string> = new Set();
+  const cycleBudget = Math.max(0, MAX_RANDOM_MODULES - dagCount - 2);
+  if (ringCount > 0 && cycleBudget >= 2) {
     const ringFormat: ModuleFormat =
       regime === "mixed" ? (rng.boolean() ? "esm" : "cjs") : rollModuleFormat();
-    const ring: RandomModuleDraft[] = Array.from({ length: ringCount }, (_, index) => ({
-      id: `ring${index}`,
-      format: ringFormat,
-      dependencies: [],
-    }));
-    for (const [index, member] of ring.entries()) {
-      const next = ring[(index + 1) % ringCount];
+    const cycleMembers: RandomModuleDraft[] = [];
+    const makeMember = (): RandomModuleDraft => {
+      const member: RandomModuleDraft = {
+        id: `ring${cycleMembers.length}`,
+        format: ringFormat,
+        dependencies: [],
+      };
+      cycleMembers.push(member);
+      return member;
+    };
+    // A single cycle edge from -> toId. When it may carry a read, ESM uses a hoisted-function CALL
+    // import and CJS uses a GUARDED readable require — the only Node-legal, total forms across a
+    // cycle edge. Otherwise a plain side-effect import / require.
+    const wireCycleEdge = (from: RandomModuleDraft, toId: string, allowRead: boolean): void => {
+      if (usedEdges.has(dependencyKey(from, toId))) {
+        return;
+      }
+      usedEdges.add(dependencyKey(from, toId));
+      if (ringFormat === "cjs") {
+        from.dependencies.push(
+          allowRead && rng.boolean()
+            ? {
+                kind: "cjs-require",
+                target: toId,
+                resultBinding: `rc_${from.id}_${toId}`,
+                readName: `v${toId}`,
+                guard: true,
+              }
+            : { kind: "cjs-require", target: toId },
+        );
+      } else {
+        from.dependencies.push(
+          allowRead && rng.boolean()
+            ? {
+                kind: "esm-value-import",
+                target: toId,
+                importedName: `f${toId}`,
+                localName: `cc_${from.id}_${toId}`,
+                call: true,
+              }
+            : { kind: "esm-side-effect-import", target: toId },
+        );
+      }
+    };
+
+    const baseSize = Math.min(ringCount, cycleBudget);
+    const base = Array.from({ length: baseSize }, () => makeMember());
+    for (const [index, member] of base.entries()) {
+      const next = base[(index + 1) % baseSize];
       if (next !== undefined) {
-        member.dependencies.push(
-          ringFormat === "cjs"
-            ? { kind: "cjs-require", target: next.id }
-            : { kind: "esm-side-effect-import", target: next.id },
+        wireCycleEdge(member, next.id, true);
+      }
+    }
+
+    // A chord: one extra non-adjacent intra-ring edge (needs at least three members).
+    if (baseSize >= 3 && rng.boolean()) {
+      const fromIndex = rng.integer(baseSize);
+      const from = base[fromIndex];
+      const to = base[(fromIndex + 2) % baseSize];
+      if (from !== undefined && to !== undefined) {
+        wireCycleEdge(from, to.id, rng.boolean());
+      }
+    }
+
+    // An interlocking second cycle sharing the hub (base[0]), a figure-eight: hub -> s0 -> … -> hub.
+    const remaining = cycleBudget - cycleMembers.length;
+    const hub = base[0];
+    if (remaining >= 1 && hub !== undefined && rng.integer(3) === 0) {
+      const subLength = Math.min(1 + rng.integer(2), remaining);
+      let previous = hub;
+      for (let step = 0; step < subLength; step += 1) {
+        const member = makeMember();
+        wireCycleEdge(previous, member.id, true);
+        previous = member;
+      }
+      wireCycleEdge(previous, hub.id, true);
+    }
+
+    drafts.push(...cycleMembers);
+    cycleMemberIds = new Set(cycleMembers.map((member) => member.id));
+
+    // Several external synchronous edges enter the cycle at DISTINCT members (from DAG carriers).
+    const enteringMembers = pickDistinct(
+      rng,
+      cycleMembers,
+      1 + rng.integer(Math.min(3, cycleMembers.length)),
+    );
+    for (const member of enteringMembers) {
+      const carrier = drafts[rng.integer(dagCount)];
+      if (carrier !== undefined && !usedEdges.has(dependencyKey(carrier, member.id))) {
+        usedEdges.add(dependencyKey(carrier, member.id));
+        carrier.dependencies.push(
+          carrier.format === "cjs"
+            ? { kind: "cjs-require", target: member.id }
+            : { kind: "esm-side-effect-import", target: member.id },
         );
       }
     }
-    const head = ring[0];
-    const carrier = drafts[rng.integer(dagCount)];
-    if (head !== undefined && carrier !== undefined) {
-      addDependency(carrier, head, false);
+
+    // Post-cycle readers: DAG modules that read a cycle member's value export (a forward edge, the
+    // member fully evaluated), so the value that flowed through the cycle is observed downstream.
+    if (rng.boolean()) {
+      for (let reader = 0; reader < 1 + rng.integer(2); reader += 1) {
+        const dagReader = drafts[rng.integer(dagCount)];
+        const member = cycleMembers[rng.integer(cycleMembers.length)];
+        if (
+          dagReader !== undefined &&
+          member !== undefined &&
+          !usedEdges.has(dependencyKey(dagReader, member.id))
+        ) {
+          usedEdges.add(dependencyKey(dagReader, member.id));
+          dagReader.dependencies.push(
+            dagReader.format === "cjs"
+              ? {
+                  kind: "cjs-require",
+                  target: member.id,
+                  resultBinding: `rp_${dagReader.id}_${member.id}`,
+                  readName: `v${member.id}`,
+                }
+              : {
+                  kind: "esm-value-import",
+                  target: member.id,
+                  importedName: `v${member.id}`,
+                  localName: `pc_${dagReader.id}_${member.id}`,
+                },
+          );
+        }
+      }
     }
-    drafts.push(...ring);
   }
 
   // Insert barrel (re-export) chains between some ESM readers and their ESM definers. The read now
@@ -449,6 +566,19 @@ function buildRandomMixed(
   for (let extra = rng.integer(3); extra > 0; extra -= 1) {
     entryIndices.add(rng.integer(drafts.length));
   }
+  // Sometimes make several cycle members entries, so the schedule enters the cycle at different
+  // members (each import/require-entry a distinct entry point into the same single-format cluster).
+  if (cycleMemberIds.size >= 2 && rng.boolean()) {
+    const cycleIndices = drafts.flatMap((draft, index) =>
+      cycleMemberIds.has(draft.id) ? [index] : [],
+    );
+    for (let extra = 1 + rng.integer(2); extra > 0 && cycleIndices.length > 0; extra -= 1) {
+      const pick = cycleIndices[rng.integer(cycleIndices.length)];
+      if (pick !== undefined) {
+        entryIndices.add(pick);
+      }
+    }
+  }
   const entries = [...entryIndices]
     .map((index) => drafts[index])
     .filter((draft) => draft !== undefined)
@@ -456,7 +586,7 @@ function buildRandomMixed(
 
   const schedule = buildRandomSchedule(rng, modules, entries, registrations);
 
-  const manualChunkGroups = buildRandomManualGroups(rng, drafts);
+  const manualChunkGroups = buildRandomManualGroups(rng, drafts, cycleMemberIds);
 
   // Flag a minority of eligible modules with `sideEffects: false` package metadata. Flagged modules
   // emit no events (their events are stripped), so the bundler's legal DCE cannot silently drop an
@@ -549,6 +679,11 @@ function insertBarrelChains(
         break;
       }
       if (dependency.kind !== "esm-value-import" && dependency.kind !== "esm-namespace-import") {
+        continue;
+      }
+      // Never reroute a hoisted-function CALL import: it is an in-cycle edge, and a barrel is a
+      // forward-only re-exporter that would break the cycle (and cannot forward a callable export).
+      if (dependency.kind === "esm-value-import" && dependency.call === true) {
         continue;
       }
       const forwardedName = barrelForwardedName(dependency);
@@ -723,10 +858,44 @@ function buildRandomSchedule(
   return schedule;
 }
 
+/// A random distinct subset of `items` of size `count`, a Fisher-Yates prefix. Used to pick the
+/// cycle members that external edges enter.
+function pickDistinct<T>(rng: SeededRng, items: readonly T[], count: number): T[] {
+  const pool = [...items];
+  for (let index = pool.length - 1; index > 0; index -= 1) {
+    const swap = rng.integer(index + 1);
+    const left = pool[index];
+    const right = pool[swap];
+    if (left !== undefined && right !== undefined) {
+      pool[index] = right;
+      pool[swap] = left;
+    }
+  }
+  return pool.slice(0, Math.max(0, Math.min(count, pool.length)));
+}
+
 function buildRandomManualGroups(
   rng: SeededRng,
   drafts: readonly RandomModuleDraft[],
+  cycleMemberIds: ReadonlySet<string>,
 ): ManualChunkGroup[] {
+  // Deliberately split a cycle across chunk groups — the cross-chunk init-cycle trigger behind the
+  // `init_X is not a function` family (rolldown #3529, #9887, #9946). Each group's `test` may match a
+  // single module; rolldown accepts that (verified), so a 2-member cycle can split one member each.
+  const cycleMembers = drafts.filter((draft) => cycleMemberIds.has(draft.id));
+  if (cycleMembers.length >= 2 && rng.boolean()) {
+    const first: string[] = [];
+    const second: string[] = [];
+    for (const [index, member] of cycleMembers.entries()) {
+      (index % 2 === 0 ? first : second).push(member.id);
+    }
+    if (first.length > 0 && second.length > 0) {
+      return [
+        { name: "cycle-a", moduleIds: first },
+        { name: "cycle-b", moduleIds: second },
+      ];
+    }
+  }
   if (rng.integer(3) !== 0 || drafts.length < 4) {
     return [];
   }
@@ -848,14 +1017,72 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     tags.add("mechanism:entry-also-imported");
   }
 
-  const cycleFormats = syncCycleFormats(modulesById);
-  if (cycleFormats.size > 0) {
+  const cycles = analyzeCycles(modulesById);
+  if (cycles.cyclicMembers.size > 0) {
     tags.add("mechanism:cycle");
-    if (cycleFormats.size === 1 && cycleFormats.has("esm")) {
+    if (cycles.formats.size === 1 && cycles.formats.has("esm")) {
       tags.add("mechanism:esm-cycle");
     }
-    if (cycleFormats.size === 1 && cycleFormats.has("cjs")) {
+    if (cycles.formats.size === 1 && cycles.formats.has("cjs")) {
       tags.add("mechanism:cjs-cycle");
+    }
+    if (cycles.hasChord) {
+      tags.add("mechanism:cycle-chord");
+    }
+    if (cycles.hasInterlocking) {
+      tags.add("mechanism:interlocking-cycles");
+    }
+    if (cycles.hasMultiEnter) {
+      tags.add("mechanism:cycle-multi-enter");
+    }
+    // A cycle whose members land in two or more manual chunk groups — the cross-chunk init-cycle
+    // shape behind the `init_X is not a function` family (rolldown #3529, #9887, #9946, vite #22341).
+    const groupsById = new Map<string, string>();
+    for (const group of program.manualChunkGroups ?? []) {
+      for (const moduleId of group.moduleIds) {
+        groupsById.set(moduleId, group.name);
+      }
+    }
+    if (
+      cycles.sccs.some((scc) => {
+        const groups = new Set(
+          scc.map((id) => groupsById.get(id)).filter((name) => name !== undefined),
+        );
+        return groups.size >= 2;
+      })
+    ) {
+      tags.add("mechanism:cycle-split-groups");
+    }
+    // A value read folded across a cycle edge (a hoisted-function call or a guarded partial read) —
+    // cycle data flow, not just cycle side-effect ordering.
+    const cycleReads = program.modules.flatMap((module) =>
+      module.events.flatMap((event) => event.reads ?? []),
+    );
+    if (cycleReads.some((read) => read.call === true || read.guard === true)) {
+      tags.add("mechanism:cycle-value-read");
+    }
+    if (cycleReads.some((read) => read.call === true)) {
+      tags.add("variation:cycle-hoisted-call");
+    }
+    if (cycleReads.some((read) => read.guard === true)) {
+      tags.add("variation:cycle-partial-read");
+    }
+    // A module OUTSIDE every cycle reads a cycle member's export (forward, fully-evaluated) — the
+    // value that flowed through the cycle observed downstream.
+    if (
+      program.modules.some(
+        (module) =>
+          !cycles.cyclicMembers.has(module.id) &&
+          module.dependencies.some(
+            (dependency) =>
+              cycles.cyclicMembers.has(dependency.target) &&
+              (dependency.kind === "esm-value-import" ||
+                dependency.kind === "esm-namespace-import" ||
+                (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined)),
+          ),
+      )
+    ) {
+      tags.add("mechanism:post-cycle-read");
     }
   }
 
@@ -980,32 +1207,136 @@ function reachesTopLevelAwait(
   );
 }
 
-/// Formats of every module sitting on a cycle of synchronous (non-dynamic) dependencies.
-function syncCycleFormats(modulesById: ReadonlyMap<string, ModuleModel>): Set<ModuleFormat> {
-  const formats = new Set<ModuleFormat>();
-  for (const module of modulesById.values()) {
-    const pending = module.dependencies.flatMap((dependency) =>
-      dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
-    );
-    const visited = new Set<string>();
+interface CycleAnalysis {
+  /// Every module sitting on a synchronous (non-dynamic) cycle.
+  readonly cyclicMembers: ReadonlySet<string>;
+  /// The strongly connected components of size >= 2 (each a distinct cyclic cluster).
+  readonly sccs: readonly (readonly string[])[];
+  /// Formats present among cyclic members (single-format cycles keep this size 1).
+  readonly formats: ReadonlySet<ModuleFormat>;
+  /// A cluster with more internal edges than a bare ring needs (a chord), and no shared hub.
+  readonly hasChord: boolean;
+  /// A cluster with a shared hub node (internal in-degree >= 2 and out-degree >= 2) joining two
+  /// cycles — a figure-eight of interlocking cycles.
+  readonly hasInterlocking: boolean;
+  /// A cluster entered by external synchronous edges at two or more distinct members.
+  readonly hasMultiEnter: boolean;
+}
+
+/// Synchronous (non-dynamic) reachability from each module, for cycle analysis.
+function synchronousReachability(
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): Map<string, Set<string>> {
+  const reachability = new Map<string, Set<string>>();
+  for (const start of modulesById.keys()) {
+    const reached = new Set<string>();
+    const pending = [start];
     while (pending.length > 0) {
       const moduleId = pending.pop();
-      if (moduleId === undefined || visited.has(moduleId)) {
+      if (moduleId === undefined) {
         continue;
       }
-      visited.add(moduleId);
-      if (moduleId === module.id) {
-        formats.add(module.format);
-        break;
-      }
       for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
-        if (dependency.kind !== "esm-dynamic-import") {
-          pending.push(dependency.target);
+        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
+          continue;
+        }
+        reached.add(dependency.target);
+        pending.push(dependency.target);
+      }
+    }
+    reachability.set(start, reached);
+  }
+  return reachability;
+}
+
+/// Analyze the synchronous cycle structure: which modules are on a cycle, their clusters (SCCs), and
+/// the richer topologies (chord, interlocking figure-eight, multiple entry members). Two modules
+/// share a cluster when each synchronously reaches the other; a module is cyclic when it reaches
+/// itself through at least one edge.
+function analyzeCycles(modulesById: ReadonlyMap<string, ModuleModel>): CycleAnalysis {
+  const reach = synchronousReachability(modulesById);
+  const syncTargets = (id: string): string[] =>
+    (modulesById.get(id)?.dependencies ?? []).flatMap((dependency) =>
+      dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
+    );
+
+  const cyclicMembers = new Set<string>();
+  for (const id of modulesById.keys()) {
+    if (syncTargets(id).some((target) => reach.get(target)?.has(id) === true)) {
+      cyclicMembers.add(id);
+    }
+  }
+
+  // Group cyclic members into clusters by mutual reachability.
+  const sccs: string[][] = [];
+  const assigned = new Set<string>();
+  for (const id of cyclicMembers) {
+    if (assigned.has(id)) {
+      continue;
+    }
+    const cluster = [...cyclicMembers].filter(
+      (other) => reach.get(id)?.has(other) === true && reach.get(other)?.has(id) === true,
+    );
+    cluster.push(id);
+    const unique = [...new Set(cluster)];
+    for (const member of unique) {
+      assigned.add(member);
+    }
+    sccs.push(unique);
+  }
+
+  const formats = new Set<ModuleFormat>();
+  for (const id of cyclicMembers) {
+    const format = modulesById.get(id)?.format;
+    if (format !== undefined) {
+      formats.add(format);
+    }
+  }
+
+  let hasChord = false;
+  let hasInterlocking = false;
+  let hasMultiEnter = false;
+  for (const scc of sccs) {
+    const members = new Set(scc);
+    let internalEdges = 0;
+    const internalOut = new Map<string, Set<string>>(scc.map((id) => [id, new Set<string>()]));
+    const internalIn = new Map<string, Set<string>>(scc.map((id) => [id, new Set<string>()]));
+    for (const id of scc) {
+      for (const target of syncTargets(id)) {
+        if (members.has(target)) {
+          internalEdges += 1;
+          internalOut.get(id)?.add(target);
+          internalIn.get(target)?.add(id);
         }
       }
     }
+    const interlocking = scc.some(
+      (id) => (internalOut.get(id)?.size ?? 0) >= 2 && (internalIn.get(id)?.size ?? 0) >= 2,
+    );
+    if (interlocking) {
+      hasInterlocking = true;
+    } else if (internalEdges > scc.length) {
+      hasChord = true;
+    }
+    const enteringMembers = new Set<string>();
+    for (const [id, module] of modulesById) {
+      if (members.has(id)) {
+        continue;
+      }
+      for (const target of (module.dependencies ?? []).flatMap((dependency) =>
+        dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
+      )) {
+        if (members.has(target)) {
+          enteringMembers.add(target);
+        }
+      }
+    }
+    if (enteringMembers.size >= 2) {
+      hasMultiEnter = true;
+    }
   }
-  return formats;
+
+  return { cyclicMembers, sccs, formats, hasChord, hasInterlocking, hasMultiEnter };
 }
 
 function manualGroupsSeparateFormats(

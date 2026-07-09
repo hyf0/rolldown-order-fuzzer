@@ -165,6 +165,36 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
       yield editModule(program, moduleIndex, { ...module, dependencies } as typeof module);
     }
   }
+  // Drop a redundant synchronous cycle edge — a chord, or one interlocking cycle's extra edge. An
+  // edge A -> B is redundant when B can still synchronously reach A without it, so the remaining
+  // cycle (and its failure mode) is preserved while the extra structure collapses. This directly
+  // shrinks a chorded ring toward a bare ring and collapses two interlocking cycles toward one.
+  const reachable = synchronousReachabilityForShrink(program);
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [depIndex, dependency] of module.dependencies.entries()) {
+      if (dependency.kind === "esm-dynamic-import") {
+        continue;
+      }
+      const closesCycle = reachable.get(dependency.target)?.has(module.id) === true;
+      if (!closesCycle) {
+        continue;
+      }
+      // Redundant iff another synchronous out-edge of this module still reaches back to it.
+      const stillCyclic = module.dependencies.some(
+        (other, index) =>
+          index !== depIndex &&
+          other.kind !== "esm-dynamic-import" &&
+          reachable.get(other.target)?.has(module.id) === true,
+      );
+      if (!stillCyclic) {
+        continue;
+      }
+      yield editModule(program, moduleIndex, {
+        ...module,
+        dependencies: module.dependencies.filter((_, index) => index !== depIndex),
+      } as typeof module);
+    }
+  }
   // Unflag a side-effect-free module (drop its `sideEffects: false` metadata). When the failure does
   // not depend on the flag this simplifies the case; the greedy pass keeps it only if the failure
   // kind is preserved, which also tells whether the metadata is load-bearing for the bug.
@@ -176,6 +206,31 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
     delete (unflagged as { sideEffectFree?: true }).sideEffectFree;
     yield editModule(program, moduleIndex, unflagged);
   }
+}
+
+/// Synchronous (non-dynamic) reachability from each module, for detecting cycle edges when shrinking.
+function synchronousReachabilityForShrink(program: ProgramModel): Map<string, Set<string>> {
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  const reachability = new Map<string, Set<string>>();
+  for (const module of program.modules) {
+    const reached = new Set<string>();
+    const pending = [module.id];
+    while (pending.length > 0) {
+      const moduleId = pending.pop();
+      if (moduleId === undefined) {
+        continue;
+      }
+      for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
+        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
+          continue;
+        }
+        reached.add(dependency.target);
+        pending.push(dependency.target);
+      }
+    }
+    reachability.set(module.id, reached);
+  }
+  return reachability;
 }
 
 /// If `dependency` reads a single name from a pure single-re-export barrel, return an equivalent

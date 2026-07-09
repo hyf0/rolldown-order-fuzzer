@@ -1016,4 +1016,209 @@ describe("validateProgramModel", () => {
       'entries[0].moduleId: unknown module id "missing-entry"',
     ]);
   });
+
+  test("accepts Node-legal cycle value flow: hoisted calls (ESM) and guarded partial reads (CJS)", () => {
+    const esmCycle = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "b",
+              importedName: "fb",
+              localName: "a_fb",
+              call: true,
+            },
+          ],
+          events: [
+            { module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_fb", call: true }] },
+          ],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "a",
+              importedName: "fa",
+              localName: "b_fa",
+              call: true,
+            },
+          ],
+          events: [
+            { module: "b", phase: "evaluate", value: 2, reads: [{ binding: "b_fa", call: true }] },
+          ],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(esmCycle)).toEqual([]);
+
+    const cjsCycle = {
+      modules: [
+        {
+          id: "a",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "b", resultBinding: "a_b", readName: "vb", guard: true },
+          ],
+          events: [
+            {
+              module: "a",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "a_b", member: "vb", guard: true }],
+            },
+          ],
+        },
+        {
+          id: "b",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "a", resultBinding: "b_a", readName: "va", guard: true },
+          ],
+          events: [
+            {
+              module: "b",
+              phase: "evaluate",
+              value: 2,
+              reads: [{ binding: "b_a", member: "va", guard: true }],
+            },
+          ],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(cjsCycle)).toEqual([]);
+  });
+
+  test("rejects unsound cycle reads: plain value/namespace closing a cycle, unguarded partial require, call to CJS", () => {
+    const plainValueCycle = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "b", importedName: "vb", localName: "a_vb" },
+          ],
+          events: [{ module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_vb" }] }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "a",
+              importedName: "fa",
+              localName: "b_fa",
+              call: true,
+            },
+          ],
+          events: [
+            { module: "b", phase: "evaluate", value: 2, reads: [{ binding: "b_fa", call: true }] },
+          ],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(plainValueCycle)).toEqual([
+      "modules[0].dependencies[0]: an ESM value import that closes a cycle must be a hoisted-function call import (call: true) to avoid TDZ",
+    ]);
+
+    const namespaceCycle = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-namespace-import", target: "b", localName: "a_ns", readMembers: ["vb"] },
+          ],
+          events: [
+            {
+              module: "a",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "a_ns", member: "vb" }],
+            },
+          ],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "a" }],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(namespaceCycle)).toEqual([
+      "modules[0].dependencies[0]: an ESM namespace import cannot close a cycle; a member read would hit TDZ",
+    ]);
+
+    const unguardedCycle = {
+      modules: [
+        {
+          id: "a",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "b", resultBinding: "a_b", readName: "vb" },
+          ],
+          events: [
+            { module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_b", member: "vb" }] },
+          ],
+        },
+        {
+          id: "b",
+          format: "cjs",
+          dependencies: [{ kind: "cjs-require", target: "a" }],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(unguardedCycle)).toEqual([
+      "modules[0].dependencies[0]: a readable require that closes a cycle must be guarded (guard: true) so a partial export folds to a sentinel instead of NaN",
+    ]);
+
+    const callToCjs = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "b",
+              importedName: "fb",
+              localName: "a_fb",
+              call: true,
+            },
+          ],
+          events: [
+            { module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_fb", call: true }] },
+          ],
+        },
+        {
+          id: "b",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(callToCjs)).toEqual([
+      'modules[0].dependencies[0]: a hoisted-function call import must target an ESM module, target "b" is cjs',
+    ]);
+  });
 });

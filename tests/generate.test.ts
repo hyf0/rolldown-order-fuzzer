@@ -254,27 +254,58 @@ describe("generateCase", () => {
     expect(density).toBeLessThan(0.5);
   });
 
-  test("value reads never target a module on a cycle", () => {
+  test("cycle-closing value reads are hoisted calls (ESM) or guarded (CJS), never plain", () => {
+    let callEdges = 0;
+    let guardEdges = 0;
+    let postCycleReads = 0;
     for (let seed = 0; seed < 2_000; seed += 1) {
       const generated = generateCase(seed, 8);
+      const modulesById = new Map(generated.program.modules.map((module) => [module.id, module]));
       const onCycle = cycleMembers(generated.program);
-      if (onCycle.size === 0) {
-        continue;
-      }
       for (const module of generated.program.modules) {
         for (const dependency of module.dependencies) {
-          const readsTarget =
-            dependency.kind === "esm-value-import" ||
-            (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined);
-          if (readsTarget) {
+          if (dependency.kind === "esm-dynamic-import") {
+            continue;
+          }
+          // A -> target closes a cycle when target synchronously reaches back to A.
+          const closesCycle =
+            dependency.target !== module.id &&
+            synchronouslyReachable(dependency.target, modulesById).has(module.id);
+          if (dependency.kind === "esm-value-import") {
+            if (closesCycle) {
+              // In-cycle ESM read: must be a hoisted-function call (no TDZ).
+              expect(
+                dependency.call,
+                `seed ${seed}: plain value import closes a cycle at ${dependency.target}`,
+              ).toBe(true);
+              callEdges += 1;
+            } else if (onCycle.has(dependency.target)) {
+              postCycleReads += 1;
+            }
+          } else if (dependency.kind === "esm-namespace-import") {
             expect(
-              onCycle.has(dependency.target),
-              `seed ${seed}: readable dependency targets cycle member ${dependency.target}`,
+              closesCycle,
+              `seed ${seed}: namespace import closes a cycle at ${dependency.target}`,
             ).toBe(false);
+          } else if (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined) {
+            if (closesCycle) {
+              // In-cycle CJS read: must be guarded (partial export folds to a sentinel, not NaN).
+              expect(
+                dependency.guard,
+                `seed ${seed}: unguarded readable require closes a cycle at ${dependency.target}`,
+              ).toBe(true);
+              guardEdges += 1;
+            } else if (onCycle.has(dependency.target)) {
+              postCycleReads += 1;
+            }
           }
         }
       }
     }
+    // The new cycle value-flow shapes are all reached across the seed window.
+    expect(callEdges).toBeGreaterThan(0);
+    expect(guardEdges).toBeGreaterThan(0);
+    expect(postCycleReads).toBeGreaterThan(0);
   });
 
   test("random-mixed never closes a cycle across module formats", () => {

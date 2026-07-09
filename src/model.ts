@@ -2,14 +2,28 @@ export type ModuleFormat = "esm" | "cjs";
 
 export type EventValue = string | number | boolean | null;
 
-/// Reads the value carried by a forward-only dependency binding in the reading module's scope:
-/// an ESM value-import's `localName`, or a CJS require-result binding (then `member` names the
-/// exported property read off the required module's exports). Every readable binding is created
-/// by a dependency that targets a module evaluated strictly before the reader, so a read never
-/// closes a cycle and never hits TDZ.
+/// Reads the value carried by a dependency binding in the reading module's scope: an ESM
+/// value-import's `localName`, or a CJS require-result binding (then `member` names the exported
+/// property read off the required module's exports). Most reads cross forward-only edges (the target
+/// is fully evaluated before the reader). The two flags below make a read TOTAL across a cycle edge,
+/// where the target may still be evaluating when the read runs, so cycle value flow never hits TDZ
+/// and never folds to NaN (see `.agents/docs/node-legal-cycles.md`):
+///
+/// - `call` — the binding is a hoisted function export, folded as `binding()` (or `binding.member()`).
+///   A `function` declaration is initialized before any module-body statement, so calling it is legal
+///   even while the defining module is mid-evaluation up the cycle stack — the ONLY sound way to fold
+///   an ESM value across a cycle edge (a plain `const` read would hit TDZ). The target synthesizes a
+///   callable function export instead of a `const`.
+/// - `guard` — the read is wrapped `Number.isFinite(EXPR) ? EXPR : <sentinel>`. A CJS cycle member
+///   legally observes a PARTIAL export (a member required back into an evaluating module is `undefined`
+///   until assigned); the wave-1 fold would turn that into NaN, which the event channel rejects — a
+///   degenerate both-sides crash. The guard turns a partial read into an observable sentinel number,
+///   so a mis-timed export assignment diverges visibly instead of crashing identically on both sides.
 export interface ValueRead {
   readonly binding: string;
   readonly member?: string;
+  readonly call?: true;
+  readonly guard?: true;
 }
 
 export interface EventRecord {
@@ -34,6 +48,12 @@ export interface EsmValueImportOperation {
   readonly target: string;
   readonly importedName: string;
   readonly localName: string;
+  /// When `true`, the import binds a hoisted FUNCTION export and every read of `localName` is a call
+  /// (`localName()`); the target synthesizes `export function importedName() { return <base> }`
+  /// instead of a `const`. Because a function declaration is callable before module-body order, this
+  /// is the sound way to fold a value across an ESM cycle edge without TDZ. `validate-model.ts`
+  /// requires it on a value edge that closes a cycle and requires the target be ESM.
+  readonly call?: true;
 }
 
 /// `import * as <localName> from "..."` — a whole-module namespace binding. Every name in
@@ -83,10 +103,15 @@ export interface CjsRequireOperation {
   readonly target: string;
   /// When set, the require is rendered as `const resultBinding = require("./target")` so the
   /// target's exports can be read. `readName` (required whenever `resultBinding` is) names the
-  /// target export read through the binding and demands that the target synthesize it. Only ever
-  /// set on forward, non-cycle require edges, so the target is fully evaluated before it is read.
+  /// target export read through the binding and demands that the target synthesize it.
   readonly resultBinding?: string;
   readonly readName?: string;
+  /// When `true`, the read of `resultBinding.readName` is guarded
+  /// (`Number.isFinite(...) ? ... : <sentinel>`) so a PARTIAL export observed mid-cycle folds to a
+  /// sentinel number instead of NaN. `validate-model.ts` REQUIRES it on a readable require that
+  /// closes a cycle (where the target may still be evaluating), so a partial read is never a
+  /// degenerate both-sides crash. Harmless (always finite) on a forward edge.
+  readonly guard?: true;
 }
 
 export type EsmDependencyOperation =
@@ -180,7 +205,12 @@ export function readableBindingsOf(
   const reads: ValueRead[] = [];
   for (const dependency of dependencies) {
     if (dependency.kind === "esm-value-import") {
-      reads.push({ binding: dependency.localName });
+      // A call import binds a hoisted function; every read of it is a call (`localName()`).
+      reads.push(
+        dependency.call === true
+          ? { binding: dependency.localName, call: true }
+          : { binding: dependency.localName },
+      );
     } else if (dependency.kind === "esm-namespace-import") {
       for (const member of dependency.readMembers) {
         reads.push({ binding: dependency.localName, member });
@@ -190,7 +220,12 @@ export function readableBindingsOf(
       dependency.resultBinding !== undefined &&
       dependency.readName !== undefined
     ) {
-      reads.push({ binding: dependency.resultBinding, member: dependency.readName });
+      // A guarded require reads a possibly-partial cyclic export; keep the read total.
+      reads.push(
+        dependency.guard === true
+          ? { binding: dependency.resultBinding, member: dependency.readName, guard: true }
+          : { binding: dependency.resultBinding, member: dependency.readName },
+      );
     }
   }
   return reads;
