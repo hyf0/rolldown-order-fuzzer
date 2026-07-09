@@ -125,6 +125,81 @@ describe("generateCase", () => {
     expect(valueRead / randomTotal).toBeGreaterThan(0.3);
   });
 
+  test("random-mixed reaches namespace-read and barrel-reexport coverage densely", () => {
+    let randomTotal = 0;
+    let namespaceRead = 0;
+    let barrelReexport = 0;
+    for (let seed = 0; seed < 3_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      randomTotal += 1;
+      if (generated.coverageTags.includes("variation:namespace-read")) {
+        namespaceRead += 1;
+      }
+      if (generated.coverageTags.includes("variation:barrel-reexport")) {
+        barrelReexport += 1;
+      }
+    }
+
+    expect(randomTotal).toBeGreaterThan(0);
+    // Both wave-3 mechanisms are dense enough to matter across a campaign, not incidental.
+    expect(namespaceRead / randomTotal).toBeGreaterThan(0.1);
+    expect(barrelReexport / randomTotal).toBeGreaterThan(0.05);
+  });
+
+  test("generated namespace imports only target ESM modules (CJS namespaces are deferred)", () => {
+    for (let seed = 0; seed < 3_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      const modulesById = new Map(generated.program.modules.map((module) => [module.id, module]));
+      for (const module of generated.program.modules) {
+        for (const dependency of module.dependencies) {
+          if (dependency.kind === "esm-namespace-import") {
+            expect(
+              modulesById.get(dependency.target)?.format,
+              `seed ${seed}: namespace import targets non-ESM ${dependency.target}`,
+            ).toBe("esm");
+          }
+        }
+      }
+    }
+  });
+
+  test("generated barrels are pure re-exporter ESM modules with no events, forwarding an ESM definer", () => {
+    let sawBarrel = false;
+    for (let seed = 0; seed < 3_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      const modulesById = new Map(generated.program.modules.map((module) => [module.id, module]));
+      for (const module of generated.program.modules) {
+        const reexports = module.dependencies.filter(
+          (dependency) =>
+            dependency.kind === "esm-reexport-named" || dependency.kind === "esm-reexport-star",
+        );
+        if (reexports.length === 0) {
+          continue;
+        }
+        sawBarrel = true;
+        // A barrel is a pure ESM re-exporter: ESM, no events, only re-export dependencies.
+        expect(module.format, `seed ${seed}: barrel ${module.id} not ESM`).toBe("esm");
+        expect(module.events, `seed ${seed}: barrel ${module.id} emits events`).toEqual([]);
+        expect(
+          module.dependencies.length,
+          `seed ${seed}: barrel ${module.id} carries non-re-export deps`,
+        ).toBe(reexports.length);
+        // Every hop forwards to another ESM module (an all-ESM chain), never a CJS target.
+        for (const dependency of reexports) {
+          expect(
+            modulesById.get(dependency.target)?.format,
+            `seed ${seed}: barrel ${module.id} forwards non-ESM ${dependency.target}`,
+          ).toBe("esm");
+        }
+      }
+      expect(validateProgramModel(generated.program)).toEqual([]);
+    }
+    expect(sawBarrel).toBe(true);
+  });
+
   test("random-mixed flags a minority of sound side-effect-free value modules", () => {
     let randomTotal = 0;
     let flaggedCases = 0;

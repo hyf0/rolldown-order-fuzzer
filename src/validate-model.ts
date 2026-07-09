@@ -61,6 +61,14 @@ const INVALID_MODULE_BINDING_IDENTIFIERS = new Set([
 
 const RENDERER_RESERVED_BINDING_IDENTIFIERS = new Set(["globalThis"]);
 
+/// How a local binding may be read by an event's `reads`: an ESM value import is read directly (no
+/// member), a CJS readable require reads exactly one member, an ESM namespace import reads any of a
+/// declared member set (`localName.member`).
+type ReadableBinding =
+  | { readonly kind: "direct" }
+  | { readonly kind: "require"; readonly member: string }
+  | { readonly kind: "namespace"; readonly members: ReadonlySet<string> };
+
 export function validateProgramModel(program: ProgramModel): readonly string[] {
   const errors: string[] = [];
   const modulesById = collectModules(program.modules, errors);
@@ -111,9 +119,9 @@ function validateModules(
     validateSideEffectFreeModule(module, moduleIndex, errors);
 
     const localBindings = new Set<string>();
-    // Each readable binding maps its local name to the member read off it: `undefined` for an ESM
-    // value-import (read directly), or the required export name for a CJS readable require.
-    const readableBindings = new Map<string, string | undefined>();
+    // Each readable binding maps its local name to how it may be read: an ESM value-import (read
+    // directly), a CJS readable require (one member), or an ESM namespace import (a member set).
+    const readableBindings = new Map<string, ReadableBinding>();
 
     for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
       const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
@@ -163,13 +171,26 @@ function validateModules(
   }
 }
 
+/// The value-only ESM dependency kinds a `sideEffects: false` module may carry: value/namespace
+/// imports and re-exports. Each only matters when the flagged module's value is used — the bundler
+/// must then keep it (and its upstream) in order — so dropping the flagged module when unused stays
+/// invisible. A side-effect import, dynamic-import registration, or interop require would be
+/// droppable under the flag yet could reorder or drop another module's events.
+const SIDE_EFFECT_FREE_DEPENDENCY_KINDS = new Set([
+  "esm-value-import",
+  "esm-namespace-import",
+  "esm-reexport-named",
+  "esm-reexport-star",
+]);
+
 /// A `sideEffects: false` module is a user promise the bundler may act on with aggressive dead-code
 /// elimination. To keep the oracle sound, such a module must contribute ONLY values and never emit
 /// an observable event: an emitted event could be legally dropped in the bundle while the source
-/// still emits it. It must also be ESM whose every dependency is a value edge (an `esm-value-import`
-/// the renderer folds into the module's exported value); a side-effect import, dynamic-import
-/// registration, or bare/interop require would be droppable under the flag and could reorder or drop
-/// another module's events. See the `sideEffectFree` doc in model.ts.
+/// still emits it. It must also be ESM whose every dependency is a value-only edge (see
+/// `SIDE_EFFECT_FREE_DEPENDENCY_KINDS`). This is a LOCAL invariant; whole-chain soundness (nothing
+/// only reachable through the flagged module emits events) is the generator's / handwritten test's
+/// responsibility, as with flagged leaves. See the `sideEffectFree` doc in model.ts and
+/// `.agents/docs/namespace-and-barrel-reexports.md`.
 function validateSideEffectFreeModule(
   module: ModuleModel,
   moduleIndex: number,
@@ -189,9 +210,9 @@ function validateSideEffectFreeModule(
     );
   }
   for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
-    if (dependency.kind !== "esm-value-import") {
+    if (!SIDE_EFFECT_FREE_DEPENDENCY_KINDS.has(dependency.kind)) {
       errors.push(
-        `${path}.dependencies[${dependencyIndex}]: a side-effect-free module may only carry esm-value-import dependencies, received ${dependency.kind}`,
+        `${path}.dependencies[${dependencyIndex}]: a side-effect-free module may only carry value-only ESM dependencies, received ${dependency.kind}`,
       );
     }
   }
@@ -200,7 +221,7 @@ function validateSideEffectFreeModule(
 function validateEventReads(
   event: ModuleModel["events"][number],
   eventPath: string,
-  readableBindings: ReadonlyMap<string, string | undefined>,
+  readableBindings: ReadonlyMap<string, ReadableBinding>,
   errors: string[],
 ): void {
   if (event.reads === undefined || event.reads.length === 0) {
@@ -214,13 +235,22 @@ function validateEventReads(
 
   for (const [readIndex, read] of event.reads.entries()) {
     const readPath = `${eventPath}.reads[${readIndex}]`;
-    if (!readableBindings.has(read.binding)) {
+    const binding = readableBindings.get(read.binding);
+    if (binding === undefined) {
       errors.push(
         `${readPath}.binding: unknown readable binding ${quote(read.binding)} in this module`,
       );
       continue;
     }
-    const expectedMember = readableBindings.get(read.binding);
+    if (binding.kind === "namespace") {
+      if (read.member === undefined || !binding.members.has(read.member)) {
+        errors.push(
+          `${readPath}.member: expected a namespace member for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
+        );
+      }
+      continue;
+    }
+    const expectedMember = binding.kind === "require" ? binding.member : undefined;
     if (read.member !== expectedMember) {
       errors.push(
         `${readPath}.member: expected ${expectedMember === undefined ? "no member" : quote(expectedMember)} for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
@@ -277,7 +307,7 @@ function validateDependencyBinding(
   dependency: DependencyOperation,
   path: string,
   localBindings: Set<string>,
-  readableBindings: Map<string, string | undefined>,
+  readableBindings: Map<string, ReadableBinding>,
   errors: string[],
 ): void {
   if (dependency.kind === "esm-value-import") {
@@ -288,7 +318,39 @@ function validateDependencyBinding(
     }
 
     if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
-      readableBindings.set(dependency.localName, undefined);
+      readableBindings.set(dependency.localName, { kind: "direct" });
+    }
+    return;
+  }
+
+  if (dependency.kind === "esm-namespace-import") {
+    for (const [memberIndex, member] of dependency.readMembers.entries()) {
+      if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(member)) {
+        errors.push(
+          `${path}.readMembers[${memberIndex}]: invalid JavaScript identifier ${quote(member)}`,
+        );
+      }
+    }
+    if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
+      readableBindings.set(dependency.localName, {
+        kind: "namespace",
+        members: new Set(dependency.readMembers),
+      });
+    }
+    return;
+  }
+
+  if (dependency.kind === "esm-reexport-named") {
+    // A re-export forwards an export; it binds nothing locally, so only its names are validated.
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.sourceName)) {
+      errors.push(
+        `${path}.sourceName: invalid JavaScript identifier ${quote(dependency.sourceName)}`,
+      );
+    }
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.exportedName)) {
+      errors.push(
+        `${path}.exportedName: invalid JavaScript identifier ${quote(dependency.exportedName)}`,
+      );
     }
     return;
   }
@@ -304,7 +366,7 @@ function validateRequireBinding(
   dependency: CjsRequireOperation,
   path: string,
   localBindings: Set<string>,
-  readableBindings: Map<string, string | undefined>,
+  readableBindings: Map<string, ReadableBinding>,
   errors: string[],
 ): void {
   if (dependency.resultBinding === undefined && dependency.readName === undefined) {
@@ -322,7 +384,10 @@ function validateRequireBinding(
   if (
     validateLocalBinding(dependency.resultBinding, `${path}.resultBinding`, localBindings, errors)
   ) {
-    readableBindings.set(dependency.resultBinding, dependency.readName);
+    readableBindings.set(dependency.resultBinding, {
+      kind: "require",
+      member: dependency.readName,
+    });
   }
 }
 

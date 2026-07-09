@@ -36,10 +36,46 @@ export interface EsmValueImportOperation {
   readonly localName: string;
 }
 
+/// `import * as <localName> from "..."` — a whole-module namespace binding. Every name in
+/// `readMembers` is read as `<localName>.<member>`, folded numerically into events and exports
+/// through the same reads machinery as a value import, and demands that export on the target. A
+/// namespace member read is forward-only like any value read (the target evaluates before the
+/// reader). The generator only ever targets ESM modules: Node's `import * of CJS` namespace shape
+/// (it adds a `module.exports` key rolldown's interop omits) legitimately differs from the bundle,
+/// so CJS-target namespaces are model-only + a handwritten test — see
+/// `.agents/docs/namespace-and-barrel-reexports.md`.
+export interface EsmNamespaceImportOperation {
+  readonly kind: "esm-namespace-import";
+  readonly target: string;
+  readonly localName: string;
+  readonly readMembers: readonly string[];
+}
+
 export interface EsmDynamicImportOperation {
   readonly kind: "esm-dynamic-import";
   readonly target: string;
   readonly registration: string;
+}
+
+/// `export { <sourceName> as <exportedName> } from "..."` — a re-export that forwards the target's
+/// `sourceName` under `exportedName` without binding it locally. Covers both `export { x } from`
+/// (`sourceName === exportedName`) and `export { default as X } from` (`sourceName === "default"`).
+/// Barrel modules chain these toward a defining module so a downstream reader's value flows through
+/// the barrel; demand for `exportedName` routes to the target's `sourceName`. Forward-only.
+export interface EsmReexportNamedOperation {
+  readonly kind: "esm-reexport-named";
+  readonly target: string;
+  readonly sourceName: string;
+  readonly exportedName: string;
+}
+
+/// `export * from "..."` — re-exports every named export of the target (never `default`). A star
+/// barrel forwards a demanded name to its target. Generated export names are unique per defining
+/// module, so a star chain never yields an ambiguous duplicate export (the validator keeps this
+/// invariant unrepresentable rather than resolving conflicts). Forward-only.
+export interface EsmReexportStarOperation {
+  readonly kind: "esm-reexport-star";
+  readonly target: string;
 }
 
 export interface CjsRequireOperation {
@@ -56,7 +92,10 @@ export interface CjsRequireOperation {
 export type EsmDependencyOperation =
   | EsmSideEffectImportOperation
   | EsmValueImportOperation
-  | EsmDynamicImportOperation;
+  | EsmNamespaceImportOperation
+  | EsmDynamicImportOperation
+  | EsmReexportNamedOperation
+  | EsmReexportStarOperation;
 
 export type DependencyOperation = EsmDependencyOperation | CjsRequireOperation;
 
@@ -129,10 +168,12 @@ export interface ProgramModel {
 }
 
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an
-/// ESM value-import contributes its `localName`; a CJS readable require contributes its
-/// `resultBinding` plus the `readName` member read off the required module's exports. This is a
-/// pure model fact shared by the generator (choosing event reads), the renderer (folding exports),
-/// and validation.
+/// ESM value-import contributes its `localName`; an ESM namespace-import contributes one read per
+/// `readMembers` entry (`localName.member`); a CJS readable require contributes its `resultBinding`
+/// plus the `readName` member read off the required module's exports. Re-export dependencies bind
+/// nothing locally and contribute no readable value (a barrel forwards, it does not read). This is
+/// a pure model fact shared by the generator (choosing event reads), the renderer (folding
+/// exports), and validation.
 export function readableBindingsOf(
   dependencies: readonly DependencyOperation[],
 ): readonly ValueRead[] {
@@ -140,6 +181,10 @@ export function readableBindingsOf(
   for (const dependency of dependencies) {
     if (dependency.kind === "esm-value-import") {
       reads.push({ binding: dependency.localName });
+    } else if (dependency.kind === "esm-namespace-import") {
+      for (const member of dependency.readMembers) {
+        reads.push({ binding: dependency.localName, member });
+      }
     } else if (
       dependency.kind === "cjs-require" &&
       dependency.resultBinding !== undefined &&

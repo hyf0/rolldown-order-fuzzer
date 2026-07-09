@@ -205,8 +205,214 @@ describe("validateProgramModel", () => {
     expect(validateProgramModel(program)).toEqual([
       "modules[0]: a side-effect-free module must be ESM, received cjs",
       "modules[0]: a side-effect-free module must not emit events; its events can be legally dropped under sideEffects:false",
-      "modules[0].dependencies[0]: a side-effect-free module may only carry esm-value-import dependencies, received cjs-require",
-      "modules[1].dependencies[0]: a side-effect-free module may only carry esm-value-import dependencies, received esm-side-effect-import",
+      "modules[0].dependencies[0]: a side-effect-free module may only carry value-only ESM dependencies, received cjs-require",
+      "modules[1].dependencies[0]: a side-effect-free module may only carry value-only ESM dependencies, received esm-side-effect-import",
+    ]);
+  });
+
+  test("accepts a namespace import with folded member reads (ESM and CJS targets)", () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "esm-target",
+              localName: "ns0",
+              readMembers: ["a", "b"],
+            },
+            {
+              kind: "esm-namespace-import",
+              target: "cjs-target",
+              localName: "ns1",
+              readMembers: ["c"],
+            },
+          ],
+          events: [
+            {
+              module: "reader",
+              phase: "evaluate",
+              value: 1,
+              reads: [
+                { binding: "ns0", member: "a" },
+                { binding: "ns0", member: "b" },
+                { binding: "ns1", member: "c" },
+              ],
+            },
+          ],
+        },
+        { id: "esm-target", format: "esm", dependencies: [], events: [] },
+        { id: "cjs-target", format: "cjs", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("rejects a namespace read of an undeclared member", () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "target",
+              localName: "ns0",
+              readMembers: ["a"],
+            },
+          ],
+          events: [
+            {
+              module: "reader",
+              phase: "evaluate",
+              value: 0,
+              reads: [{ binding: "ns0", member: "b" }, { binding: "ns0" }],
+            },
+          ],
+        },
+        { id: "target", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].events[0].reads[0].member: expected a namespace member for binding "ns0", received "b"',
+      'modules[0].events[0].reads[1].member: expected a namespace member for binding "ns0", received no member',
+    ]);
+  });
+
+  test("accepts a re-export (barrel) chain including star and default-as-name forms", () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel-a", importedName: "vdef", localName: "r" },
+          ],
+          events: [{ module: "reader", phase: "evaluate", value: 1, reads: [{ binding: "r" }] }],
+        },
+        {
+          id: "barrel-a",
+          format: "esm",
+          dependencies: [{ kind: "esm-reexport-star", target: "barrel-b" }],
+          events: [],
+        },
+        {
+          id: "barrel-b",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-reexport-named",
+              target: "def",
+              sourceName: "default",
+              exportedName: "vdef",
+            },
+          ],
+          events: [],
+        },
+        { id: "def", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("accepts a side-effect-free (flagged) barrel re-exporting a value-only definer", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel", importedName: "vdef", localName: "v" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "v" }] }],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          sideEffectFree: true,
+          dependencies: [
+            { kind: "esm-reexport-named", target: "def", sourceName: "vdef", exportedName: "vdef" },
+          ],
+          events: [],
+        },
+        { id: "def", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("rejects invalid re-export identifier names", () => {
+    const program = {
+      modules: [
+        {
+          id: "esm-barrel",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-reexport-named",
+              target: "target",
+              sourceName: "ok",
+              exportedName: "not ok",
+            },
+            {
+              kind: "esm-reexport-named",
+              target: "target",
+              sourceName: "no-dash",
+              exportedName: "fine",
+            },
+          ],
+          events: [],
+        },
+        { id: "target", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "esm-barrel" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].dependencies[0].exportedName: invalid JavaScript identifier "not ok"',
+      'modules[0].dependencies[1].sourceName: invalid JavaScript identifier "no-dash"',
+    ]);
+  });
+
+  test("rejects namespace imports and re-exports on CJS modules", () => {
+    // The model types forbid these on a CJS module; the runtime check guards a model loaded from
+    // JSON (e.g. by the shrinker), so this simulates that with an explicit cast.
+    const program = {
+      modules: [
+        {
+          id: "cjs-reader",
+          format: "cjs",
+          dependencies: [
+            { kind: "esm-namespace-import", target: "target", localName: "ns", readMembers: ["a"] },
+            { kind: "esm-reexport-star", target: "target" },
+          ],
+          events: [],
+        },
+        { id: "target", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "target" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } as unknown as ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      "modules[0].dependencies[0]: CJS modules cannot use esm-namespace-import",
+      "modules[0].dependencies[1]: CJS modules cannot use esm-reexport-star",
     ]);
   });
 

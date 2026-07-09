@@ -974,6 +974,255 @@ describe("renderProgram", () => {
       });
     });
   });
+
+  test("renders an ESM namespace import with a folded member read, then round-trips", async () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "target",
+              localName: "ns0",
+              readMembers: ["vt"],
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "ns0", member: "vt" }],
+            },
+          ],
+        },
+        {
+          id: "target",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "target", phase: "evaluate", value: 40 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
+      [
+        'import * as ns0 from "./module-0001.mjs";',
+        "",
+        'globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: 1 + ns0.vt });',
+        "",
+      ].join("\n"),
+    );
+    expect(fileContents(rendered.files, "module-0001.mjs")).toContain(
+      "export { __orderExport0 as vt };",
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "target", phase: "evaluate", value: 40 },
+          { version: 1, module: "entry", phase: "evaluate", value: 41 },
+        ],
+      });
+    });
+  });
+
+  test("renders a re-export barrel chain (star then named), then round-trips", async () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel-a", importedName: "vdef", localName: "r" },
+          ],
+          events: [{ module: "reader", phase: "evaluate", value: 1, reads: [{ binding: "r" }] }],
+        },
+        {
+          id: "barrel-a",
+          format: "esm",
+          dependencies: [{ kind: "esm-reexport-star", target: "barrel-b" }],
+          events: [],
+        },
+        {
+          id: "barrel-b",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-reexport-named", target: "def", sourceName: "vdef", exportedName: "vdef" },
+          ],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    // The barrels forward the value; only the definer synthesizes it, so a dropped barrel init is
+    // observable downstream (rolldown #8777 / #9299 shape).
+    expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
+      [
+        'import { vdef as r } from "./module-0001.mjs";',
+        "",
+        'globalThis.__orderEvent({ module: "reader", phase: "evaluate", value: 1 + r });',
+        "",
+      ].join("\n"),
+    );
+    expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
+      ['export * from "./module-0002.mjs";', ""].join("\n"),
+    );
+    expect(fileContents(rendered.files, "module-0002.mjs")).toBe(
+      ['export { vdef } from "./module-0003.mjs";', ""].join("\n"),
+    );
+    expect(fileContents(rendered.files, "module-0003.mjs")).toContain(
+      "export { __orderExport0 as vdef };",
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "def", phase: "evaluate", value: 7 },
+          { version: 1, module: "reader", phase: "evaluate", value: 8 },
+        ],
+      });
+    });
+  });
+
+  test("renders a default-as-name re-export forwarding a definer's default, then round-trips", async () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel", importedName: "vdef", localName: "r" },
+          ],
+          events: [{ module: "reader", phase: "evaluate", value: 2, reads: [{ binding: "r" }] }],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-reexport-named",
+              target: "def",
+              sourceName: "default",
+              exportedName: "vdef",
+            },
+          ],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 5 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
+      ['export { default as vdef } from "./module-0002.mjs";', ""].join("\n"),
+    );
+    // The definer's demanded export is `default`, sourced through the default-as-name re-export.
+    expect(fileContents(rendered.files, "module-0002.mjs")).toContain(
+      "export { __orderExport0 as default };",
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "def", phase: "evaluate", value: 5 },
+          { version: 1, module: "reader", phase: "evaluate", value: 7 },
+        ],
+      });
+    });
+  });
+
+  test("renders a CJS require of an ESM barrel's forwarded member, then round-trips", async () => {
+    // The model supports a CJS reader requiring a barrel and reading a re-exported member; the
+    // existing readable-require rendering handles it and the demand routes through the barrel.
+    const program = {
+      modules: [
+        {
+          id: "cjs-reader",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "barrel", resultBinding: "b", readName: "vdef" },
+          ],
+          events: [
+            {
+              module: "cjs-reader",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "b", member: "vdef" }],
+            },
+          ],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-reexport-named", target: "def", sourceName: "vdef", exportedName: "vdef" },
+          ],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 9 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "cjs-reader" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0000.cjs")).toBe(
+      [
+        'const b = require("./module-0001.mjs");',
+        "",
+        'globalThis.__orderEvent({ module: "cjs-reader", phase: "evaluate", value: 1 + b.vdef });',
+        "",
+      ].join("\n"),
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "def", phase: "evaluate", value: 9 },
+          { version: 1, module: "cjs-reader", phase: "evaluate", value: 10 },
+        ],
+      });
+    });
+  });
 });
 
 function fileContents(

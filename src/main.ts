@@ -35,7 +35,7 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 11 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 12 as const;
 
 export interface CampaignOptions {
   readonly seed: number;

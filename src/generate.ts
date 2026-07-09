@@ -41,6 +41,11 @@ export interface GeneratedCase {
 
 export const MAX_CASE_SIZE = 16;
 
+/// Upper bound on modules in a random-mixed program (DAG + optional ring + inserted barrels), so a
+/// case's rendered graph stays small enough to build and execute quickly and barrels never blow the
+/// budget. The DAG caps at 11 and a ring adds up to 3, leaving room for a couple of barrel modules.
+const MAX_RANDOM_MODULES = 16;
+
 export function generateCase(
   seed: number,
   size: number,
@@ -340,12 +345,25 @@ function buildRandomMixed(
     if (roll < 3 || (!allowRead && roll < 5)) {
       importer.dependencies.push({ kind: "esm-side-effect-import", target: target.id });
     } else if (roll < 5) {
-      importer.dependencies.push({
-        kind: "esm-value-import",
-        target: target.id,
-        importedName: `v${target.id}`,
-        localName: `${importer.id}_v${target.id}`,
-      });
+      // A value edge. When the target is ESM, a minority become namespace imports: `import * as ns`
+      // + a folded `ns.v<target>` member read, exercising the namespace-shape interop surface. CJS
+      // targets stay value imports — Node's `import * of CJS` namespace shape legitimately differs
+      // from rolldown's interop (a `module.exports` key), so CJS-target namespaces are model-only.
+      if (target.format === "esm" && rng.integer(3) === 0) {
+        importer.dependencies.push({
+          kind: "esm-namespace-import",
+          target: target.id,
+          localName: `ns_${importer.id}_${target.id}`,
+          readMembers: [`v${target.id}`],
+        });
+      } else {
+        importer.dependencies.push({
+          kind: "esm-value-import",
+          target: target.id,
+          importedName: `v${target.id}`,
+          localName: `${importer.id}_v${target.id}`,
+        });
+      }
     } else {
       const registration = `dyn-${importer.id}-${target.id}`;
       importer.dependencies.push({ kind: "esm-dynamic-import", target: target.id, registration });
@@ -397,14 +415,18 @@ function buildRandomMixed(
     drafts.push(...ring);
   }
 
+  // Insert barrel (re-export) chains between some ESM readers and their ESM definers. The read now
+  // flows through pure re-exporter modules (forward edges only), the classic barrel shape.
+  drafts.push(...insertBarrelChains(rng, drafts));
+
   const modules = drafts.map((draft): ModuleModel => {
     // A draft only ever accumulates dependency kinds legal for its format, so the filters below are
     // defensive; the reads are chosen from the same forward-only bindings the renderer will fold.
-    const moduleEvents = withValueReads(
-      events(draft.id, rng, 1 + rng.integer(2)),
-      draft.dependencies,
-      rng,
-    );
+    // A barrel (a pure re-exporter) emits no events — it only forwards a value onward.
+    const isBarrel = draft.dependencies.some(isReexportDependency);
+    const moduleEvents = isBarrel
+      ? []
+      : withValueReads(events(draft.id, rng, 1 + rng.integer(2)), draft.dependencies, rng);
     return draft.format === "esm"
       ? esmModule(
           draft.id,
@@ -457,6 +479,109 @@ function buildRandomMixed(
       ...(manualChunkGroups.length > 0 ? { manualChunkGroups } : {}),
     },
   };
+}
+
+/// A dependency that forwards an export without binding it locally (a barrel edge).
+function isReexportDependency(dependency: DependencyOperation): boolean {
+  return dependency.kind === "esm-reexport-named" || dependency.kind === "esm-reexport-star";
+}
+
+/// The single export name a readable ESM edge pulls from its target, or null if the edge cannot be
+/// routed through a barrel (side-effect / dynamic imports, requires, or multi-member namespaces).
+function barrelForwardedName(dependency: DependencyOperation): string | null {
+  if (dependency.kind === "esm-value-import") {
+    return dependency.importedName;
+  }
+  if (dependency.kind === "esm-namespace-import" && dependency.readMembers.length === 1) {
+    return dependency.readMembers[0] ?? null;
+  }
+  return null;
+}
+
+/// One re-export hop forwarding `name` from `targetId`: a star (`export *`) or a named re-export.
+/// The hop adjacent to the definer may instead use `export { default as name }` (the #9299 shape),
+/// which routes demand to the definer's `default` export.
+function makeReexport(
+  rng: SeededRng,
+  targetId: string,
+  name: string,
+  isDefinerHop: boolean,
+): EsmDependencyOperation {
+  const roll = rng.integer(isDefinerHop ? 3 : 2);
+  if (roll === 0) {
+    return { kind: "esm-reexport-star", target: targetId };
+  }
+  if (isDefinerHop && roll === 2) {
+    return {
+      kind: "esm-reexport-named",
+      target: targetId,
+      sourceName: "default",
+      exportedName: name,
+    };
+  }
+  return { kind: "esm-reexport-named", target: targetId, sourceName: name, exportedName: name };
+}
+
+/// Reroute a meaningful minority of ESM readable edges (value or single-member namespace imports of
+/// an ESM definer) through fresh ESM barrel chains: reader -> barrel(s) -> definer, forwarding the
+/// read name. Forward edges only (the barrels are new nodes evaluated after the definer and before
+/// the reader), so acyclicity and the forward-only read invariant hold. Bounded so total modules
+/// stay within the case budget. All-ESM chains keep the interop surface clean; CJS interactions (a
+/// CJS reader requiring a barrel, an ESM barrel re-exporting a CJS definer) are model + test only.
+function insertBarrelChains(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+): RandomModuleDraft[] {
+  const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
+  const barrels: RandomModuleDraft[] = [];
+  let budget = Math.min(2, Math.max(0, MAX_RANDOM_MODULES - drafts.length));
+  // Consider barrels in a meaningful minority of cases.
+  if (budget === 0 || rng.integer(2) !== 0) {
+    return barrels;
+  }
+  let counter = 0;
+  for (const importer of drafts) {
+    if (importer.format !== "esm" || budget === 0) {
+      continue;
+    }
+    for (const [dependencyIndex, dependency] of importer.dependencies.entries()) {
+      if (budget === 0) {
+        break;
+      }
+      if (dependency.kind !== "esm-value-import" && dependency.kind !== "esm-namespace-import") {
+        continue;
+      }
+      const forwardedName = barrelForwardedName(dependency);
+      const definer = draftsById.get(dependency.target);
+      if (
+        forwardedName === null ||
+        definer === undefined ||
+        definer.format !== "esm" ||
+        // ~1/3 of eligible edges get a barrel chain.
+        rng.integer(3) !== 0
+      ) {
+        continue;
+      }
+      const hopCount = budget >= 2 && rng.boolean() ? 2 : 1;
+      const chain: RandomModuleDraft[] = [];
+      for (let hop = 0; hop < hopCount; hop += 1) {
+        chain.push({ id: `barrel${counter}`, format: "esm", dependencies: [] });
+        counter += 1;
+        budget -= 1;
+      }
+      for (const [hopIndex, barrel] of chain.entries()) {
+        const isDefinerHop = hopIndex === chain.length - 1;
+        const nextId = isDefinerHop ? definer.id : (chain[hopIndex + 1]?.id ?? definer.id);
+        barrel.dependencies.push(makeReexport(rng, nextId, forwardedName, isDefinerHop));
+      }
+      const head = chain[0];
+      if (head !== undefined) {
+        importer.dependencies[dependencyIndex] = { ...dependency, target: head.id };
+        barrels.push(...chain);
+      }
+    }
+  }
+  return barrels;
 }
 
 /// Choose a meaningful minority of leaf, value-contributing ESM modules to carry `sideEffects:false`
@@ -745,6 +870,31 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   // versus execution-order trigger. Flagged modules emit no events and contribute only values.
   if (program.modules.some((module) => module.sideEffectFree === true)) {
     tags.add("variation:side-effect-free-metadata");
+  }
+
+  // Namespace imports (`import * as ns`) with a folded member read exercise the namespace-shape
+  // interop surface; re-export (barrel) chains forward a value several hops from its definer.
+  const dependencyKinds = new Set(
+    program.modules.flatMap((module) => module.dependencies.map((dependency) => dependency.kind)),
+  );
+  if (dependencyKinds.has("esm-namespace-import")) {
+    tags.add("variation:namespace-read");
+  }
+  if (dependencyKinds.has("esm-reexport-named") || dependencyKinds.has("esm-reexport-star")) {
+    tags.add("variation:barrel-reexport");
+  }
+  if (dependencyKinds.has("esm-reexport-star")) {
+    tags.add("variation:reexport-star");
+  }
+  if (
+    program.modules.some((module) =>
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-reexport-named" && dependency.sourceName === "default",
+      ),
+    )
+  ) {
+    tags.add("variation:reexport-default");
   }
 
   const template = deriveTemplateName(program, tags, hasOverlappingEntries, esmCarriersByCjsTarget);

@@ -105,30 +105,95 @@ function importSpecifier(fromPath: string, toPath: string): string {
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
 
+/// The export names each module must expose, propagated through re-export (barrel) chains. A value
+/// import demands its imported name; a namespace import demands each read member; a readable require
+/// demands the name it reads; a named re-export always references (demands) its source on the target;
+/// a star re-export forwards any name demanded on the barrel down to its target. The result feeds
+/// both re-export statements and locally synthesized state-derived exports (see `localExportsFor`).
 function collectRequestedExports(program: ProgramModel): ReadonlyMap<string, readonly string[]> {
   const requestedExports = new Map<string, string[]>();
-  const demand = (target: string, name: string): void => {
+  const demand = (target: string, name: string): boolean => {
     const names = requestedExports.get(target);
     if (names === undefined) {
       requestedExports.set(target, [name]);
-    } else if (!names.includes(name)) {
-      names.push(name);
+      return true;
     }
+    if (!names.includes(name)) {
+      names.push(name);
+      return true;
+    }
+    return false;
   };
 
   for (const module of program.modules) {
     for (const dependency of module.dependencies) {
-      // A value import demands its imported name; a readable require demands the name it reads off
-      // the required module's exports. Both synthesize a state-derived export on the target.
       if (dependency.kind === "esm-value-import") {
         demand(dependency.target, dependency.importedName);
+      } else if (dependency.kind === "esm-namespace-import") {
+        for (const member of dependency.readMembers) {
+          demand(dependency.target, member);
+        }
       } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
         demand(dependency.target, dependency.readName);
+      } else if (dependency.kind === "esm-reexport-named") {
+        // `export { source as exported } from target` references `source` on the target eagerly.
+        demand(dependency.target, dependency.sourceName);
+      }
+    }
+  }
+
+  // Fixpoint: a `export * from target` barrel forwards every name demanded on it (that a named
+  // re-export does not already provide) to its target, so demand reaches the defining module.
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const module of program.modules) {
+      const starTargets = module.dependencies.flatMap((dependency) =>
+        dependency.kind === "esm-reexport-star" ? [dependency.target] : [],
+      );
+      if (starTargets.length === 0) {
+        continue;
+      }
+      const namedProvided = new Set(
+        module.dependencies.flatMap((dependency) =>
+          dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
+        ),
+      );
+      // Index iteration tolerates the array growing under a (pathological) self-star; `demand`
+      // deduplicates, so the fixpoint still terminates.
+      const demandedHere = requestedExports.get(module.id);
+      for (let index = 0; index < (demandedHere?.length ?? 0); index += 1) {
+        const name = demandedHere?.[index];
+        if (name === undefined || namedProvided.has(name)) {
+          continue;
+        }
+        for (const starTarget of starTargets) {
+          if (demand(starTarget, name)) {
+            changed = true;
+          }
+        }
       }
     }
   }
 
   return requestedExports;
+}
+
+/// The subset of a module's requested exports it must synthesize locally (a state-derived value):
+/// everything a re-export does not forward. CJS cannot re-export, so it synthesizes all of them; an
+/// ESM barrel forwards names via named re-exports (matched by `exportedName`) or a star re-export
+/// (which forwards everything else), leaving a pure barrel with no local exports.
+function localExportsFor(module: ModuleModel, requested: readonly string[]): readonly string[] {
+  if (module.format === "cjs") {
+    return requested;
+  }
+  const namedProvided = new Set(
+    module.dependencies.flatMap((dependency) =>
+      dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
+    ),
+  );
+  const hasStar = module.dependencies.some((dependency) => dependency.kind === "esm-reexport-star");
+  return requested.filter((name) => !namedProvided.has(name) && !hasStar);
 }
 
 function renderModule(
@@ -175,6 +240,7 @@ function renderModule(
   }
 
   const importLines: string[] = [];
+  const reexportLines: string[] = [];
   const dynamicRegistrationLines: string[] = [];
   const usedBindings = new Set<string>();
   for (const dependency of module.dependencies) {
@@ -186,6 +252,17 @@ function renderModule(
       importLines.push(
         `import { ${dependency.importedName} as ${dependency.localName} } from "${specifier}";`,
       );
+    } else if (dependency.kind === "esm-namespace-import") {
+      usedBindings.add(dependency.localName);
+      importLines.push(`import * as ${dependency.localName} from "${specifier}";`);
+    } else if (dependency.kind === "esm-reexport-named") {
+      reexportLines.push(
+        dependency.sourceName === dependency.exportedName
+          ? `export { ${dependency.sourceName} } from "${specifier}";`
+          : `export { ${dependency.sourceName} as ${dependency.exportedName} } from "${specifier}";`,
+      );
+    } else if (dependency.kind === "esm-reexport-star") {
+      reexportLines.push(`export * from "${specifier}";`);
     } else {
       dynamicRegistrationLines.push(
         `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`,
@@ -193,9 +270,13 @@ function renderModule(
     }
   }
 
+  const localExports = localExportsFor(module, requestedExports);
   const sections: string[][] = [];
   if (importLines.length > 0) {
     sections.push(importLines);
+  }
+  if (reexportLines.length > 0) {
+    sections.push(reexportLines);
   }
   if (module.hasTopLevelAwait === true) {
     sections.push(["await 0;"]);
@@ -206,8 +287,8 @@ function renderModule(
   if (module.events.length > 0) {
     sections.push(renderEvents(module));
   }
-  if (requestedExports.length > 0) {
-    sections.push(renderEsmExports(module, requestedExports, usedBindings, readable));
+  if (localExports.length > 0) {
+    sections.push(renderEsmExports(module, localExports, usedBindings, readable));
   }
 
   return renderSections(sections);

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import type { GeneratedCase } from "./generate.ts";
 import { deriveCoverageTags } from "./generate.ts";
-import type { EventRecord, ProgramModel } from "./model.ts";
+import type { DependencyOperation, EventRecord, ProgramModel } from "./model.ts";
 import { DEFAULT_CASE_SIZE, executeGeneratedCase, type CampaignOptions } from "./main.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -114,6 +114,57 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
       }
     }
   }
+  // Drop a single read member from a namespace import, removing any event reads of it. This shrinks
+  // the namespace's footprint and lets a later pass drop the now-unused import or its target.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [depIndex, dependency] of module.dependencies.entries()) {
+      if (dependency.kind !== "esm-namespace-import" || dependency.readMembers.length === 0) {
+        continue;
+      }
+      for (let memberIndex = 0; memberIndex < dependency.readMembers.length; memberIndex += 1) {
+        const removedMember = dependency.readMembers[memberIndex];
+        const dependencies = module.dependencies.map((candidate, index) =>
+          index === depIndex
+            ? {
+                ...dependency,
+                readMembers: dependency.readMembers.filter((_, i) => i !== memberIndex),
+              }
+            : candidate,
+        );
+        const events = module.events.map((event) => {
+          if (event.reads === undefined) {
+            return event;
+          }
+          const reads = event.reads.filter(
+            (read) => !(read.binding === dependency.localName && read.member === removedMember),
+          );
+          if (reads.length === event.reads.length) {
+            return event;
+          }
+          return reads.length > 0 ? { ...event, reads } : withoutReads(event);
+        });
+        yield editModule(program, moduleIndex, {
+          ...module,
+          dependencies,
+          events,
+        } as typeof module);
+      }
+    }
+  }
+  // Drop a barrel hop: rewire a read that targets a pure single-re-export barrel directly to the
+  // barrel's target (adjusting the imported name), so the intermediate barrel becomes droppable.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [depIndex, dependency] of module.dependencies.entries()) {
+      const rewired = rewireReadPastBarrel(dependency, program);
+      if (rewired === undefined) {
+        continue;
+      }
+      const dependencies = module.dependencies.map((candidate, index) =>
+        index === depIndex ? rewired : candidate,
+      );
+      yield editModule(program, moduleIndex, { ...module, dependencies } as typeof module);
+    }
+  }
   // Unflag a side-effect-free module (drop its `sideEffects: false` metadata). When the failure does
   // not depend on the flag this simplifies the case; the greedy pass keeps it only if the failure
   // kind is preserved, which also tells whether the metadata is load-bearing for the bug.
@@ -125,6 +176,57 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
     delete (unflagged as { sideEffectFree?: true }).sideEffectFree;
     yield editModule(program, moduleIndex, unflagged);
   }
+}
+
+/// If `dependency` reads a single name from a pure single-re-export barrel, return an equivalent
+/// dependency that reads directly from the barrel's target (collapsing one hop); otherwise undefined.
+/// A named re-export maps the read name to its source; a star re-export forwards the same name.
+function rewireReadPastBarrel(
+  dependency: DependencyOperation,
+  program: ProgramModel,
+): DependencyOperation | undefined {
+  let readName: string | undefined;
+  if (dependency.kind === "esm-value-import") {
+    readName = dependency.importedName;
+  } else if (dependency.kind === "esm-namespace-import" && dependency.readMembers.length === 1) {
+    readName = dependency.readMembers[0];
+  } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
+    readName = dependency.readName;
+  }
+  if (readName === undefined) {
+    return undefined;
+  }
+
+  const barrel = program.modules.find((module) => module.id === dependency.target);
+  if (barrel === undefined || barrel.dependencies.length !== 1) {
+    return undefined;
+  }
+  const reexport = barrel.dependencies[0];
+  if (reexport === undefined) {
+    return undefined;
+  }
+  let target: string;
+  let name: string;
+  if (reexport.kind === "esm-reexport-named" && reexport.exportedName === readName) {
+    target = reexport.target;
+    name = reexport.sourceName;
+  } else if (reexport.kind === "esm-reexport-star") {
+    target = reexport.target;
+    name = readName;
+  } else {
+    return undefined;
+  }
+
+  if (dependency.kind === "esm-value-import") {
+    return { ...dependency, target, importedName: name };
+  }
+  if (dependency.kind === "esm-namespace-import") {
+    return { ...dependency, target, readMembers: [name] };
+  }
+  if (dependency.kind === "cjs-require") {
+    return { ...dependency, target, readName: name };
+  }
+  return undefined;
 }
 
 function withoutReads(event: EventRecord): EventRecord {

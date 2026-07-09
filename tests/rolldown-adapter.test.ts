@@ -389,6 +389,216 @@ describe("withRolldownBuild", () => {
     });
   });
 
+  test("builds and round-trips a #8675-shaped namespace import member read", async () => {
+    // `import * as ns` + a folded `ns.k`. If rolldown wrongly removes the used export or mis-rewrites
+    // the namespace member access (#8675 / #4780 / #8710), the folded number diverges or the binding
+    // is undefined and the bundle crashes; on a correct build source and bundle match.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "target",
+              localName: "ns0",
+              readMembers: ["k"],
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "ns0", member: "k" }],
+            },
+          ],
+        },
+        {
+          id: "target",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "target", phase: "evaluate", value: 40 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+      };
+    });
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [
+        ["target", 40],
+        ["entry", 41],
+      ],
+    });
+  });
+
+  test("builds and round-trips an ESM namespace import of a CJS target's named member", async () => {
+    // Deferred from the generator: Node's `import * of CJS` namespace carries a `module.exports` key
+    // rolldown's interop omits, so enumerating the namespace legitimately differs. A single numeric
+    // member read still round-trips and stays model-expressible (see the namespace-and-barrel doc).
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-namespace-import", target: "cjs", localName: "ns0", readMembers: ["k"] },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "ns0", member: "k" }],
+            },
+          ],
+        },
+        {
+          id: "cjs",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "cjs", phase: "evaluate", value: 40 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return classifyVerdict(sourceOutcome, bundleOutcome);
+    });
+
+    expect(successValue(result)).toEqual({ kind: "pass", signature: "pass" });
+  });
+
+  test("builds and round-trips an ESM re-export (barrel) chain", async () => {
+    // reader imports `vdef` from a two-hop barrel (`export *` then `export { vdef } from`) that
+    // forwards a definer's value. Only the definer synthesizes it, so a dropped barrel init would be
+    // observable downstream; on a correct build source and bundle match.
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel-a", importedName: "vdef", localName: "r" },
+          ],
+          events: [{ module: "reader", phase: "evaluate", value: 1, reads: [{ binding: "r" }] }],
+        },
+        {
+          id: "barrel-a",
+          format: "esm",
+          dependencies: [{ kind: "esm-reexport-star", target: "barrel-b" }],
+          events: [],
+        },
+        {
+          id: "barrel-b",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-reexport-named", target: "def", sourceName: "vdef", exportedName: "vdef" },
+          ],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+      };
+    });
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [
+        ["def", 7],
+        ["reader", 8],
+      ],
+    });
+  });
+
+  test("builds and round-trips a #8777-shaped side-effect-free barrel re-export chain", async () => {
+    // A `sideEffects:false` barrel re-exporting a value-only definer whose value the entry folds. If
+    // rolldown drops the re-exported init under strictExecutionOrder (#8777: the re-exported variable
+    // stays undefined) the fold becomes non-finite and the bundle crashes; on a correct build source
+    // and bundle match. The definer emits no events, so the flag can never drop an observed side
+    // effect — the flagged barrel stays within the no-events / value-only contract.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel", importedName: "vdef", localName: "v" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "v" }] }],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          sideEffectFree: true,
+          dependencies: [
+            { kind: "esm-reexport-named", target: "def", sourceName: "vdef", exportedName: "vdef" },
+          ],
+          events: [],
+        },
+        { id: "def", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
+      const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+        readFile(join(artifacts.sourceDirectory, "side-effect-free/package.json"), "utf8"),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+        packageJson,
+      };
+    });
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [["entry", 1]],
+      packageJson: '{\n  "sideEffects": false\n}\n',
+    });
+  });
+
   test("recognizes panic-shaped build errors and rejects ordinary ones", () => {
     expect(looksLikePanic({ name: "Error", message: "panicked at 'oops', crates/x.rs:1:1" })).toBe(
       true,
