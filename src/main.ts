@@ -7,7 +7,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { executeManifest } from "./execute.ts";
-import { generateCase, MAX_CASE_SIZE, type GeneratedCase } from "./generate.ts";
+import {
+  FORMAT_REGIMES,
+  generateCase,
+  MAX_CASE_SIZE,
+  type FormatRegime,
+  type GeneratedCase,
+} from "./generate.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -29,13 +35,16 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 8 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 9 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
   readonly cases: number;
   readonly caseSize: number;
   readonly onDemandWrapping: boolean;
+  /// Forces every case onto the random generator with a fixed format regime; absent means the
+  /// generator's own weighted mix of regimes and fixed templates.
+  readonly formatRegime?: FormatRegime;
   readonly rolldownPackage: string;
   readonly outDir: string;
   readonly continueOnFail: boolean;
@@ -140,13 +149,14 @@ const DEFAULT_OPTIONS: CampaignOptions = {
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--wrap-all] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--wrap-all] [--format-regime mixed|pure-esm|pure-cjs] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
   let cases = DEFAULT_OPTIONS.cases;
   let caseSize = DEFAULT_OPTIONS.caseSize;
   let onDemandWrapping = DEFAULT_OPTIONS.onDemandWrapping;
+  let formatRegime: FormatRegime | undefined;
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
   let outDir = DEFAULT_OPTIONS.outDir;
   let continueOnFail = DEFAULT_OPTIONS.continueOnFail;
@@ -168,6 +178,14 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
       case "--wrap-all":
         onDemandWrapping = false;
         break;
+      case "--format-regime": {
+        const value = readNonEmptyValue(argv, ++index, argument);
+        if (!(FORMAT_REGIMES as readonly string[]).includes(value)) {
+          throw new Error(`--format-regime must be one of ${FORMAT_REGIMES.join(", ")}`);
+        }
+        formatRegime = value as FormatRegime;
+        break;
+      }
       case "--rolldown-package":
         rolldownPackage = readNonEmptyValue(argv, ++index, argument);
         break;
@@ -192,7 +210,16 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   }
   validateSeedRange(seed, cases);
 
-  return { seed, cases, caseSize, onDemandWrapping, rolldownPackage, outDir, continueOnFail };
+  return {
+    seed,
+    cases,
+    caseSize,
+    onDemandWrapping,
+    ...(formatRegime === undefined ? {} : { formatRegime }),
+    rolldownPackage,
+    outDir,
+    continueOnFail,
+  };
 }
 
 export async function runCampaign(
@@ -223,7 +250,7 @@ async function runCampaignCases(
 
   for (let caseIndex = 0; caseIndex < options.cases; caseIndex += 1) {
     const seed = (options.seed + caseIndex) % UINT32_RANGE;
-    const generated = dependencies.generate(seed, options.caseSize);
+    const generated = dependencies.generate(seed, options.caseSize, options.formatRegime);
     const result = await dependencies.executeCase(generated, options);
     const didPass = result.verdict.kind === "pass";
     let artifactDirectory: string | undefined;
@@ -879,6 +906,9 @@ function createReplayMetadata(result: CampaignCaseResult): {
     cases: 1,
     caseSize: result.generated.size,
     onDemandWrapping: result.options.onDemandWrapping,
+    ...(result.options.formatRegime === undefined
+      ? {}
+      : { formatRegime: result.options.formatRegime }),
     rolldownPackage: result.options.rolldownPackage,
     outDir: result.options.outDir,
     continueOnFail: false,
@@ -896,6 +926,9 @@ function createReplayMetadata(result: CampaignCaseResult): {
       "--case-size",
       String(options.caseSize),
       ...(options.onDemandWrapping ? [] : ["--wrap-all"]),
+      ...("formatRegime" in options && options.formatRegime !== undefined
+        ? ["--format-regime", options.formatRegime]
+        : []),
       "--rolldown-package",
       options.rolldownPackage,
       "--out-dir",

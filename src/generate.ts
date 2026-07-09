@@ -25,6 +25,10 @@ export const MIXED_TEMPLATE_NAMES = [...FIXED_TEMPLATE_NAMES, "random-mixed"] as
 
 export type MixedTemplateName = (typeof MIXED_TEMPLATE_NAMES)[number];
 
+export const FORMAT_REGIMES = ["mixed", "pure-esm", "pure-cjs"] as const;
+
+export type FormatRegime = (typeof FORMAT_REGIMES)[number];
+
 export interface GeneratedCase {
   readonly seed: number;
   readonly size: number;
@@ -35,15 +39,29 @@ export interface GeneratedCase {
 
 export const MAX_CASE_SIZE = 16;
 
-export function generateCase(seed: number, size: number): GeneratedCase {
+export function generateCase(
+  seed: number,
+  size: number,
+  forcedRegime?: FormatRegime,
+): GeneratedCase {
   const rng = new SeededRng(seed);
   if (!Number.isInteger(size) || size < 1 || size > MAX_CASE_SIZE) {
     throw new Error(`size must be an integer from 1 through ${MAX_CASE_SIZE}`);
   }
 
   // Half the campaign explores random graphs; the other half keeps the audited fixed shapes.
-  const template = rng.boolean() ? "random-mixed" : rng.pick(FIXED_TEMPLATE_NAMES);
-  const generated = TEMPLATE_BUILDERS[template](rng, size);
+  // A forced regime pins every case to the random generator: the fixed templates carry their
+  // own inherent formats and would dilute a pure-format campaign.
+  const template =
+    forcedRegime !== undefined
+      ? "random-mixed"
+      : rng.boolean()
+        ? "random-mixed"
+        : rng.pick(FIXED_TEMPLATE_NAMES);
+  const generated =
+    template === "random-mixed"
+      ? buildRandomMixed(rng, size, forcedRegime)
+      : TEMPLATE_BUILDERS[template](rng, size);
   const coverageTags = deriveCoverageTags(generated.program);
   // `template:*` tags stay purely structural; only fixed templates promise their own shape.
   if (template !== "random-mixed" && !coverageTags.includes(`template:${template}`)) {
@@ -247,13 +265,33 @@ interface RandomModuleDraft {
 /// entry evaluation with dynamic-import triggers. Mixed-format cycles are never generated:
 /// depending on the runtime entry point they can hit Node's require-of-evaluating-ESM error,
 /// and value imports never close a cycle, so TDZ (documented as not preserved) stays out.
-function buildRandomMixed(rng: SeededRng, size: number): TemplateResult {
+///
+/// Each case rolls a format regime — mixed, pure-esm, or pure-cjs — so the pure ends of the
+/// matrix are exercised deliberately instead of only by per-module coincidence. CJS modules
+/// may register dynamic imports (legal in Node CJS) alongside their requires.
+function buildRandomMixed(
+  rng: SeededRng,
+  size: number,
+  forcedRegime?: FormatRegime,
+): TemplateResult {
+  const regimeRoll = rng.integer(5);
+  const regime: FormatRegime =
+    forcedRegime ?? (regimeRoll === 0 ? "pure-esm" : regimeRoll === 1 ? "pure-cjs" : "mixed");
+  const rollModuleFormat = (): ModuleFormat => {
+    if (regime === "pure-esm") {
+      return "esm";
+    }
+    if (regime === "pure-cjs") {
+      return "cjs";
+    }
+    // Two thirds ESM keeps interop pairs frequent without starving pure-ESM shapes.
+    return rng.integer(3) < 2 ? "esm" : "cjs";
+  };
   const dagCount = Math.min(3 + rng.integer(size + 1), 11);
   const ringCount = rng.integer(4) === 0 ? 2 + rng.integer(2) : 0;
   const drafts: RandomModuleDraft[] = Array.from({ length: dagCount }, (_, index) => ({
     id: `m${index}`,
-    // Two thirds ESM keeps interop pairs frequent without starving pure-ESM shapes.
-    format: rng.integer(3) < 2 ? "esm" : "cjs",
+    format: rollModuleFormat(),
     dependencies: [],
   }));
 
@@ -268,7 +306,17 @@ function buildRandomMixed(rng: SeededRng, size: number): TemplateResult {
     }
     usedEdges.add(edgeKey);
     if (importer.format === "cjs") {
-      importer.dependencies.push({ kind: "cjs-require", target: target.id });
+      if (rng.integer(4) === 0) {
+        const registration = `dyn-${importer.id}-${target.id}`;
+        importer.dependencies.push({
+          kind: "esm-dynamic-import",
+          target: target.id,
+          registration,
+        });
+        registrations.push({ owner: importer.id, registration });
+      } else {
+        importer.dependencies.push({ kind: "cjs-require", target: target.id });
+      }
       return;
     }
     const roll = rng.integer(6);
@@ -307,7 +355,8 @@ function buildRandomMixed(rng: SeededRng, size: number): TemplateResult {
   }
 
   if (ringCount > 0) {
-    const ringFormat: ModuleFormat = rng.boolean() ? "esm" : "cjs";
+    const ringFormat: ModuleFormat =
+      regime === "mixed" ? (rng.boolean() ? "esm" : "cjs") : rollModuleFormat();
     const ring: RandomModuleDraft[] = Array.from({ length: ringCount }, (_, index) => ({
       id: `ring${index}`,
       format: ringFormat,
@@ -341,7 +390,10 @@ function buildRandomMixed(rng: SeededRng, size: number): TemplateResult {
           )
         : cjsModule(
             draft.id,
-            draft.dependencies.filter((dependency) => dependency.kind === "cjs-require"),
+            draft.dependencies.filter(
+              (dependency) =>
+                dependency.kind === "cjs-require" || dependency.kind === "esm-dynamic-import",
+            ),
             events(draft.id, rng, 1 + rng.integer(2)),
           ),
   );
@@ -500,11 +552,17 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
 
   if (formats.has("esm") && formats.has("cjs")) {
     tags.add("mechanism:mixed-esm-cjs");
+    tags.add("regime:mixed");
+  } else {
+    tags.add(formats.has("cjs") ? "regime:pure-cjs" : "regime:pure-esm");
   }
 
   for (const module of program.modules) {
     for (const dependency of module.dependencies) {
       const target = modulesById.get(dependency.target);
+      if (module.format === "cjs" && dependency.kind === "esm-dynamic-import") {
+        tags.add("mechanism:cjs-dynamic-import");
+      }
       if (module.format === "esm" && target?.format === "cjs") {
         tags.add("mechanism:esm-imports-cjs");
         tags.add(

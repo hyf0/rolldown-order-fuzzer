@@ -49,9 +49,11 @@ export interface EsmModuleModel extends ModuleModelBase {
   readonly hasTopLevelAwait?: true;
 }
 
+/// CJS modules require synchronously and may also register dynamic imports — `import()` is
+/// legal inside CommonJS in Node.
 export interface CjsModuleModel extends ModuleModelBase {
   readonly format: "cjs";
-  readonly dependencies: readonly CjsRequireOperation[];
+  readonly dependencies: readonly (CjsRequireOperation | EsmDynamicImportOperation)[];
   readonly hasTopLevelAwait?: never;
 }
 

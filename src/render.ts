@@ -100,13 +100,25 @@ function renderModule(
 ): string {
   if (module.format === "cjs") {
     const requireLines: string[] = [];
+    const dynamicRegistrationLines: string[] = [];
     for (const dependency of module.dependencies) {
-      requireLines.push(`require("./${getRequiredPath(modulePaths, dependency.target)}");`);
+      const targetPath = getRequiredPath(modulePaths, dependency.target);
+      if (dependency.kind === "esm-dynamic-import") {
+        // `import()` is legal inside CommonJS in Node.
+        dynamicRegistrationLines.push(
+          `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("./${targetPath}");`,
+        );
+      } else {
+        requireLines.push(`require("./${targetPath}");`);
+      }
     }
 
     const sections: string[][] = [];
     if (requireLines.length > 0) {
       sections.push(requireLines);
+    }
+    if (dynamicRegistrationLines.length > 0) {
+      sections.push(dynamicRegistrationLines);
     }
     if (module.events.length > 0) {
       sections.push(renderEvents(module));

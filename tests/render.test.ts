@@ -285,6 +285,40 @@ describe("renderProgram", () => {
     });
   });
 
+  test("renders CJS dynamic-import registrations alongside requires", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "dep" },
+            { kind: "esm-dynamic-import", target: "lazy", registration: "dyn-entry-lazy" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        { id: "dep", format: "cjs", dependencies: [], events: [] },
+        { id: "lazy", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [
+        { kind: "require-entry", entry: "main" },
+        { kind: "trigger-dynamic-import", registration: "dyn-entry-lazy" },
+      ],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+    const entryFile = rendered.files.find(
+      (file) => file.path === rendered.modulePaths.get("entry"),
+    );
+    expect(entryFile).toBeDefined();
+    expect(entryFile?.contents).toContain('require("./');
+    expect(entryFile?.contents).toContain(
+      'globalThis.__orderDynamicImports["dyn-entry-lazy"] = () => import("./',
+    );
+    expect(entryFile?.contents).not.toContain('require("./' + rendered.modulePaths.get("lazy"));
+  });
+
   test("rejects invalid programs before rendering", () => {
     const program = {
       modules: [

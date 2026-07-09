@@ -244,3 +244,56 @@ function synchronouslyReachable(
 function intersection(left: ReadonlySet<string>, right: ReadonlySet<string>): Set<string> {
   return new Set([...left].filter((value) => right.has(value)));
 }
+
+describe("format regimes", () => {
+  test("forced pure regimes produce single-format valid programs on the random generator", () => {
+    for (const [regime, format] of [
+      ["pure-esm", "esm"],
+      ["pure-cjs", "cjs"],
+    ] as const) {
+      for (let seed = 0; seed < 50; seed += 1) {
+        const generated = generateCase(seed, 6, regime);
+        expect(generated.template).toBe("random-mixed");
+        expect(validateProgramModel(generated.program)).toEqual([]);
+        expect(generated.program.modules.every((module) => module.format === format)).toBe(true);
+        expect(generated.coverageTags).toContain(`regime:${regime}`);
+      }
+    }
+  });
+
+  test("unforced seeds reach all three regimes on the random generator", () => {
+    const reached = new Set<string>();
+    for (let seed = 0; seed < 2_000 && reached.size < 3; seed += 1) {
+      const generated = generateCase(seed, 6);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      const tag = generated.coverageTags.find((candidate) => candidate.startsWith("regime:"));
+      if (tag !== undefined) {
+        reached.add(tag);
+      }
+    }
+    expect([...reached].sort()).toEqual(["regime:mixed", "regime:pure-cjs", "regime:pure-esm"]);
+  });
+
+  test("CJS modules can register dynamic imports, including in pure-cjs programs", () => {
+    let sawCjsDynamic = false;
+    let sawPureCjsDynamic = false;
+    for (let seed = 0; seed < 2_000 && !(sawCjsDynamic && sawPureCjsDynamic); seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      expect(validateProgramModel(generated.program)).toEqual([]);
+      if (!generated.coverageTags.includes("mechanism:cjs-dynamic-import")) {
+        continue;
+      }
+      sawCjsDynamic = true;
+      if (generated.coverageTags.includes("regime:pure-cjs")) {
+        sawPureCjsDynamic = true;
+      }
+    }
+    expect(sawCjsDynamic).toBe(true);
+    expect(sawPureCjsDynamic).toBe(true);
+  });
+});

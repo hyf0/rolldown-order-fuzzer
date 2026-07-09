@@ -237,7 +237,12 @@ function validateDependencySyntax(
 ): void {
   if (module.format === "esm" && dependency.kind === "cjs-require") {
     errors.push(`${path}: ESM modules cannot use cjs-require`);
-  } else if (module.format === "cjs" && dependency.kind !== "cjs-require") {
+  } else if (
+    module.format === "cjs" &&
+    dependency.kind !== "cjs-require" &&
+    dependency.kind !== "esm-dynamic-import"
+  ) {
+    // `import()` is legal inside CommonJS in Node; static import syntax is not.
     errors.push(`${path}: CJS modules cannot use ${dependency.kind}`);
   }
 }

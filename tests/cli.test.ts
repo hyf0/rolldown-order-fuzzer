@@ -44,8 +44,17 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 8", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(8);
+  test("uses artifact schema version 9", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(9);
+  });
+
+  test("parses and validates --format-regime", () => {
+    const options = parseCliArgs(["--format-regime", "pure-cjs"]);
+    expect(options.formatRegime).toBe("pure-cjs");
+    expect(parseCliArgs([]).formatRegime).toBeUndefined();
+    expect(() => parseCliArgs(["--format-regime", "esm-only"])).toThrow(
+      /--format-regime must be one of/,
+    );
   });
 
   test("parses the complete campaign option set", () => {
