@@ -2,10 +2,26 @@ export type ModuleFormat = "esm" | "cjs";
 
 export type EventValue = string | number | boolean | null;
 
+/// Reads the value carried by a forward-only dependency binding in the reading module's scope:
+/// an ESM value-import's `localName`, or a CJS require-result binding (then `member` names the
+/// exported property read off the required module's exports). Every readable binding is created
+/// by a dependency that targets a module evaluated strictly before the reader, so a read never
+/// closes a cycle and never hits TDZ.
+export interface ValueRead {
+  readonly binding: string;
+  readonly member?: string;
+}
+
 export interface EventRecord {
   readonly module: string;
   readonly phase: string;
   readonly value: EventValue;
+  /// Optional forward-only dependency reads folded into the emitted payload: the rendered value
+  /// becomes `value + read0 + read1 + …`. When present and non-empty, `value` must be a finite
+  /// number so the fold stays numeric, and every read must reference one of the module's readable
+  /// bindings. Folding a dependency's exported value into an event makes a wrong, dropped, or
+  /// reordered upstream initialization observable as a changed number.
+  readonly reads?: readonly ValueRead[];
 }
 
 export interface EsmSideEffectImportOperation {
@@ -29,6 +45,12 @@ export interface EsmDynamicImportOperation {
 export interface CjsRequireOperation {
   readonly kind: "cjs-require";
   readonly target: string;
+  /// When set, the require is rendered as `const resultBinding = require("./target")` so the
+  /// target's exports can be read. `readName` (required whenever `resultBinding` is) names the
+  /// target export read through the binding and demands that the target synthesize it. Only ever
+  /// set on forward, non-cycle require edges, so the target is fully evaluated before it is read.
+  readonly resultBinding?: string;
+  readonly readName?: string;
 }
 
 export type EsmDependencyOperation =
@@ -94,4 +116,27 @@ export interface ProgramModel {
   readonly entries: readonly EntryModel[];
   readonly schedule: readonly ScheduleOperation[];
   readonly manualChunkGroups?: readonly ManualChunkGroup[];
+}
+
+/// The forward-only dependency values a module can read in its own scope, in dependency order: an
+/// ESM value-import contributes its `localName`; a CJS readable require contributes its
+/// `resultBinding` plus the `readName` member read off the required module's exports. This is a
+/// pure model fact shared by the generator (choosing event reads), the renderer (folding exports),
+/// and validation.
+export function readableBindingsOf(
+  dependencies: readonly DependencyOperation[],
+): readonly ValueRead[] {
+  const reads: ValueRead[] = [];
+  for (const dependency of dependencies) {
+    if (dependency.kind === "esm-value-import") {
+      reads.push({ binding: dependency.localName });
+    } else if (
+      dependency.kind === "cjs-require" &&
+      dependency.resultBinding !== undefined &&
+      dependency.readName !== undefined
+    ) {
+      reads.push({ binding: dependency.resultBinding, member: dependency.readName });
+    }
+  }
+  return reads;
 }

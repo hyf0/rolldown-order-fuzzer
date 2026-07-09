@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 
 import type { GeneratedCase } from "./generate.ts";
 import { deriveCoverageTags } from "./generate.ts";
-import type { ProgramModel } from "./model.ts";
+import type { EventRecord, ProgramModel } from "./model.ts";
 import { DEFAULT_CASE_SIZE, executeGeneratedCase, type CampaignOptions } from "./main.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -95,6 +95,29 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
       } as typeof module);
     }
   }
+  // Drop a single value read from an event. This keeps the model valid on its own and lets a
+  // later pass drop the now-unread dependency that produced the binding.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [eventIndex, event] of module.events.entries()) {
+      const reads = event.reads;
+      if (reads === undefined || reads.length === 0) {
+        continue;
+      }
+      for (let readIndex = 0; readIndex < reads.length; readIndex += 1) {
+        const remaining = reads.filter((_, index) => index !== readIndex);
+        const replacement: EventRecord =
+          remaining.length > 0 ? { ...event, reads: remaining } : withoutReads(event);
+        const events = module.events.map((candidate, index) =>
+          index === eventIndex ? replacement : candidate,
+        );
+        yield editModule(program, moduleIndex, { ...module, events } as typeof module);
+      }
+    }
+  }
+}
+
+function withoutReads(event: EventRecord): EventRecord {
+  return { module: event.module, phase: event.phase, value: event.value };
 }
 
 function dropModule(program: ProgramModel, moduleId: string): ProgramModel {

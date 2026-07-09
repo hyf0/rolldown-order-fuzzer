@@ -69,6 +69,193 @@ describe("validateProgramModel", () => {
     expect(validateProgramModel(program)).toEqual([]);
   });
 
+  test("accepts value-carrying events and readable requires", () => {
+    const program = {
+      modules: [
+        {
+          id: "esm-reader",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "esm-source",
+              importedName: "v",
+              localName: "sourceValue",
+            },
+          ],
+          events: [
+            {
+              module: "esm-reader",
+              phase: "evaluate",
+              value: 10,
+              reads: [{ binding: "sourceValue" }],
+            },
+          ],
+        },
+        {
+          id: "esm-source",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "esm-source", phase: "evaluate", value: 3 }],
+        },
+        {
+          id: "cjs-reader",
+          format: "cjs",
+          dependencies: [
+            {
+              kind: "cjs-require",
+              target: "cjs-target",
+              resultBinding: "targetExports",
+              readName: "vt",
+            },
+          ],
+          events: [
+            {
+              module: "cjs-reader",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "targetExports", member: "vt" }],
+            },
+          ],
+        },
+        {
+          id: "cjs-target",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "cjs-target", phase: "evaluate", value: 5 }],
+        },
+      ],
+      entries: [
+        { name: "main", moduleId: "esm-reader" },
+        { name: "worker", moduleId: "cjs-reader" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "main" },
+        { kind: "require-entry", entry: "worker" },
+      ],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("rejects event reads that do not resolve to a readable binding", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "source",
+              importedName: "v",
+              localName: "sourceValue",
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 0,
+              reads: [{ binding: "missing" }, { binding: "sourceValue", member: "notAMember" }],
+            },
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: "not-a-number",
+              reads: [{ binding: "sourceValue" }],
+            },
+          ],
+        },
+        {
+          id: "source",
+          format: "esm",
+          dependencies: [],
+          events: [],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].events[0].reads[0].binding: unknown readable binding "missing" in this module',
+      'modules[0].events[0].reads[1].member: expected no member for binding "sourceValue", received "notAMember"',
+      "modules[0].events[1].value: expected a finite JSON number when the event carries reads",
+    ]);
+  });
+
+  test("rejects a require read with the wrong member", () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "cjs",
+          dependencies: [
+            {
+              kind: "cjs-require",
+              target: "target",
+              resultBinding: "targetExports",
+              readName: "vt",
+            },
+          ],
+          events: [
+            {
+              module: "reader",
+              phase: "evaluate",
+              value: 0,
+              reads: [{ binding: "targetExports" }],
+            },
+          ],
+        },
+        { id: "target", format: "cjs", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].events[0].reads[0].member: expected "vt" for binding "targetExports", received no member',
+    ]);
+  });
+
+  test("rejects colliding readable bindings and unpaired readable-require fields", () => {
+    const program = {
+      modules: [
+        {
+          id: "reader",
+          format: "cjs",
+          dependencies: [
+            {
+              kind: "cjs-require",
+              target: "first",
+              resultBinding: "shared",
+              readName: "a",
+            },
+            {
+              kind: "cjs-require",
+              target: "second",
+              resultBinding: "shared",
+              readName: "b",
+            },
+            { kind: "cjs-require", target: "third", resultBinding: "other" },
+          ],
+          events: [],
+        },
+        { id: "first", format: "cjs", dependencies: [], events: [] },
+        { id: "second", format: "cjs", dependencies: [], events: [] },
+        { id: "third", format: "cjs", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "reader" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].dependencies[1].resultBinding: duplicate module local binding "shared"',
+      "modules[0].dependencies[2]: resultBinding and readName must be set together on a readable require",
+    ]);
+  });
+
   test("rejects triggering a dynamic import before its owner is evaluated", () => {
     const program = {
       modules: [
@@ -291,7 +478,7 @@ describe("validateProgramModel", () => {
     } satisfies ProgramModel;
 
     expect(validateProgramModel(program)).toEqual([
-      'modules[0].dependencies[1].localName: duplicate ESM local binding "shared"',
+      'modules[0].dependencies[1].localName: duplicate module local binding "shared"',
     ]);
   });
 

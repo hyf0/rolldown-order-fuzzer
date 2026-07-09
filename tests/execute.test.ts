@@ -10,6 +10,7 @@ import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
 import type { ExecutionManifest, ExecutionOutcome } from "../src/protocol.ts";
 import { renderProgram, type RenderedProgram } from "../src/render.ts";
+import { validateProgramModel } from "../src/validate-model.ts";
 import { classifyVerdict } from "../src/verdict.ts";
 
 const EXECUTION_TEST_TIMEOUT_MS = 10_000;
@@ -632,6 +633,176 @@ describe("executeManifest", () => {
     });
   });
 });
+
+// Handwritten models in the shape of the value-flow bugs the value oracle targets. Each expresses
+// the issue purely through observed value flow — no sideEffects metadata, no namespace, no
+// re-export syntax — and must validate, render, and round-trip source execution. A correct source
+// run is the oracle the campaign then compares Rolldown against.
+describe("value-carrying issue shapes", () => {
+  test("#9961-like: a referenced cross-module value drop is observable without metadata", async () => {
+    // consumer references initializer's exported value; dropping the initializer would make the
+    // observed number diverge or crash, exactly as the dropped `checkGlobals` binding did.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "consumer" }],
+          events: [],
+        },
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "initializer",
+              importedName: "checkGlobals",
+              localName: "checkGlobals",
+            },
+          ],
+          events: [
+            {
+              module: "consumer",
+              phase: "evaluate",
+              value: 0,
+              reads: [{ binding: "checkGlobals" }],
+            },
+          ],
+        },
+        {
+          id: "initializer",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "initializer", phase: "evaluate", value: 500 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    await expectRoundTrip(program, [
+      { version: 1, module: "initializer", phase: "evaluate", value: 500 },
+      { version: 1, module: "consumer", phase: "evaluate", value: 500 },
+    ]);
+  });
+
+  test("#8675-like: namespace-less named imports read specific used exports", async () => {
+    // entry names `used` and `other` directly (no `import *`) and reads each; wrongly removing one
+    // named export makes its read undefined, the failure #8675 reproduced.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "lib",
+              importedName: "used",
+              localName: "usedValue",
+            },
+            {
+              kind: "esm-value-import",
+              target: "lib",
+              importedName: "other",
+              localName: "otherValue",
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 0,
+              reads: [{ binding: "usedValue" }, { binding: "otherValue" }],
+            },
+          ],
+        },
+        {
+          id: "lib",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "lib", phase: "evaluate", value: 42 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    await expectRoundTrip(program, [
+      { version: 1, module: "lib", phase: "evaluate", value: 42 },
+      { version: 1, module: "entry", phase: "evaluate", value: 84 },
+    ]);
+  });
+
+  test("#8777-like: a re-exported value depends on the source initializer running", async () => {
+    // barrel re-exposes a value computed from source's `Foo`; if source's initializer is not called
+    // the re-exported value is undefined, the `variable undefined` symptom of #8777.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "barrel",
+              importedName: "Foo",
+              localName: "barrelFoo",
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 0,
+              reads: [{ binding: "barrelFoo" }],
+            },
+          ],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "source",
+              importedName: "Foo",
+              localName: "fooValue",
+            },
+          ],
+          events: [{ module: "barrel", phase: "evaluate", value: 0 }],
+        },
+        {
+          id: "source",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "source", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    await expectRoundTrip(program, [
+      { version: 1, module: "source", phase: "evaluate", value: 7 },
+      { version: 1, module: "barrel", phase: "evaluate", value: 0 },
+      { version: 1, module: "entry", phase: "evaluate", value: 7 },
+    ]);
+  });
+});
+
+async function expectRoundTrip(
+  program: ProgramModel,
+  events: ExecutionOutcome["events"],
+): Promise<void> {
+  expect(validateProgramModel(program)).toEqual([]);
+  await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    await expect(
+      executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
+    ).resolves.toEqual({ version: 1, status: "ok", events });
+  });
+}
 
 async function withRenderedProgram(
   rendered: RenderedProgram,

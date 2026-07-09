@@ -1,4 +1,5 @@
-import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel } from "./model.ts";
+import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
+import { readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -74,18 +75,23 @@ function modulePath(index: number, format: ModuleFormat): string {
 
 function collectRequestedExports(program: ProgramModel): ReadonlyMap<string, readonly string[]> {
   const requestedExports = new Map<string, string[]>();
+  const demand = (target: string, name: string): void => {
+    const names = requestedExports.get(target);
+    if (names === undefined) {
+      requestedExports.set(target, [name]);
+    } else if (!names.includes(name)) {
+      names.push(name);
+    }
+  };
 
   for (const module of program.modules) {
     for (const dependency of module.dependencies) {
-      if (dependency.kind !== "esm-value-import") {
-        continue;
-      }
-
-      const names = requestedExports.get(dependency.target);
-      if (names === undefined) {
-        requestedExports.set(dependency.target, [dependency.importedName]);
-      } else if (!names.includes(dependency.importedName)) {
-        names.push(dependency.importedName);
+      // A value import demands its imported name; a readable require demands the name it reads off
+      // the required module's exports. Both synthesize a state-derived export on the target.
+      if (dependency.kind === "esm-value-import") {
+        demand(dependency.target, dependency.importedName);
+      } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
+        demand(dependency.target, dependency.readName);
       }
     }
   }
@@ -98,6 +104,8 @@ function renderModule(
   modulePaths: ReadonlyMap<string, string>,
   requestedExports: readonly string[],
 ): string {
+  const readable = readableBindingsOf(module.dependencies);
+
   if (module.format === "cjs") {
     const requireLines: string[] = [];
     const dynamicRegistrationLines: string[] = [];
@@ -108,6 +116,9 @@ function renderModule(
         dynamicRegistrationLines.push(
           `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("./${targetPath}");`,
         );
+      } else if (dependency.resultBinding !== undefined) {
+        // Bind the require result so the target's exports can be read into events and exports.
+        requireLines.push(`const ${dependency.resultBinding} = require("./${targetPath}");`);
       } else {
         requireLines.push(`require("./${targetPath}");`);
       }
@@ -124,7 +135,7 @@ function renderModule(
       sections.push(renderEvents(module));
     }
     if (requestedExports.length > 0) {
-      sections.push(renderCjsExports(requestedExports));
+      sections.push(renderCjsExports(module, requestedExports, readable));
     }
 
     return renderSections(sections);
@@ -163,21 +174,62 @@ function renderModule(
     sections.push(renderEvents(module));
   }
   if (requestedExports.length > 0) {
-    sections.push(renderEsmExports(requestedExports, usedBindings));
+    sections.push(renderEsmExports(module, requestedExports, usedBindings, readable));
   }
 
   return renderSections(sections);
 }
 
-function renderEvents(module: ModuleModel): string[] {
-  return module.events.map(
-    (event) => `globalThis.__orderEvent(${serializeJavaScriptValue(event)});`,
-  );
+function renderRead(read: ValueRead): string {
+  return read.member === undefined ? read.binding : `${read.binding}.${read.member}`;
 }
 
-function renderCjsExports(requestedExports: readonly string[]): string[] {
+/// A numeric fold: a constant base plus every read, as a JavaScript expression. Used for both
+/// value-carrying events and state-derived export initializers. Callers guarantee `base` is a
+/// finite number whenever `reads` is non-empty, so the expression stays numeric.
+function renderFold(base: number, reads: readonly ValueRead[]): string {
+  return [String(base), ...reads.map(renderRead)].join(" + ");
+}
+
+/// The module's own contribution to its export values: its first finite numeric event value, or 0.
+/// Combining this "own state" with the module's dependency reads yields exports that change when a
+/// wrong, dropped, or reordered upstream initialization changes what the module observed.
+function moduleStateBase(module: ModuleModel): number {
+  const first = module.events[0];
+  return first !== undefined && typeof first.value === "number" && Number.isFinite(first.value)
+    ? first.value
+    : 0;
+}
+
+function renderEvents(module: ModuleModel): string[] {
+  return module.events.map((event) => {
+    if (event.reads === undefined || event.reads.length === 0) {
+      // No reads: keep the exact compact-JSON payload the oracle has always emitted.
+      return `globalThis.__orderEvent(${serializeJavaScriptValue({
+        module: event.module,
+        phase: event.phase,
+        value: event.value,
+      })});`;
+    }
+    // Fold the read dependency values into the payload so cross-module data flow is observed.
+    // Validation guarantees a finite numeric base whenever reads are present.
+    const base = typeof event.value === "number" ? event.value : 0;
+    const valueExpression = renderFold(base, event.reads);
+    return `globalThis.__orderEvent({ module: ${serializeJavaScriptValue(
+      event.module,
+    )}, phase: ${serializeJavaScriptValue(event.phase)}, value: ${valueExpression} });`;
+  });
+}
+
+function renderCjsExports(
+  module: ModuleModel,
+  requestedExports: readonly string[],
+  readable: readonly ValueRead[],
+): string[] {
+  const base = moduleStateBase(module);
+
   if (requestedExports.length === 1 && requestedExports[0] === "default") {
-    return ['module.exports = "default";'];
+    return [`module.exports = ${renderFold(base, readable)};`];
   }
 
   if (requestedExports.includes("default")) {
@@ -185,23 +237,32 @@ function renderCjsExports(requestedExports: readonly string[]): string[] {
       "module.exports = {};",
       ...requestedExports
         .filter((name) => name !== "default")
-        .map((name) => renderCjsNamedExport("module.exports", name)),
+        .map((name) => renderCjsNamedExport("module.exports", name, base, readable)),
     ];
   }
 
-  return requestedExports.map((name) => renderCjsNamedExport("exports", name));
+  return requestedExports.map((name) => renderCjsNamedExport("exports", name, base, readable));
 }
 
-function renderCjsNamedExport(target: "exports" | "module.exports", name: string): string {
+function renderCjsNamedExport(
+  target: "exports" | "module.exports",
+  name: string,
+  base: number,
+  readable: readonly ValueRead[],
+): string {
+  const value = renderFold(base, readable);
   return name === "__proto__"
-    ? `Object.defineProperty(${target}, "__proto__", { value: "__proto__", enumerable: true });`
-    : `${target}.${name} = ${serializeJavaScriptValue(name)};`;
+    ? `Object.defineProperty(${target}, "__proto__", { value: ${value}, enumerable: true });`
+    : `${target}.${name} = ${value};`;
 }
 
 function renderEsmExports(
+  module: ModuleModel,
   requestedExports: readonly string[],
   usedBindings: Set<string>,
+  readable: readonly ValueRead[],
 ): string[] {
+  const base = moduleStateBase(module);
   const lines: string[] = [];
   let candidateIndex = 0;
 
@@ -214,7 +275,7 @@ function renderEsmExports(
 
     usedBindings.add(bindingName);
     lines.push(
-      `const ${bindingName} = ${serializeJavaScriptValue(exportName)};`,
+      `const ${bindingName} = ${renderFold(base, readable)};`,
       `export { ${bindingName} as ${exportName} };`,
     );
   }

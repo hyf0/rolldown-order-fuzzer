@@ -1,4 +1,10 @@
-import type { DependencyOperation, EntryModel, ModuleModel, ProgramModel } from "./model.ts";
+import type {
+  CjsRequireOperation,
+  DependencyOperation,
+  EntryModel,
+  ModuleModel,
+  ProgramModel,
+} from "./model.ts";
 
 const JAVASCRIPT_IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
 
@@ -103,13 +109,16 @@ function validateModules(
 ): void {
   for (const [moduleIndex, module] of modules.entries()) {
     const localBindings = new Set<string>();
+    // Each readable binding maps its local name to the member read off it: `undefined` for an ESM
+    // value-import (read directly), or the required export name for a CJS readable require.
+    const readableBindings = new Map<string, string | undefined>();
 
     for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
       const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
       const operation: DependencyOperation = dependency;
 
       validateDependencySyntax(module, operation, path, errors);
-      validateImportBinding(operation, path, localBindings, errors);
+      validateDependencyBinding(operation, path, localBindings, readableBindings, errors);
 
       const target = modulesById.get(operation.target);
       if (target === undefined) {
@@ -136,17 +145,50 @@ function validateModules(
     }
 
     for (const [eventIndex, event] of module.events.entries()) {
+      const eventPath = `modules[${moduleIndex}].events[${eventIndex}]`;
       if (event.module !== module.id) {
         errors.push(
-          `modules[${moduleIndex}].events[${eventIndex}].module: expected containing module id ${quote(module.id)}, received ${quote(event.module)}`,
+          `${eventPath}.module: expected containing module id ${quote(module.id)}, received ${quote(event.module)}`,
         );
       }
 
       if (typeof event.value === "number" && !Number.isFinite(event.value)) {
-        errors.push(
-          `modules[${moduleIndex}].events[${eventIndex}].value: expected a finite JSON number`,
-        );
+        errors.push(`${eventPath}.value: expected a finite JSON number`);
       }
+
+      validateEventReads(event, eventPath, readableBindings, errors);
+    }
+  }
+}
+
+function validateEventReads(
+  event: ModuleModel["events"][number],
+  eventPath: string,
+  readableBindings: ReadonlyMap<string, string | undefined>,
+  errors: string[],
+): void {
+  if (event.reads === undefined || event.reads.length === 0) {
+    return;
+  }
+
+  // A folded event emits `value + read0 + …`; the base must stay numeric so the fold stays numeric.
+  if (typeof event.value !== "number" || !Number.isFinite(event.value)) {
+    errors.push(`${eventPath}.value: expected a finite JSON number when the event carries reads`);
+  }
+
+  for (const [readIndex, read] of event.reads.entries()) {
+    const readPath = `${eventPath}.reads[${readIndex}]`;
+    if (!readableBindings.has(read.binding)) {
+      errors.push(
+        `${readPath}.binding: unknown readable binding ${quote(read.binding)} in this module`,
+      );
+      continue;
+    }
+    const expectedMember = readableBindings.get(read.binding);
+    if (read.member !== expectedMember) {
+      errors.push(
+        `${readPath}.member: expected ${expectedMember === undefined ? "no member" : quote(expectedMember)} for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
+      );
     }
   }
 }
@@ -195,38 +237,79 @@ function computeTopLevelAwaitReachability(
   return modulesReachingTopLevelAwait;
 }
 
-function validateImportBinding(
+function validateDependencyBinding(
   dependency: DependencyOperation,
   path: string,
   localBindings: Set<string>,
+  readableBindings: Map<string, string | undefined>,
   errors: string[],
 ): void {
-  if (dependency.kind !== "esm-value-import") {
+  if (dependency.kind === "esm-value-import") {
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.importedName)) {
+      errors.push(
+        `${path}.importedName: invalid JavaScript identifier ${quote(dependency.importedName)}`,
+      );
+    }
+
+    if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
+      readableBindings.set(dependency.localName, undefined);
+    }
     return;
   }
 
-  if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.importedName)) {
-    errors.push(
-      `${path}.importedName: invalid JavaScript identifier ${quote(dependency.importedName)}`,
-    );
+  if (dependency.kind === "cjs-require") {
+    validateRequireBinding(dependency, path, localBindings, readableBindings, errors);
+  }
+}
+
+/// A readable require binds `const resultBinding = require(...)` and reads `resultBinding.readName`.
+/// Both fields travel together: the binding is the scope name, the read name is the demanded export.
+function validateRequireBinding(
+  dependency: CjsRequireOperation,
+  path: string,
+  localBindings: Set<string>,
+  readableBindings: Map<string, string | undefined>,
+  errors: string[],
+): void {
+  if (dependency.resultBinding === undefined && dependency.readName === undefined) {
+    return;
+  }
+  if (dependency.resultBinding === undefined || dependency.readName === undefined) {
+    errors.push(`${path}: resultBinding and readName must be set together on a readable require`);
+    return;
+  }
+
+  if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.readName)) {
+    errors.push(`${path}.readName: invalid JavaScript identifier ${quote(dependency.readName)}`);
   }
 
   if (
-    !JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.localName) ||
-    INVALID_MODULE_BINDING_IDENTIFIERS.has(dependency.localName)
+    validateLocalBinding(dependency.resultBinding, `${path}.resultBinding`, localBindings, errors)
   ) {
-    errors.push(
-      `${path}.localName: invalid JavaScript binding identifier ${quote(dependency.localName)}`,
-    );
-  } else if (RENDERER_RESERVED_BINDING_IDENTIFIERS.has(dependency.localName)) {
-    errors.push(
-      `${path}.localName: reserved renderer binding identifier ${quote(dependency.localName)}`,
-    );
-  } else if (localBindings.has(dependency.localName)) {
-    errors.push(`${path}.localName: duplicate ESM local binding ${quote(dependency.localName)}`);
-  } else {
-    localBindings.add(dependency.localName);
+    readableBindings.set(dependency.resultBinding, dependency.readName);
   }
+}
+
+function validateLocalBinding(
+  name: string,
+  path: string,
+  localBindings: Set<string>,
+  errors: string[],
+): boolean {
+  if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(name) || INVALID_MODULE_BINDING_IDENTIFIERS.has(name)) {
+    errors.push(`${path}: invalid JavaScript binding identifier ${quote(name)}`);
+    return false;
+  }
+  if (RENDERER_RESERVED_BINDING_IDENTIFIERS.has(name)) {
+    errors.push(`${path}: reserved renderer binding identifier ${quote(name)}`);
+    return false;
+  }
+  if (localBindings.has(name)) {
+    errors.push(`${path}: duplicate module local binding ${quote(name)}`);
+    return false;
+  }
+  localBindings.add(name);
+  return true;
 }
 
 function validateDependencySyntax(

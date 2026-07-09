@@ -10,7 +10,9 @@ import type {
   ModuleModel,
   ProgramModel,
   ScheduleOperation,
+  ValueRead,
 } from "./model.ts";
+import { readableBindingsOf } from "./model.ts";
 import { SeededRng } from "./rng.ts";
 
 export const FIXED_TEMPLATE_NAMES = [
@@ -299,7 +301,14 @@ function buildRandomMixed(
     `${importer.id}->${targetId}`;
   const usedEdges = new Set<string>();
   const registrations: { owner: string; registration: string }[] = [];
-  const addDependency = (importer: RandomModuleDraft, target: RandomModuleDraft) => {
+  // `allowRead` gates value edges (readable requires and value imports). It is false only for the
+  // single edge into a cycle ring's head, so no readable binding ever targets a ring member and no
+  // read crosses into a cycle: value edges stay forward-only, rings keep side-effect/require edges.
+  const addDependency = (
+    importer: RandomModuleDraft,
+    target: RandomModuleDraft,
+    allowRead = true,
+  ) => {
     const edgeKey = dependencyKey(importer, target.id);
     if (usedEdges.has(edgeKey)) {
       return;
@@ -314,13 +323,21 @@ function buildRandomMixed(
           registration,
         });
         registrations.push({ owner: importer.id, registration });
+      } else if (allowRead && rng.boolean()) {
+        // Readable require: bind the result and read a state-derived export off the target.
+        importer.dependencies.push({
+          kind: "cjs-require",
+          target: target.id,
+          resultBinding: `r_${importer.id}_${target.id}`,
+          readName: `v${target.id}`,
+        });
       } else {
         importer.dependencies.push({ kind: "cjs-require", target: target.id });
       }
       return;
     }
     const roll = rng.integer(6);
-    if (roll < 3) {
+    if (roll < 3 || (!allowRead && roll < 5)) {
       importer.dependencies.push({ kind: "esm-side-effect-import", target: target.id });
     } else if (roll < 5) {
       importer.dependencies.push({
@@ -375,28 +392,34 @@ function buildRandomMixed(
     const head = ring[0];
     const carrier = drafts[rng.integer(dagCount)];
     if (head !== undefined && carrier !== undefined) {
-      addDependency(carrier, head);
+      addDependency(carrier, head, false);
     }
     drafts.push(...ring);
   }
 
-  const modules = drafts.map(
-    (draft): ModuleModel =>
-      draft.format === "esm"
-        ? esmModule(
-            draft.id,
-            draft.dependencies.filter((dependency) => dependency.kind !== "cjs-require"),
-            events(draft.id, rng, 1 + rng.integer(2)),
-          )
-        : cjsModule(
-            draft.id,
-            draft.dependencies.filter(
-              (dependency) =>
-                dependency.kind === "cjs-require" || dependency.kind === "esm-dynamic-import",
-            ),
-            events(draft.id, rng, 1 + rng.integer(2)),
+  const modules = drafts.map((draft): ModuleModel => {
+    // A draft only ever accumulates dependency kinds legal for its format, so the filters below are
+    // defensive; the reads are chosen from the same forward-only bindings the renderer will fold.
+    const moduleEvents = withValueReads(
+      events(draft.id, rng, 1 + rng.integer(2)),
+      draft.dependencies,
+      rng,
+    );
+    return draft.format === "esm"
+      ? esmModule(
+          draft.id,
+          draft.dependencies.filter((dependency) => dependency.kind !== "cjs-require"),
+          moduleEvents,
+        )
+      : cjsModule(
+          draft.id,
+          draft.dependencies.filter(
+            (dependency) =>
+              dependency.kind === "cjs-require" || dependency.kind === "esm-dynamic-import",
           ),
-  );
+          moduleEvents,
+        );
+  });
 
   // Module 0 anchors the schedule; extra entries may be modules other modules also import,
   // which exercises entry facades and shared entry chunks.
@@ -645,6 +668,13 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     }
   }
 
+  // A module reads an imported value into an event payload — the dormant value oracle is active.
+  if (
+    program.modules.some((module) => module.events.some((event) => (event.reads?.length ?? 0) > 0))
+  ) {
+    tags.add("variation:value-read");
+  }
+
   const template = deriveTemplateName(program, tags, hasOverlappingEntries, esmCarriersByCjsTarget);
   if (template !== undefined) {
     tags.add(`template:${template}`);
@@ -802,4 +832,42 @@ function events(id: string, rng: SeededRng, count: number): readonly EventRecord
     phase: index === 0 ? "evaluate" : `evaluate-${index}`,
     value: rng.integer(1_000_000),
   }));
+}
+
+/// Fold a module's forward-only dependency reads into some of its events so cross-module data flow
+/// is observed. Each event carries reads with meaningful probability, and any module with a
+/// readable binding ends up with at least one folded event, keeping value-read coverage dense. The
+/// event value stays a finite number (the fold base), so the emitted payload stays numeric. Reads
+/// only ever reference bindings the renderer will bind, and those target strictly earlier modules,
+/// so a read never closes a cycle.
+function withValueReads(
+  baseEvents: readonly EventRecord[],
+  dependencies: readonly DependencyOperation[],
+  rng: SeededRng,
+): readonly EventRecord[] {
+  const readable = readableBindingsOf(dependencies);
+  if (readable.length === 0 || baseEvents.length === 0) {
+    return baseEvents;
+  }
+
+  const pickSome = (): readonly ValueRead[] => {
+    const chosen = readable.filter(() => rng.boolean());
+    if (chosen.length > 0) {
+      return chosen;
+    }
+    const fallback = readable[rng.integer(readable.length)];
+    return fallback === undefined ? [] : [fallback];
+  };
+
+  const enriched = baseEvents.map((event) =>
+    rng.boolean() ? { ...event, reads: pickSome() } : event,
+  );
+  if (!enriched.some((event) => (event.reads?.length ?? 0) > 0)) {
+    const index = rng.integer(enriched.length);
+    const target = enriched[index];
+    if (target !== undefined) {
+      enriched[index] = { ...target, reads: pickSome() };
+    }
+  }
+  return enriched;
 }

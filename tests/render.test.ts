@@ -112,7 +112,7 @@ describe("renderProgram", () => {
       [
         'globalThis.__orderEvent({"module":"value:target","phase":"evaluate","value":"ready"});',
         "",
-        'const __orderExport0 = "answer";',
+        "const __orderExport0 = 0;",
         "export { __orderExport0 as answer };",
         "",
       ].join("\n"),
@@ -207,7 +207,7 @@ describe("renderProgram", () => {
       [
         'globalThis.__orderEvent({"module":"shared-cjs","phase":"evaluate","value":"once"});',
         "",
-        'exports.shared = "shared";',
+        "exports.shared = 0;",
         "",
       ].join("\n"),
     );
@@ -387,7 +387,7 @@ describe("renderProgram", () => {
       [
         'import { source as __orderExport0 } from "./module-0002.mjs";',
         "",
-        'const __orderExport1 = "default";',
+        "const __orderExport1 = 0 + __orderExport0;",
         "export { __orderExport1 as default };",
         "",
       ].join("\n"),
@@ -424,15 +424,14 @@ describe("renderProgram", () => {
     const rendered = renderProgram(program);
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
-      [
-        'Object.defineProperty(exports, "__proto__", { value: "__proto__", enumerable: true });',
-        "",
-      ].join("\n"),
+      ['Object.defineProperty(exports, "__proto__", { value: 0, enumerable: true });', ""].join(
+        "\n",
+      ),
     );
     await withRenderedProgram(rendered.files, async (directory) => {
       await import(pathToFileURL(join(directory, "module-0000.mjs")).href);
       const namespace = await import(pathToFileURL(join(directory, "module-0001.cjs")).href);
-      expect(namespace.__proto__).toBe("__proto__");
+      expect(namespace.__proto__).toBe(0);
     });
   });
 
@@ -466,12 +465,12 @@ describe("renderProgram", () => {
     const rendered = renderProgram(program);
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
-      ['module.exports = "default";', ""].join("\n"),
+      ["module.exports = 0;", ""].join("\n"),
     );
     await withRenderedProgram(rendered.files, async (directory) => {
       await import(pathToFileURL(join(directory, "module-0000.mjs")).href);
       const namespace = await import(pathToFileURL(join(directory, "module-0001.cjs")).href);
-      expect(namespace.default).toBe("default");
+      expect(namespace.default).toBe(0);
     });
   });
 
@@ -519,8 +518,8 @@ describe("renderProgram", () => {
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
       [
         "module.exports = {};",
-        'module.exports.answer = "answer";',
-        'Object.defineProperty(module.exports, "__proto__", { value: "__proto__", enumerable: true });',
+        "module.exports.answer = 0;",
+        'Object.defineProperty(module.exports, "__proto__", { value: 0, enumerable: true });',
         "",
       ].join("\n"),
     );
@@ -544,10 +543,10 @@ describe("renderProgram", () => {
 
       const { stdout } = await execFileAsync(process.execPath, [probePath]);
       expect(JSON.parse(stdout)).toEqual({
-        answer: "answer",
-        proto: "__proto__",
-        defaultAnswer: "answer",
-        defaultProto: "__proto__",
+        answer: 0,
+        proto: 0,
+        defaultAnswer: 0,
+        defaultProto: 0,
         ownProto: true,
       });
     });
@@ -740,7 +739,154 @@ describe("renderProgram", () => {
 
     await withRenderedProgram(rendered.files, async (directory) => {
       const namespace = await import(pathToFileURL(join(directory, "module-0001.cjs")).href);
-      expect(namespace.answer).toBe("answer");
+      expect(namespace.answer).toBe(0);
+    });
+  });
+
+  test("folds ESM value reads into events and state-derived exports, then round-trips", async () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "reader",
+              importedName: "w",
+              localName: "readerValue",
+            },
+          ],
+          events: [],
+        },
+        {
+          id: "reader",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "source",
+              importedName: "v",
+              localName: "srcValue",
+            },
+          ],
+          events: [
+            {
+              module: "reader",
+              phase: "evaluate",
+              value: 100,
+              reads: [{ binding: "srcValue" }],
+            },
+          ],
+        },
+        {
+          id: "source",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "source", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
+      [
+        'import { v as srcValue } from "./module-0002.mjs";',
+        "",
+        'globalThis.__orderEvent({ module: "reader", phase: "evaluate", value: 100 + srcValue });',
+        "",
+        "const __orderExport0 = 100 + srcValue;",
+        "export { __orderExport0 as w };",
+        "",
+      ].join("\n"),
+    );
+    expect(fileContents(rendered.files, "module-0002.mjs")).toBe(
+      [
+        'globalThis.__orderEvent({"module":"source","phase":"evaluate","value":7});',
+        "",
+        "const __orderExport0 = 7;",
+        "export { __orderExport0 as v };",
+        "",
+      ].join("\n"),
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "source", phase: "evaluate", value: 7 },
+          { version: 1, module: "reader", phase: "evaluate", value: 107 },
+        ],
+      });
+    });
+  });
+
+  test("binds a CJS require result and reads a member across interop, then round-trips", async () => {
+    const program = {
+      modules: [
+        {
+          id: "cjs-reader",
+          format: "cjs",
+          dependencies: [
+            {
+              kind: "cjs-require",
+              target: "cjs-source",
+              resultBinding: "sourceExports",
+              readName: "vs",
+            },
+          ],
+          events: [
+            {
+              module: "cjs-reader",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "sourceExports", member: "vs" }],
+            },
+          ],
+        },
+        {
+          id: "cjs-source",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "cjs-source", phase: "evaluate", value: 40 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "cjs-reader" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0000.cjs")).toBe(
+      [
+        'const sourceExports = require("./module-0001.cjs");',
+        "",
+        'globalThis.__orderEvent({ module: "cjs-reader", phase: "evaluate", value: 1 + sourceExports.vs });',
+        "",
+      ].join("\n"),
+    );
+    expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
+      [
+        'globalThis.__orderEvent({"module":"cjs-source","phase":"evaluate","value":40});',
+        "",
+        "exports.vs = 40;",
+        "",
+      ].join("\n"),
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        events: [
+          { version: 1, module: "cjs-source", phase: "evaluate", value: 40 },
+          { version: 1, module: "cjs-reader", phase: "evaluate", value: 41 },
+        ],
+      });
     });
   });
 });

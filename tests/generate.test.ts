@@ -105,6 +105,49 @@ describe("generateCase", () => {
     expect(wanted.filter((tag) => !reached.has(tag))).toEqual([]);
   });
 
+  test("random-mixed reaches value-read coverage densely", () => {
+    let randomTotal = 0;
+    let valueRead = 0;
+    for (let seed = 0; seed < 2_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      randomTotal += 1;
+      if (generated.coverageTags.includes("variation:value-read")) {
+        valueRead += 1;
+      }
+    }
+
+    expect(randomTotal).toBeGreaterThan(0);
+    expect(valueRead).toBeGreaterThan(0);
+    // Reads are emitted often enough that value-carrying coverage is dense, not incidental.
+    expect(valueRead / randomTotal).toBeGreaterThan(0.3);
+  });
+
+  test("value reads never target a module on a cycle", () => {
+    for (let seed = 0; seed < 2_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      const onCycle = cycleMembers(generated.program);
+      if (onCycle.size === 0) {
+        continue;
+      }
+      for (const module of generated.program.modules) {
+        for (const dependency of module.dependencies) {
+          const readsTarget =
+            dependency.kind === "esm-value-import" ||
+            (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined);
+          if (readsTarget) {
+            expect(
+              onCycle.has(dependency.target),
+              `seed ${seed}: readable dependency targets cycle member ${dependency.target}`,
+            ).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
   test("random-mixed never closes a cycle across module formats", () => {
     for (let seed = 0; seed < 2_000; seed += 1) {
       const generated = generateCase(seed, 8);
@@ -217,6 +260,34 @@ function maxEsmCarrierCount(
     }
   }
   return Math.max(0, ...[...carriersByTarget.values()].map((carriers) => carriers.size));
+}
+
+function cycleMembers(program: ProgramModel): Set<string> {
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  const members = new Set<string>();
+  for (const module of program.modules) {
+    const pending = module.dependencies.flatMap((dependency) =>
+      dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
+    );
+    const visited = new Set<string>();
+    while (pending.length > 0) {
+      const moduleId = pending.pop();
+      if (moduleId === undefined || visited.has(moduleId)) {
+        continue;
+      }
+      visited.add(moduleId);
+      if (moduleId === module.id) {
+        members.add(module.id);
+        break;
+      }
+      for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
+        if (dependency.kind !== "esm-dynamic-import") {
+          pending.push(dependency.target);
+        }
+      }
+    }
+  }
+  return members;
 }
 
 function synchronouslyReachable(
