@@ -5,6 +5,7 @@ import { posix } from "node:path";
 import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
 import { readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
+import { EXECUTION_PROTOCOL_VERSION } from "./protocol.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
 export interface RenderedFile {
@@ -12,16 +13,12 @@ export interface RenderedFile {
   readonly contents: string;
 }
 
-export type RenderedScheduleEntry = ExecutionManifestEntry;
-
-export type RenderedScheduleManifest = ExecutionManifest;
-
 export interface RenderedProgram {
   readonly files: readonly RenderedFile[];
   readonly modulePaths: ReadonlyMap<string, string>;
   readonly entryPaths: ReadonlyMap<string, string>;
   readonly schedulePath: string;
-  readonly schedule: RenderedScheduleManifest;
+  readonly schedule: ExecutionManifest;
 }
 
 const SCHEDULE_PATH = "schedule.json";
@@ -77,8 +74,8 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
   const entryPaths = new Map(
     program.entries.map((entry) => [entry.name, getRequiredPath(modulePaths, entry.moduleId)]),
   );
-  const schedule: RenderedScheduleManifest = {
-    version: 1,
+  const schedule: ExecutionManifest = {
+    version: EXECUTION_PROTOCOL_VERSION,
     entries: program.entries.map((entry) => renderScheduleEntry(entry, modulePaths, program)),
     operations: program.schedule.map((operation) => ({ ...operation })),
   };
@@ -634,7 +631,7 @@ function renderScheduleEntry(
   entry: EntryModel,
   modulePaths: ReadonlyMap<string, string>,
   program: ProgramModel,
-): RenderedScheduleEntry {
+): ExecutionManifestEntry {
   const module = program.modules.find((candidate) => candidate.id === entry.moduleId);
   if (module === undefined) {
     throw new Error(`Missing entry module ${JSON.stringify(entry.moduleId)}`);

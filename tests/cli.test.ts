@@ -33,7 +33,6 @@ import {
   type CampaignCaseResult,
   type CampaignOptions,
 } from "../src/main.ts";
-import { projectStatus } from "../src/project.ts";
 import type { ExecutionOutcome } from "../src/protocol.ts";
 import { renderProgram } from "../src/render.ts";
 import {
@@ -135,10 +134,6 @@ describe("parseCliArgs", () => {
       cases,
     });
   });
-});
-
-test("reports the project as an MVP", () => {
-  expect(projectStatus.phase).toBe("mvp");
 });
 
 describe("runCampaign", () => {

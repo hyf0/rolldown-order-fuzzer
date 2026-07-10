@@ -378,7 +378,7 @@ export function classifyCampaignVerdict(
 ): CampaignVerdict {
   if (sourceOutcome.status === "harness-error" || sourceOutcome.status === "timeout") {
     return classifyVerdict(sourceOutcome, {
-      version: 1,
+      version: EXECUTION_PROTOCOL_VERSION,
       status: "timeout",
       events: [],
     });

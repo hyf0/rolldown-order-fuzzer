@@ -109,7 +109,7 @@ The parent and child strictly validate their versioned protocol. Output filename
 
 Every build has a bounded timeout. Timeout handling terminates the child process tree with TERM followed by KILL and a bounded final-close grace, so a package loader or helper subprocess cannot stall a campaign indefinitely.
 
-The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. Artifact schema 6 records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity. The differential source-versus-bundle execution result is the sole semantic oracle.
+The adapter does not enable Rolldown devtools and does not read internal wrapping, inclusion, or execution-plan state. The versioned failure artifact (`FAILURE_ARTIFACT_SCHEMA_VERSION` in `main.ts`, currently 16) records the generated model, manifests, observed source and bundle outcomes, emitted bytes, exact verdict, and tested runtime/package identity. The differential source-versus-bundle execution result is the sole semantic oracle.
 
 ## Regression policy
 

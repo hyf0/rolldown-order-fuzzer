@@ -129,8 +129,9 @@ composition (or panics on a cyclic chunk graph) is a genuine bug: an `events-reo
   green against the snapshot with organic ≈ 45–50% of random-mixed cases, sizes spanning all three
   scales, and nested-dynamic dense — confirming the new axes are exercised, not just implemented.
 
-## Known residual
+## Shrink wrap-mode (wave-6 residual closed in wave 7)
 
-`shrink.ts` hardcodes `onDemandWrapping: true`, so a wrap-all-ONLY failure would not reproduce under the
-shrinker as-is; shrink it with a package/mode that reproduces it (or teach `shrink.ts` a `--wrap-all`
-flag) before filing. No such failure was seen in this wave's campaigns.
+The wave-6 residual — `shrink.ts` hardcoding `onDemandWrapping: true`, so a wrap-all-only failure could
+not reproduce under the shrinker — is CLOSED: `shrink.ts` now selects the wrap mode (`--wrap-all` /
+`--on-demand`, auto-read from a failure artifact's `replay.json`). See
+[real-app-bug-families](./real-app-bug-families.md).

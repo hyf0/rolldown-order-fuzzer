@@ -346,14 +346,10 @@ function buildRandomMixed(
     `${importer.id}->${targetId}`;
   const usedEdges = new Set<string>();
   const registrations: { owner: string; registration: string }[] = [];
-  // `allowRead` gates value edges (readable requires and value imports). It is false only for the
-  // single edge into a cycle ring's head, so no readable binding ever targets a ring member and no
-  // read crosses into a cycle: value edges stay forward-only, rings keep side-effect/require edges.
-  const addDependency = (
-    importer: RandomModuleDraft,
-    target: RandomModuleDraft,
-    allowRead = true,
-  ) => {
+  // The DAG's forward-only edge builder. Rings never route through here (they wire their own
+  // in-cycle side-effect/require/call edges), so every edge this adds targets a forward module and a
+  // value edge stays forward-only, TDZ-free.
+  const addDependency = (importer: RandomModuleDraft, target: RandomModuleDraft) => {
     const edgeKey = dependencyKey(importer, target.id);
     if (usedEdges.has(edgeKey)) {
       return;
@@ -370,7 +366,7 @@ function buildRandomMixed(
           registration,
         });
         registrations.push({ owner: importer.id, registration });
-      } else if (allowRead && rng.boolean()) {
+      } else if (rng.boolean()) {
         // Readable require: bind the result and read a state-derived export off the target.
         importer.dependencies.push({
           kind: "cjs-require",
@@ -386,7 +382,7 @@ function buildRandomMixed(
     // Dynamic-edge density raised modestly (wave 6): ESM ~1/4 (was 1/6). `roll >= 6` (of 8) is a
     // dynamic import; side-effect and value each take three of the remaining bands.
     const roll = rng.integer(8);
-    if (roll < 3 || (!allowRead && roll < 6)) {
+    if (roll < 3) {
       importer.dependencies.push({ kind: "esm-side-effect-import", target: target.id });
     } else if (roll < 6) {
       // A value edge. When the target is ESM, a minority become namespace imports: `import * as ns`
