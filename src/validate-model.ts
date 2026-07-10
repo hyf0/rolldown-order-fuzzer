@@ -16,8 +16,23 @@ import type {
   ProgramModel,
   ValueRead,
 } from "./model.ts";
-import { moduleProfile, programChunking } from "./model.ts";
+import { metadataPureModuleIds, moduleProfile, programChunking } from "./model.ts";
 import type { ProgramFacts } from "./program-facts.ts";
+
+/// Generated package names: npm-safe, lowercase, deterministic. Restrictive on purpose — the name is
+/// a directory AND a bare import specifier, so the model never carries a name whose resolution could
+/// surprise (scopes, dots, uppercase).
+const PACKAGE_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
+
+/// A package MEMBER's id becomes its rendered file name (`<id>.mjs` — stable under shrink, unlike the
+/// index-named root files), so it must be filename-safe.
+const PACKAGE_MEMBER_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/// The `sideEffects` array entries the model may carry: an optional `./` prefix, then a flat
+/// literal-plus-`*` name (no directory separators — package files are flat). Restricting the syntax
+/// keeps the fuzzer's matcher (`sideEffectsPatternMatches`) equivalent to rolldown's glob engine on
+/// everything the model can express (both semantics were probed against the frozen snapshot).
+const SIDE_EFFECTS_PATTERN = /^(\.\/)?[A-Za-z0-9_.*-]+$/;
 
 /// The `preserveEntrySignatures` values rolldown accepts. The generator only ever produces
 /// `"allow-extension"`; the rest are permitted so a future axis (or a hand-crafted model) is not
@@ -126,10 +141,112 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
   const entriesByName = collectEntries(program.entries, modulesById, errors);
   validateSchedule(program, entriesByName, modulesById, facts, dynamicRegistrationOwners, errors);
   validateBuildConfig(program, errors);
+  validatePackages(program, modulesById, errors);
   validateManualChunkGroups(program, modulesById, errors);
   validateOrganicChunkGroups(program, errors);
 
   return errors;
+}
+
+/// The package/layout model (W14b, schema 18). Beyond well-formedness (unique npm-safe names,
+/// existing filename-safe members, each module in at most ONE package, restricted `sideEffects`
+/// patterns), this enforces the TWO semantic rules:
+///
+/// - ONE live representation: a program carrying `packages` may not ALSO flag a module
+///   `sideEffectFree` — the flag is the legacy form `packagesOf` normalizes, never a parallel one.
+/// - The metadata-purity contract applies exactly to the members the resolved packages assert PURE
+///   (`metadataPureModuleIds`): all members under `sideEffects: false`, the array-UNMATCHED members
+///   under the partial form — a matched or `sideEffects: true` member keeps its side effects and is
+///   unconstrained. A pure member must be ESM, emit no events, and carry only value-only ESM
+///   dependencies (the same contract the legacy flag enforced); it must not be `callableOwnState`
+///   (a legal DCE may drop the state its callable reads) nor `objectExport` (a dropped object export
+///   defeats the identity witness). It MAY be `inferredPure`: both mechanisms assert "no side
+///   effects" and the inferred-pure rendering stays sound under package metadata — the real vben
+///   packages carry exactly this combination (deliberately relaxed from the old per-module
+///   flag mutual exclusion, which remains for the two FLAGS on one module).
+function validatePackages(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  errors: string[],
+): void {
+  const packages = program.packages;
+  if (packages !== undefined) {
+    const names = new Set<string>();
+    const memberIds = new Set<string>();
+    for (const [packageIndex, pkg] of packages.entries()) {
+      const path = `packages[${packageIndex}]`;
+      if (!PACKAGE_NAME_PATTERN.test(pkg.name)) {
+        errors.push(`${path}.name: invalid package name ${quote(pkg.name)}`);
+      } else if (names.has(pkg.name)) {
+        errors.push(`${path}.name: duplicate package name ${quote(pkg.name)}`);
+      } else {
+        names.add(pkg.name);
+      }
+      if (pkg.moduleIds.length === 0) {
+        errors.push(`${path}.moduleIds: a package needs at least one member (the main module)`);
+      }
+      for (const [memberIndex, moduleId] of pkg.moduleIds.entries()) {
+        const memberPath = `${path}.moduleIds[${memberIndex}]`;
+        if (!modulesById.has(moduleId)) {
+          errors.push(`${memberPath}: unknown module id ${quote(moduleId)}`);
+        } else if (!PACKAGE_MEMBER_ID_PATTERN.test(moduleId)) {
+          errors.push(
+            `${memberPath}: module id ${quote(moduleId)} is not filename-safe (a member id becomes its rendered file name)`,
+          );
+        }
+        if (memberIds.has(moduleId)) {
+          errors.push(`${memberPath}: module ${quote(moduleId)} belongs to more than one package`);
+        } else {
+          memberIds.add(moduleId);
+        }
+      }
+      if (typeof pkg.sideEffects !== "boolean") {
+        for (const [patternIndex, pattern] of pkg.sideEffects.entries()) {
+          if (!SIDE_EFFECTS_PATTERN.test(pattern)) {
+            errors.push(
+              `${path}.sideEffects[${patternIndex}]: invalid pattern ${quote(pattern)} (a flat literal-plus-* name, optionally ./-prefixed)`,
+            );
+          }
+        }
+      }
+    }
+    for (const [moduleIndex, module] of program.modules.entries()) {
+      if (module.sideEffectFree === true) {
+        errors.push(
+          `modules[${moduleIndex}]: a program carrying packages may not also flag sideEffectFree; the flag is the legacy representation packagesOf normalizes`,
+        );
+      }
+    }
+  }
+
+  // The metadata-purity contract over the RESOLVED view (persisted packages, or the legacy-flag
+  // normalization once it lands), so the flag and package forms can never enforce different rules.
+  const moduleIndexById = new Map(program.modules.map((module, index) => [module.id, index]));
+  for (const moduleId of metadataPureModuleIds(program)) {
+    const module = modulesById.get(moduleId);
+    const moduleIndex = moduleIndexById.get(moduleId);
+    if (module === undefined || moduleIndex === undefined) {
+      continue;
+    }
+    const path = `modules[${moduleIndex}]`;
+    validateValueOnlyEsmContract(
+      module,
+      path,
+      "a metadata-pure package member",
+      "its events can be legally dropped under the package's sideEffects metadata",
+      errors,
+    );
+    if (module.callableOwnState === true) {
+      errors.push(
+        `${path}: a metadata-pure package member cannot be callableOwnState; a legal DCE may drop the state a callable-own-state export reads`,
+      );
+    }
+    if (module.objectExport === true) {
+      errors.push(
+        `${path}: a metadata-pure package member cannot be objectExport; a dropped object export defeats the identity witness`,
+      );
+    }
+  }
 }
 
 /// Program-level export-demand soundness, read from the ONE canonical plan. Every readable consumer's
@@ -443,6 +560,8 @@ function validateModules(
       }
     }
 
+    validateLocalExports(module, moduleIndex, explicitReexportNames, errors);
+
     const readFlags = canonicalReadFlags(module.dependencies);
     for (const [eventIndex, event] of module.events.entries()) {
       const eventPath = `modules[${moduleIndex}].events[${eventIndex}]`;
@@ -457,6 +576,44 @@ function validateModules(
       }
 
       validateEventReads(event, eventPath, readableBindings, readFlags, objectOrigins, errors);
+    }
+  }
+}
+
+/// DECLARED local exports (`localExports`, the vben own-helper-next-to-a-star shape): ESM-only,
+/// valid unique identifier names, and never colliding with a re-export's exported name (ESM permits
+/// one binding per exported name — Node: Duplicate export). Names here are LOCAL definers that
+/// shadow `export *` for routing, so a collision would make the two projections disagree.
+function validateLocalExports(
+  module: ModuleModel,
+  moduleIndex: number,
+  explicitReexportNames: ReadonlySet<string>,
+  errors: string[],
+): void {
+  const declared = (module as { readonly localExports?: readonly string[] }).localExports;
+  if (declared === undefined) {
+    return;
+  }
+  const path = `modules[${moduleIndex}].localExports`;
+  if (module.format !== "esm") {
+    errors.push(`${path}: only an ESM module may declare local exports`);
+    return;
+  }
+  const seen = new Set<string>();
+  for (const [nameIndex, name] of declared.entries()) {
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(name)) {
+      errors.push(`${path}[${nameIndex}]: invalid JavaScript identifier ${quote(name)}`);
+      continue;
+    }
+    if (seen.has(name)) {
+      errors.push(`${path}[${nameIndex}]: duplicate declared local export ${quote(name)}`);
+      continue;
+    }
+    seen.add(name);
+    if (explicitReexportNames.has(name)) {
+      errors.push(
+        `${path}[${nameIndex}]: ${quote(name)} collides with a re-export's exported name; a module may export a name at most once (Node: Duplicate export)`,
+      );
     }
   }
 }

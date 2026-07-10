@@ -10,6 +10,9 @@ export interface ModuleLike {
   readonly dependencies: readonly DependencyOperation[];
   /// Only ESM modules carry this; drafts never do. Used for the require-of-evaluating-ESM exclusion.
   readonly hasTopLevelAwait?: boolean;
+  /// Export names the module DECLARES locally beside a star re-export (ESM only) — a declared name is
+  /// a LOCAL definer that shadows `export *`, so supply resolution stops at it (never walks the star).
+  readonly localExports?: readonly string[];
 }
 
 /// The synchronous cycle structure of a program: which modules sit on a cycle, their clusters (SCCs),
@@ -277,6 +280,10 @@ export class ProgramFacts {
         return this.#resolveExportOrigin(dependency.target, dependency.sourceName, visited);
       }
     }
+    // A DECLARED local export shadows `export *` (ES semantics), so the origin is this module.
+    if (module.localExports?.includes(exportName) === true) {
+      return { moduleId, exportName };
+    }
     // A star re-export never forwards `default`.
     if (exportName !== "default") {
       for (const dependency of module.dependencies) {
@@ -360,8 +367,11 @@ export class ProgramFacts {
       }
     }
     if (!matchedNamed) {
+      // A DECLARED local export (`localExports`) shadows `export *` (ES semantics): the name is a
+      // LOCAL definer and the star is never walked for it — the vben own-helper-next-to-a-star shape.
+      const declaredLocal = module.localExports?.includes(exportName) === true;
       // A star re-export never forwards `default`.
-      if (exportName !== "default") {
+      if (!declaredLocal && exportName !== "default") {
         for (const dependency of module.dependencies) {
           if (dependency.kind === "esm-reexport-star") {
             this.#collectDefiners(
@@ -378,8 +388,9 @@ export class ProgramFacts {
         (dependency) => dependency.kind === "esm-reexport-star",
       );
       // A CJS module synthesizes every demanded export; an ESM module synthesizes one unless a star
-      // re-export suppresses all local synthesis. Either way, the local definer supplies the name here.
-      if (!(module.format === "esm" && hasStar)) {
+      // re-export suppresses all local synthesis — EXCEPT a name it DECLARES in `localExports`, which
+      // it defines locally even beside a star. Either way, the local definer supplies the name here.
+      if (declaredLocal || !(module.format === "esm" && hasStar)) {
         const originKey = `${moduleId}\0${exportName}`;
         if (!out.has(originKey)) {
           out.set(originKey, { origin: { moduleId, exportName }, hops });

@@ -440,7 +440,7 @@ function collectRequestedExports(program: ProgramModel): {
       if (starTargets.length === 0) {
         continue;
       }
-      const namedProvided = providedExportNames(module);
+      const namedProvided = starShadowedNames(module);
       const demandedHere = requestedExports.get(module.id);
       for (let index = 0; index < (demandedHere?.length ?? 0); index += 1) {
         const name = demandedHere?.[index];
@@ -473,10 +473,25 @@ function providedExportNames(module: ModuleModel): ReadonlySet<string> {
   );
 }
 
+/// The names a module's own surface SHADOWS from its star re-export (ES: a local export wins over
+/// `export *`): re-export-provided names plus DECLARED local exports (`localExports` — the vben
+/// own-helper-next-to-a-star shape). Demand for a shadowed name never forwards through the star.
+function starShadowedNames(module: ModuleModel): ReadonlySet<string> {
+  const shadowed = new Set(providedExportNames(module));
+  if (module.format === "esm") {
+    for (const name of module.localExports ?? []) {
+      shadowed.add(name);
+    }
+  }
+  return shadowed;
+}
+
 /// The subset of a module's requested exports it must synthesize LOCALLY (a state-derived value):
 /// everything a re-export (named, star, or local) does not provide. CJS synthesizes all; an ESM barrel
 /// forwards names via named/local re-exports or a star (which forwards everything else), leaving a
-/// pure barrel with no local exports. RELOCATED verbatim from the renderer.
+/// pure barrel with no local exports — EXCEPT names the module DECLARES in `localExports`, which
+/// synthesize locally even beside a star (a local export shadows `export *`). RELOCATED verbatim from
+/// the renderer; the declared-names extension is additive (no existing model carries `localExports`).
 export function localExportsFor(
   module: ModuleModel,
   requested: readonly string[],
@@ -485,6 +500,7 @@ export function localExportsFor(
     return requested;
   }
   const namedProvided = providedExportNames(module);
+  const declared = new Set(module.localExports ?? []);
   const hasStar = module.dependencies.some((dependency) => dependency.kind === "esm-reexport-star");
-  return requested.filter((name) => !namedProvided.has(name) && !hasStar);
+  return requested.filter((name) => !namedProvided.has(name) && (!hasStar || declared.has(name)));
 }

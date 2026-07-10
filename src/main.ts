@@ -46,13 +46,22 @@ export {
 
 const UINT32_RANGE = 0x1_0000_0000;
 
+// 18: W14b — the package/layout model (`ProgramModel.packages`: fixture-local node_modules packages
+// with boolean/array `sideEffects` metadata and bare-specifier imports), declared `localExports`
+// beside a star, and the source-less local re-export operation. The module-level `sideEffectFree`
+// flag becomes the LEGACY representation: `packagesOf` (model.ts) is the v17 reader, normalizing a
+// flagged module to a single-member `sideEffects: false` package, so an old artifact still replays
+// (semantically identical metadata; the rendered layout moves from the shared `side-effect-free/`
+// directory to per-package `node_modules/<name>/`).
+// 17: W14a — the persisted `BuildConfig` (chunking union + includeDependenciesRecursively /
+// preserveEntrySignatures / lazyBarrel / strictExecutionOrder axes); `buildConfigOf` is the v16 reader.
 // 16: wave 7 — inferred-pure definers, function-hidden and computed-member reads in the model (the
 // two real-app bug families A/B), and the shrinker's failing wrap-mode carried in the artifact.
 // 15: wave 6 — organic (size/share-driven) chunk groups in the model, the raised size ceiling with a
 // per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 17 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 18 as const;
 
 export interface CampaignSummary {
   readonly casesRun: number;

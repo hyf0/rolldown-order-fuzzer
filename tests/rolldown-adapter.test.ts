@@ -722,6 +722,101 @@ describe("withRolldownBuild", () => {
     });
   });
 
+  test("builds and round-trips a multi-package layout (bare mains, a subpath, partial sideEffects)", async () => {
+    // Two fixture-local node_modules packages: the entry imports pkga's main barrel BARE plus a
+    // SUBPATH member, the barrel forwards a listed (side-effectful) sibling that itself imports pkgb
+    // BARE and reaches back out to a root module — the whole W14b resolution surface in one build.
+    // pkga's sideEffects ARRAY lists only the sibling, so the barrel and inner member are
+    // metadata-pure (value-only), keeping the differential oracle sound however the bundler DCEs them.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "abar", importedName: "va", localName: "e_va" },
+            { kind: "esm-value-import", target: "ainner", importedName: "vi", localName: "e_vi" },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "e_va" }, { binding: "e_vi" }],
+            },
+          ],
+        },
+        {
+          id: "abar",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-reexport-named", target: "asib", sourceName: "va", exportedName: "va" },
+          ],
+          events: [],
+        },
+        {
+          id: "asib",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "bmain", importedName: "vb", localName: "a_vb" },
+            {
+              kind: "esm-value-import",
+              target: "roothelper",
+              importedName: "vr",
+              localName: "a_vr",
+            },
+          ],
+          events: [
+            {
+              module: "asib",
+              phase: "evaluate",
+              value: 10,
+              reads: [{ binding: "a_vb" }, { binding: "a_vr" }],
+            },
+          ],
+        },
+        { id: "ainner", format: "esm", dependencies: [], events: [] },
+        {
+          id: "bmain",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "bmain", phase: "evaluate", value: 100 }],
+        },
+        { id: "roothelper", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      packages: [
+        { name: "pkga", sideEffects: ["./asib.mjs"], moduleIds: ["abar", "asib", "ainner"] },
+        { name: "pkgb", sideEffects: true, moduleIds: ["bmain"] },
+      ],
+    } satisfies ProgramModel;
+
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          events: moduleEventPairs(sourceOutcome.events),
+        };
+      },
+    );
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [
+        ["bmain", 100],
+        ["asib", 110],
+        ["entry", 111],
+      ],
+    });
+  });
+
   test("builds and round-trips a camunda-shaped local re-export with an own side effect (M4)", async () => {
     // The barrel IMPORTS the definer's binding, emits its OWN event, and re-exports the binding
     // through a source-less `export { … };` clause — the package-barrel-with-own-effect shape from

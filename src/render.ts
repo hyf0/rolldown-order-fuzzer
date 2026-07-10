@@ -13,10 +13,17 @@ import type {
   EsmDynamicImportOperation,
   ModuleFormat,
   ModuleModel,
+  PackageMembership,
   ProgramModel,
   ValueRead,
 } from "./model.ts";
-import { moduleProfile, readableBindingsOf } from "./model.ts";
+import {
+  moduleProfile,
+  packageMemberFileName,
+  packageMembershipOf,
+  packagesOf,
+  readableBindingsOf,
+} from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
 import { EXECUTION_PROTOCOL_VERSION } from "./protocol.ts";
 import { INVALID_MODULE_BINDING_IDENTIFIERS, validateProgramModel } from "./validate-model.ts";
@@ -64,11 +71,19 @@ export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
   // profile. Threaded in along the case path so demand analysis runs ONCE.
   const isMetadataPure = (module: ModuleModel): boolean =>
     moduleProfile(module).purity.kind === "metadata";
+  // Package members live under fixture-local `node_modules/<name>/<id>.<ext>`; everything else keeps
+  // the historical index-named root path, so a package-free program renders byte-identically.
+  const membership = packageMembershipOf(program);
   const modulePaths = new Map(
-    program.modules.map((module, index) => [
-      module.id,
-      modulePath(index, module.format, isMetadataPure(module)),
-    ]),
+    program.modules.map((module, index) => {
+      const member = membership.get(module.id);
+      return [
+        module.id,
+        member === undefined
+          ? modulePath(index, module.format, isMetadataPure(module))
+          : `node_modules/${member.package.name}/${packageMemberFileName(module)}`,
+      ];
+    }),
   );
   const files: RenderedFile[] = [];
 
@@ -79,9 +94,29 @@ export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
       contents: renderModule(
         module,
         modulePaths,
+        membership,
         plan.requestedNames.get(module.id) ?? [],
         (name) => renderedFormOf(module, name, plan.callableNames),
       ),
+    });
+  }
+
+  // Each package's generated package.json: the `name` a bare specifier resolves, the `main` file the
+  // bare form lands on (the FIRST member), and the `sideEffects` metadata verbatim.
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  for (const pkg of packagesOf(program)) {
+    const mainModule = modulesById.get(pkg.moduleIds[0] ?? "");
+    if (mainModule === undefined) {
+      throw new Error(`Package ${JSON.stringify(pkg.name)} has no main module`);
+    }
+    const packageJson = {
+      name: pkg.name,
+      main: `./${packageMemberFileName(mainModule)}`,
+      sideEffects: pkg.sideEffects,
+    };
+    files.push({
+      path: `node_modules/${pkg.name}/package.json`,
+      contents: `${JSON.stringify(packageJson, null, 2)}\n`,
     });
   }
 
@@ -121,10 +156,25 @@ function modulePath(index: number, format: ModuleFormat, sideEffectFree: boolean
   return sideEffectFree ? `${SIDE_EFFECT_FREE_DIRECTORY}/${base}` : base;
 }
 
-/// A relative import specifier from one rendered module to another, honoring the side-effect-free
-/// subdirectory. Root-to-root keeps the historical `./module-NNNN.ext` form; crossing the
-/// side-effect-free boundary yields `./side-effect-free/…` or `../…`.
-function importSpecifier(fromPath: string, toPath: string): string {
+/// The import specifier from one rendered module to another. A target INSIDE a package that the
+/// importer is not a member of resolves through node_modules — the BARE package name when the target
+/// is the package MAIN (`import … from "pkg"`), a subpath with the file name otherwise
+/// (`"pkg/inner.mjs"`); both were smoke-verified to resolve identically under Node and the rolldown
+/// build child, including package-to-package bare imports through the flat fixture-local
+/// node_modules. Everything else is a relative path: root-to-root keeps the historical
+/// `./module-NNNN.ext` form, same-package members are siblings (`./<id>.mjs`), and a package member
+/// reaching a root module climbs out (`../../module-NNNN.ext` — path-legal, if rare in real code).
+function importSpecifier(
+  fromPath: string,
+  toPath: string,
+  fromMember: PackageMembership | undefined,
+  toMember: PackageMembership | undefined,
+): string {
+  if (toMember !== undefined && toMember.package !== fromMember?.package) {
+    return toMember.isMain
+      ? toMember.package.name
+      : `${toMember.package.name}/${posix.basename(toPath)}`;
+  }
   const specifier = posix.relative(posix.dirname(fromPath), toPath);
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
@@ -144,18 +194,26 @@ function importSpecifier(fromPath: string, toPath: string): string {
 function renderModule(
   module: ModuleModel,
   modulePaths: ReadonlyMap<string, string>,
+  membership: ReadonlyMap<string, PackageMembership>,
   requestedExports: readonly string[],
   formOf: (name: string) => RenderedExportForm,
 ): string {
   const readable = readableBindingsOf(module.dependencies);
   const selfPath = getRequiredPath(modulePaths, module.id);
+  const specifierTo = (targetId: string): string =>
+    importSpecifier(
+      selfPath,
+      getRequiredPath(modulePaths, targetId),
+      membership.get(module.id),
+      membership.get(targetId),
+    );
   const dynamicRegistration = (dependency: EsmDynamicImportOperation, specifier: string): string =>
     `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`;
 
   if (module.format === "cjs") {
     const dependencyLines: string[] = [];
     for (const dependency of module.dependencies) {
-      const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
+      const specifier = specifierTo(dependency.target);
       if (dependency.kind === "esm-dynamic-import") {
         // `import()` is legal inside CommonJS in Node.
         dependencyLines.push(dynamicRegistration(dependency, specifier));
@@ -190,7 +248,7 @@ function renderModule(
   // re-exports the binding it holds).
   const localReexportLines: string[] = [];
   for (const dependency of module.dependencies) {
-    const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
+    const specifier = specifierTo(dependency.target);
     if (dependency.kind === "esm-side-effect-import") {
       dependencyLines.push(`import "${specifier}";`);
     } else if (dependency.kind === "esm-value-import") {

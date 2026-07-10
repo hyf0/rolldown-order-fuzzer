@@ -269,6 +269,15 @@ export interface EsmModuleModel extends ModuleModelBase {
   readonly format: "esm";
   readonly dependencies: readonly EsmDependencyOperation[];
   readonly hasTopLevelAwait?: true;
+  /// Export names this module DECLARES locally — synthesized state-derived exports that coexist with
+  /// a star re-export (the vben `index.js` shape: an own helper next to `export * from "./facade"`).
+  /// Without this field a star suppresses ALL local synthesis (`localExportsFor` renders nothing
+  /// local), so a barrel could never carry an own included statement — the family-B conjunction's
+  /// "one own helper the entry uses keeps the barrel included" ingredient. A declared name is a LOCAL
+  /// definer for routing (ES semantics: a local export shadows `export *`, so demand for it never
+  /// forwards through the star), rendered by the same synthesized-export templates as any local
+  /// export. Optional and additive: models without it behave exactly as before.
+  readonly localExports?: readonly string[];
 }
 
 /// CJS modules require synchronously and may also register dynamic imports — `import()` is
@@ -322,6 +331,34 @@ export function moduleProfile(module: ModuleModel): ModuleProfile {
         ? { kind: "callable-own-state" }
         : { kind: "numeric-fold" };
   return { purity, exportShape };
+}
+
+/// A named package a subset of modules belongs to (W14b, schema 18). Members render under a
+/// fixture-local `node_modules/<name>/` directory carrying a generated `package.json` with `name`,
+/// `main` (the FIRST member's file — the package index a bare `import … from "<name>"` resolves to),
+/// and `sideEffects`; cross-package imports use bare specifiers. `sideEffects` is the tree-shaking
+/// metadata axis:
+///
+/// - `false` — every member is METADATA-PURE: the bundler may legally drop a member or its
+///   initializer, so each member must satisfy the value-only/no-events contract (see
+///   `validate-model.ts`), exactly like the historical module-level `sideEffectFree` flag.
+/// - `string[]` — PARTIAL metadata (the vben / family-B ingredient): a member whose rendered file
+///   name matches an entry is side-effectFUL (events allowed); an UNMATCHED member is metadata-pure
+///   and must satisfy the contract. Patterns are restricted to a literal-plus-`*` subset so the
+///   fuzzer's matcher cannot diverge from rolldown's glob semantics (both match with or without a
+///   leading `./`, verified against the frozen snapshot).
+/// - `true` — no purity assertion (every member effectful); the field is still written, so the
+///   package exercises the resolution/layout surface without a tree-shaking claim.
+///
+/// This model MIGRATES the module-level `sideEffectFree` representation: `packagesOf` is the ONE
+/// legacy-normalization seam (a legacy flag becomes a single-member `sideEffects: false` package),
+/// so there is never a second live representation — a program carrying BOTH `packages` and a flagged
+/// module is rejected at validation.
+export interface PackageModel {
+  readonly name: string;
+  readonly sideEffects: boolean | readonly string[];
+  /// Member module ids; the FIRST is the package main (the bare-specifier target).
+  readonly moduleIds: readonly string[];
 }
 
 export interface EntryModel {
@@ -387,6 +424,10 @@ export interface ProgramModel {
   readonly modules: readonly ModuleModel[];
   readonly entries: readonly EntryModel[];
   readonly schedule: readonly ScheduleOperation[];
+  /// The named packages (W14b, schema 18) — the SINGLE live representation of package/layout
+  /// metadata. Absent on a legacy (schema ≤17) model, where `packagesOf` derives single-member
+  /// `sideEffects: false` packages from any module-level `sideEffectFree` flags.
+  readonly packages?: readonly PackageModel[];
   /// The single persisted bundle-side build configuration (W14a, schema 17). Present on every
   /// generator-produced program; absent on a legacy (schema-16) model, where `buildConfigOf` derives it
   /// from the legacy top-level arrays + defaults.
@@ -495,6 +536,90 @@ export function programChunking(program: ProgramModel): Chunking {
     return { kind: "automatic" };
   }
   return chunking;
+}
+
+/// The resolved packages of a program — the ONE place the package/layout representation is read, so
+/// every consumer (renderer layout, validator contract, tags, shrink) sees the same view. Persisted
+/// `packages` (schema 18) win; the legacy module-level `sideEffectFree` normalization (a flag becomes
+/// a single-member `sideEffects: false` package) lands with the W14b migration flip.
+export function packagesOf(program: ProgramModel): readonly PackageModel[] {
+  return program.packages ?? [];
+}
+
+/// One module's package membership: the package it belongs to and whether it is the package MAIN
+/// (the first member — the file `package.json#main` points at, which a bare `import "<name>"`
+/// resolves to).
+export interface PackageMembership {
+  readonly package: PackageModel;
+  readonly isMain: boolean;
+}
+
+/// Per-module package membership, from the ONE resolved packages view. A module is a member of at
+/// most one package (validated); non-members are absent from the map.
+export function packageMembershipOf(program: ProgramModel): ReadonlyMap<string, PackageMembership> {
+  const membership = new Map<string, PackageMembership>();
+  for (const pkg of packagesOf(program)) {
+    for (const [index, moduleId] of pkg.moduleIds.entries()) {
+      if (!membership.has(moduleId)) {
+        membership.set(moduleId, { package: pkg, isMain: index === 0 });
+      }
+    }
+  }
+  return membership;
+}
+
+/// The rendered file name of a PACKAGE MEMBER: `<id>.<mjs|cjs>` under `node_modules/<name>/`. Named
+/// by the STABLE module id — not the program-order index root modules use — so a shrink step that
+/// drops modules never renumbers package files, and a `sideEffects` array entry (which names these
+/// files) keeps matching across shrinks. Root (non-member) modules keep the historical
+/// `module-NNNN.<ext>` index naming, so a package-free program renders byte-identically.
+export function packageMemberFileName(module: ModuleModel): string {
+  return `${module.id}.${module.format === "esm" ? "mjs" : "cjs"}`;
+}
+
+/// Whether a `sideEffects` array PATTERN matches a package member's rendered file name. Semantics
+/// pinned against the frozen snapshot: an entry matches with or without a leading `./`, and `*`
+/// wildcards within the name match any run of characters (rolldown, like webpack, matches the
+/// package-relative path — our package files are flat, so the relative path IS the file name).
+/// Patterns are validated to a literal-plus-`*` subset (`validate-model.ts`), so this matcher cannot
+/// silently diverge from rolldown's glob engine on syntax the model can never carry.
+export function sideEffectsPatternMatches(pattern: string, fileName: string): boolean {
+  const normalized = pattern.startsWith("./") ? pattern.slice(2) : pattern;
+  const regexSource = `^${normalized
+    .split("*")
+    .map((literal) => literal.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join(".*")}$`;
+  return new RegExp(regexSource).test(fileName);
+}
+
+/// The module ids the resolved packages assert METADATA-PURE — the modules whose value-only/no-events
+/// contract the validator enforces and whose initializer the bundler may LEGALLY drop:
+/// `sideEffects: false` marks every member; an ARRAY marks exactly the members whose rendered file
+/// name no entry matches (the vben partial form — a matched member keeps its side effects); `true`
+/// marks none. This is the package-model successor of the module-level `sideEffectFree` flag.
+export function metadataPureModuleIds(program: ProgramModel): ReadonlySet<string> {
+  const pure = new Set<string>();
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  for (const pkg of packagesOf(program)) {
+    if (pkg.sideEffects === true) {
+      continue;
+    }
+    for (const moduleId of pkg.moduleIds) {
+      const module = modulesById.get(moduleId);
+      if (module === undefined) {
+        continue;
+      }
+      if (pkg.sideEffects === false) {
+        pure.add(moduleId);
+        continue;
+      }
+      const fileName = packageMemberFileName(module);
+      if (!pkg.sideEffects.some((pattern) => sideEffectsPatternMatches(pattern, fileName))) {
+        pure.add(moduleId);
+      }
+    }
+  }
+  return pure;
 }
 
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an
