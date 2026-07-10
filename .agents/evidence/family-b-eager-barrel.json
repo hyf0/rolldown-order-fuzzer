@@ -1,8 +1,8 @@
 {
   "proof": "family-B eager-barrel (vben initPreferences shape): same-seed od-RED / wa-GREEN split on the frozen snapshot",
-  "generatedAt": "2026-07-10T17:57:13.004Z",
-  "head": "dbad46db5acc0db4ad216d838684dcf196f6ccb5",
-  "dirty": true,
+  "generatedAt": "2026-07-10T21:03:40.288Z",
+  "head": "9944fe0367fa23f7d2dc2eaba9aec46922a20262",
+  "dirty": false,
   "node": "v24.18.0",
   "cases": 20,
   "catchTag": "mechanism:family-b-eager-barrel",
