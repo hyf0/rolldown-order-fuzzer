@@ -67,7 +67,10 @@ const RENDERER_RESERVED_BINDING_IDENTIFIERS = new Set(["globalThis"]);
 type ReadableBinding =
   | { readonly kind: "direct" }
   | { readonly kind: "require"; readonly member: string }
-  | { readonly kind: "namespace"; readonly members: ReadonlySet<string> };
+  | { readonly kind: "namespace"; readonly members: ReadonlySet<string> }
+  // An `objectRef` value import: an object reference, never a folded number. It may only be referenced
+  // by an event's `identityCheck`, never a numeric read.
+  | { readonly kind: "object" };
 
 export function validateProgramModel(program: ProgramModel): readonly string[] {
   const errors: string[] = [];
@@ -205,6 +208,8 @@ function validateModules(
   for (const [moduleIndex, module] of modules.entries()) {
     validateSideEffectFreeModule(module, moduleIndex, errors);
     validateInferredPureModule(module, moduleIndex, errors);
+    validateCallableOwnStateModule(module, moduleIndex, errors);
+    validateObjectExportModule(module, moduleIndex, errors);
 
     const localBindings = new Set<string>();
     // Each readable binding maps its local name to how it may be read: an ESM value-import (read
@@ -233,6 +238,39 @@ function validateModules(
         errors.push(
           `${path}: cannot require ESM module ${quote(target.id)} because it has top-level await`,
         );
+      }
+
+      // Every export a callable-own-state module synthesizes is a FUNCTION. Folding a function
+      // binding numerically concatenates its SOURCE TEXT into the payload, and the bundle may rename
+      // or reformat that function — a false-positive surface, not a bug witness. So a read of a
+      // callable-own-state module's export must consume it as a CALL (or capture it as an objectRef,
+      // compared only for identity). Checked on DIRECT edges; a chain through a barrel is the
+      // generator's responsibility (its consumers always call), the same split as flagged barrels.
+      if (target !== undefined && target.callableOwnState === true) {
+        if (
+          operation.kind === "esm-value-import" &&
+          operation.call !== true &&
+          operation.objectRef !== true
+        ) {
+          errors.push(
+            `${path}: a value import of callable-own-state module ${quote(target.id)} must be a call import or an objectRef; its export is a function and a numeric fold of it is unsound`,
+          );
+        }
+        if (operation.kind === "esm-namespace-import") {
+          const callMembers = new Set(operation.callMembers ?? []);
+          for (const member of operation.readMembers) {
+            if (!callMembers.has(member)) {
+              errors.push(
+                `${path}: namespace member ${quote(member)} of callable-own-state module ${quote(target.id)} must be in callMembers; its exports are functions and a plain member fold is unsound`,
+              );
+            }
+          }
+        }
+        if (operation.kind === "cjs-require" && operation.resultBinding !== undefined) {
+          errors.push(
+            `${path}: a readable require may not target callable-own-state module ${quote(target.id)}; its exports are functions and a member fold is unsound`,
+          );
+        }
       }
 
       if (operation.kind === "esm-dynamic-import") {
@@ -338,6 +376,9 @@ function validateInferredPureModule(
       `${path}: an inferred-pure module must not emit events; an event is a top-level side effect`,
     );
   }
+  if (module.objectExport === true) {
+    errors.push(`${path}: a module cannot be both inferredPure and objectExport`);
+  }
   if (module.pureBase === undefined || !Number.isFinite(module.pureBase)) {
     errors.push(`${path}.pureBase: an inferred-pure module requires a finite numeric pureBase`);
   }
@@ -350,12 +391,91 @@ function validateInferredPureModule(
   }
 }
 
+/// A callable-reads-own-state definer (`callableOwnState`) synthesizes a module-scope mutable state
+/// var assigned during init from a non-inlinable pure call, and renders each local export as a
+/// function that reads that state. It must be ESM (only an ESM chunk-scope function export is callable
+/// while its module init is skipped — the family-B shape). It may be combined with `inferredPure` (a
+/// no-events pure definer whose callable reads its state) but not with `objectExport` (a different
+/// export rendering). See the `callableOwnState` doc in model.ts.
+function validateCallableOwnStateModule(
+  module: ModuleModel,
+  moduleIndex: number,
+  errors: string[],
+): void {
+  if (module.callableOwnState !== true) {
+    return;
+  }
+  const path = `modules[${moduleIndex}]`;
+  if (module.format !== "esm") {
+    errors.push(`${path}: a callable-own-state module must be ESM, received ${module.format}`);
+  }
+  if (module.objectExport === true) {
+    errors.push(`${path}: a module cannot be both callableOwnState and objectExport`);
+  }
+}
+
+/// An object-export definer (`objectExport`) exports a fresh object literal per demanded name and emits
+/// NO events (the invisible double-init target — a module run twice is undetectable by numbers but not
+/// by object identity). It must be ESM, a leaf (no dependencies — nothing it could reorder or fold),
+/// carry no events, and not combine with another export-rendering flag. See the `objectExport` doc in
+/// model.ts.
+function validateObjectExportModule(
+  module: ModuleModel,
+  moduleIndex: number,
+  errors: string[],
+): void {
+  if (module.objectExport !== true) {
+    return;
+  }
+  const path = `modules[${moduleIndex}]`;
+  if (module.format !== "esm") {
+    errors.push(`${path}: an object-export module must be ESM, received ${module.format}`);
+  }
+  if (module.events.length > 0) {
+    errors.push(
+      `${path}: an object-export module must not emit events; it is the invisible double-init target`,
+    );
+  }
+  if (module.dependencies.length > 0) {
+    errors.push(`${path}: an object-export module must be a leaf (no dependencies)`);
+  }
+  if (module.sideEffectFree === true) {
+    errors.push(`${path}: a module cannot be both objectExport and sideEffectFree`);
+  }
+}
+
 function validateEventReads(
   event: ModuleModel["events"][number],
   eventPath: string,
   readableBindings: ReadonlyMap<string, ReadableBinding>,
   errors: string[],
 ): void {
+  // An object-identity event folds `value + ((left === right) ? 0 : sentinel)`: it carries no numeric
+  // reads, keeps a finite numeric base, and both sides compare `objectRef` bindings of this module.
+  if (event.identityCheck !== undefined) {
+    if (event.reads !== undefined && event.reads.length > 0) {
+      errors.push(`${eventPath}: an event cannot carry both reads and an identityCheck`);
+    }
+    if (event.hiddenReadFn === true) {
+      errors.push(`${eventPath}: identityCheck cannot combine with hiddenReadFn`);
+    }
+    if (typeof event.value !== "number" || !Number.isFinite(event.value)) {
+      errors.push(
+        `${eventPath}.value: expected a finite number when the event carries an identityCheck`,
+      );
+    }
+    for (const side of ["leftBinding", "rightBinding"] as const) {
+      const bindingName = event.identityCheck[side];
+      const binding = readableBindings.get(bindingName);
+      if (binding === undefined || binding.kind !== "object") {
+        errors.push(
+          `${eventPath}.identityCheck.${side}: ${quote(bindingName)} must be an objectRef import binding in this module`,
+        );
+      }
+    }
+    return;
+  }
+
   if (event.reads === undefined || event.reads.length === 0) {
     // A function-hidden read wraps the folded reads in a local function; it is meaningless with no
     // reads to hide.
@@ -376,6 +496,14 @@ function validateEventReads(
     if (binding === undefined) {
       errors.push(
         `${readPath}.binding: unknown readable binding ${quote(read.binding)} in this module`,
+      );
+      continue;
+    }
+    // An objectRef binding holds an object reference; folding it into a numeric payload is a type error
+    // (it may only be compared for identity in an `identityCheck`).
+    if (binding.kind === "object") {
+      errors.push(
+        `${readPath}.binding: ${quote(read.binding)} is an objectRef binding and cannot be folded numerically; use an identityCheck`,
       );
       continue;
     }
@@ -460,9 +588,16 @@ function validateDependencyBinding(
         `${path}.importedName: invalid JavaScript identifier ${quote(dependency.importedName)}`,
       );
     }
-
+    // An objectRef import binds an object reference (compared for identity, never folded); a plain
+    // value import binds a directly-readable value. The two roles are mutually exclusive.
+    if (dependency.objectRef === true && dependency.call === true) {
+      errors.push(`${path}: an import cannot be both objectRef and a call import`);
+    }
     if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
-      readableBindings.set(dependency.localName, { kind: "direct" });
+      readableBindings.set(
+        dependency.localName,
+        dependency.objectRef === true ? { kind: "object" } : { kind: "direct" },
+      );
     }
     return;
   }
@@ -472,6 +607,15 @@ function validateDependencyBinding(
       if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(member)) {
         errors.push(
           `${path}.readMembers[${memberIndex}]: invalid JavaScript identifier ${quote(member)}`,
+        );
+      }
+    }
+    // A call member (`ns.member()`) must name a member the namespace actually reads.
+    const readMemberSet = new Set(dependency.readMembers);
+    for (const [callIndex, callMember] of (dependency.callMembers ?? []).entries()) {
+      if (!readMemberSet.has(callMember)) {
+        errors.push(
+          `${path}.callMembers[${callIndex}]: ${quote(callMember)} must be one of readMembers`,
         );
       }
     }

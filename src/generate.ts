@@ -291,6 +291,16 @@ interface RandomModuleDraft {
   /// A family-A conjunction consumer that must become an entry (a barrel importer, so the barrel is
   /// shared by >= 2 entry chunks — the "barrel not flattened" ingredient).
   forceEntry?: boolean;
+  /// A callable-reads-own-state definer draft (Task 2): converted to a `ModuleModel` with
+  /// `callableOwnState: true`. Combined with `inferredPure` it stays a no-events pure definer; alone
+  /// it becomes an event-carrying module. See `injectCallableOwnStateClusters`.
+  callableOwnState?: boolean;
+  /// An object-export definer draft (Task 3): converted to a no-events `objectExport` module (a fresh
+  /// object literal per demanded export — the invisible double-init target).
+  objectExport?: boolean;
+  /// An object-identity consumer draft (Task 3): converted to a module with one `identityCheck` event
+  /// comparing two `objectRef` captures of the same object export reached through different paths.
+  identityCheck?: { readonly leftBinding: string; readonly rightBinding: string };
 }
 
 /// Random mixed graphs: a forward-edge DAG over ESM/CJS modules, an optional self-contained
@@ -621,6 +631,14 @@ function buildRandomMixed(
     conjunctionDrafts.filter((draft) => draft.forceEntry === true).map((draft) => draft.id),
   );
 
+  // Witness-enrichment clusters (wave 8), appended after the conjunctions so the conjunction density is
+  // unchanged: a callable-reads-own-state cluster (the d3-scale/shadcn read-side ingredient for family
+  // B) and an object-identity cluster (a silent double-init witness numbers cannot see). Their entry
+  // consumers are NOT skipped in applyStaticallyInvisibleReads — the callable calls are meant to be
+  // hidden, and the identity events carry no folded reads to hide.
+  drafts.push(...injectCallableOwnStateClusters(rng, drafts, regime));
+  drafts.push(...injectObjectIdentityClusters(rng, drafts, regime));
+
   const modules = drafts.map((draft): ModuleModel => {
     // A draft only ever accumulates dependency kinds legal for its format, so the filters below are
     // defensive; the reads are chosen from the same forward-only bindings the renderer will fold.
@@ -636,26 +654,58 @@ function buildRandomMixed(
         events: [],
         inferredPure: true,
         pureBase: draft.pureBase ?? 1 + rng.integer(900_000),
+        // A callable-own-state definer may ALSO be inferred-pure: its exports then read a module-scope
+        // state var (still only pure statements), so the bundler still infers it side-effect-free.
+        ...(draft.callableOwnState === true ? { callableOwnState: true as const } : {}),
+      };
+    }
+    // An object-export definer (Task 3): a no-events ESM leaf exporting fresh object literals — the
+    // invisible double-init target of the object-identity witness.
+    if (draft.objectExport === true) {
+      return { id: draft.id, format: "esm", dependencies: [], events: [], objectExport: true };
+    }
+    // An object-identity consumer (Task 3): its objectRef imports capture the same object export
+    // through two paths; a single event compares them for identity. objectRef bindings are never
+    // folded numerically, so this event carries no `reads`.
+    if (draft.identityCheck !== undefined) {
+      return {
+        id: draft.id,
+        format: "esm",
+        dependencies: draft.dependencies.filter(
+          (dependency) => dependency.kind !== "cjs-require",
+        ) as EsmModuleModel["dependencies"],
+        events: [
+          {
+            module: draft.id,
+            phase: "evaluate",
+            value: rng.integer(1_000_000),
+            identityCheck: draft.identityCheck,
+          },
+        ],
       };
     }
     const isBarrel = draft.dependencies.some(isReexportDependency);
     const moduleEvents = isBarrel
       ? []
       : withValueReads(events(draft.id, rng, 1 + rng.integer(2)), draft.dependencies, rng);
-    return draft.format === "esm"
-      ? esmModule(
-          draft.id,
-          draft.dependencies.filter((dependency) => dependency.kind !== "cjs-require"),
-          moduleEvents,
-        )
-      : cjsModule(
-          draft.id,
-          draft.dependencies.filter(
-            (dependency) =>
-              dependency.kind === "cjs-require" || dependency.kind === "esm-dynamic-import",
-          ),
-          moduleEvents,
-        );
+    if (draft.format === "esm") {
+      const esm = esmModule(
+        draft.id,
+        draft.dependencies.filter((dependency) => dependency.kind !== "cjs-require"),
+        moduleEvents,
+      );
+      // An event-carrying callable-own-state definer (Task 2): a real side-effecting module whose
+      // exports read a module-scope state var assigned during init (its base is its first event value).
+      return draft.callableOwnState === true ? { ...esm, callableOwnState: true } : esm;
+    }
+    return cjsModule(
+      draft.id,
+      draft.dependencies.filter(
+        (dependency) =>
+          dependency.kind === "cjs-require" || dependency.kind === "esm-dynamic-import",
+      ),
+      moduleEvents,
+    );
   });
 
   // Module 0 anchors the schedule; extra entries may be modules other modules also import,
@@ -1064,6 +1114,206 @@ function injectPureDefinerConjunctions(
   return [definer, sibling, ...barrels, consumerA, consumerB];
 }
 
+/// Inject a callable-reads-own-state cluster (`.agents/docs/object-identity-and-callable-own-state.md`):
+/// a `callableOwnState` definer whose exported FUNCTION reads a module-scope state var assigned during
+/// init, forwarded through a barrel, and CALLED by entry consumers through the barrel's namespace
+/// (`ns.vdef()`). This is the read-side ingredient wave 7 named for isolating on-demand-only bugs — the
+/// exact d3-scale/shadcn shape (a callable export reading its OWN init-assigned state), which the
+/// existing `call` import (returning a constant) could not express. The two entry consumers make the
+/// barrel a shared, order-wrapped chunk; about half the clusters SPLIT the second consumer onto a
+/// side-effectful sibling (the family-A conjunction with a CALL read side — hand-verified RED both
+/// modes against the frozen snapshot), the rest have both consumers call (the pure witness; it
+/// flattens green on the snapshot in isolation). `applyStaticallyInvisibleReads` hides ~half the entry
+/// calls inside a local function, the statically-invisible startup use family B needs. A
+/// dropped/skipped definer init leaves the state `undefined`, so the call folds to NaN (caught).
+/// Self-contained (fresh ids, forward edges only). ESM-only and bounded by the module budget. Returns
+/// the appended drafts; the caller forces the consumers to be entries.
+function injectCallableOwnStateClusters(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  regime: FormatRegime,
+): RandomModuleDraft[] {
+  // A cluster is 4 modules (definer, barrel, two entry consumers), 5 with the split sibling; ESM-only
+  // (a callable function export forwarded through a barrel and called through a namespace).
+  const budget = MAX_RANDOM_MODULES - drafts.length;
+  if (regime === "pure-cjs" || budget < 4 || rng.integer(100) >= 18) {
+    return [];
+  }
+  const counter = drafts.length;
+  const definerId = `cos${counter}`;
+  const siblingId = `cossib${counter}`;
+  const barrelId = `cosbar${counter}`;
+  const definerName = `v${definerId}`;
+  const siblingName = `v${siblingId}`;
+
+  // ~60% inferred-pure (a no-events pure definer whose callable reads its own init-assigned state — the
+  // clean family-B-relevant witness, dropped from output when unused), else event-carrying (a real
+  // side-effecting module carrying the same construct). Both are leaves (no dependencies), so the
+  // callable only ever reads its own state.
+  const inferredPure = rng.integer(5) < 3;
+  const definer: RandomModuleDraft = {
+    id: definerId,
+    format: "esm",
+    dependencies: [],
+    callableOwnState: true,
+    ...(inferredPure ? { inferredPure: true, pureBase: 1 + rng.integer(900_000) } : {}),
+  };
+
+  // About half the clusters SPLIT the reads across a side-effectful sibling (consumer B then reads the
+  // sibling's value instead of calling the definer) — the family-A conjunction shape with a CALL read
+  // side, hand-verified RED in both modes against the frozen snapshot (the sibling keeps the barrel a
+  // wrapped chunk whose init drops the definer, while both-call clusters flatten green there). The
+  // split variant hunts today's bug through the call path; the both-call variant is the pure witness
+  // for any future dropped/skipped init.
+  const split = budget >= 5 && rng.boolean();
+  const sibling: RandomModuleDraft | undefined = split
+    ? { id: siblingId, format: "esm", dependencies: [] }
+    : undefined;
+
+  // The barrel forwards the callable export: a STAR re-export (the whole definer init may drop) or a
+  // NAMED one. Either keeps the definer cross-chunk behind a barrel; the campaign's organic chunking
+  // supplies the order-wrapping that can make on-demand skip its init. A split cluster always uses the
+  // STAR for the definer (the load-bearing family-A ingredient) plus a NAMED sibling re-export.
+  const barrel: RandomModuleDraft = {
+    id: barrelId,
+    format: "esm",
+    dependencies: split
+      ? [
+          { kind: "esm-reexport-star", target: definerId },
+          {
+            kind: "esm-reexport-named",
+            target: siblingId,
+            sourceName: siblingName,
+            exportedName: siblingName,
+          },
+        ]
+      : [
+          rng.boolean()
+            ? { kind: "esm-reexport-star", target: definerId }
+            : {
+                kind: "esm-reexport-named",
+                target: definerId,
+                sourceName: definerName,
+                exportedName: definerName,
+              },
+        ],
+  };
+
+  // Entry consumers namespace-import the barrel. A caller CALLS the definer's export (`ns.vdef()`),
+  // folding the returned own-state value into an event; a split cluster's second consumer reads the
+  // SIBLING's value instead (the split that keeps the barrel wrapped).
+  const makeCaller = (id: string): RandomModuleDraft => ({
+    id,
+    format: "esm",
+    dependencies: [
+      {
+        kind: "esm-namespace-import",
+        target: barrelId,
+        localName: `ns_${id}`,
+        readMembers: [definerName],
+        callMembers: [definerName],
+      },
+    ],
+    forceEntry: true,
+  });
+  const makeSiblingReader = (id: string): RandomModuleDraft => ({
+    id,
+    format: "esm",
+    dependencies: [
+      {
+        kind: "esm-namespace-import",
+        target: barrelId,
+        localName: `ns_${id}`,
+        readMembers: [siblingName],
+      },
+    ],
+    forceEntry: true,
+  });
+
+  const consumerA = makeCaller(`coscA${counter}`);
+  const consumerB = split ? makeSiblingReader(`coscB${counter}`) : makeCaller(`coscB${counter}`);
+  return sibling === undefined
+    ? [definer, barrel, consumerA, consumerB]
+    : [definer, sibling, barrel, consumerA, consumerB];
+}
+
+/// Inject an object-identity cluster (Task 3, `.agents/docs/object-identity-and-callable-own-state.md`):
+/// an `objectExport` definer (a no-events module exporting a fresh object literal — the invisible
+/// double-init target), forwarded through a barrel, captured by two entry consumers that each hold a
+/// DIRECT reference and a BARREL-forwarded reference and compare identity (`a === b`). In source ESM
+/// the definer evaluates once, so both captures are one object (`true`); if a bundler ever re-runs the
+/// definer (e.g. duplicates it across chunks) a late capture is a NEW object (`false`) — a silent
+/// double-init a numeric oracle cannot see (numbers are idempotent). Identity preservation across these
+/// import paths was probed LEGAL on both healthy builds before integrating (no false positives).
+/// Self-contained (fresh ids, forward edges only). ESM-only and bounded by the module budget. Returns
+/// the appended drafts; the caller forces the consumers to be entries (sharing the definer and barrel
+/// so organic chunking can pull the definer into two chunks — the double-evaluation the witness hunts).
+function injectObjectIdentityClusters(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  regime: FormatRegime,
+): RandomModuleDraft[] {
+  // A cluster is 4 modules (object-export definer, barrel, two entry consumers). ESM-only.
+  const budget = MAX_RANDOM_MODULES - drafts.length;
+  if (regime === "pure-cjs" || budget < 4 || rng.integer(100) >= 12) {
+    return [];
+  }
+  const counter = drafts.length;
+  const definerId = `obj${counter}`;
+  const barrelId = `objbar${counter}`;
+  const definerName = `v${definerId}`;
+
+  const definer: RandomModuleDraft = {
+    id: definerId,
+    format: "esm",
+    dependencies: [],
+    objectExport: true,
+  };
+  const barrel: RandomModuleDraft = {
+    id: barrelId,
+    format: "esm",
+    dependencies: [
+      rng.boolean()
+        ? { kind: "esm-reexport-star", target: definerId }
+        : {
+            kind: "esm-reexport-named",
+            target: definerId,
+            sourceName: definerName,
+            exportedName: definerName,
+          },
+    ],
+  };
+  // Each consumer captures the SAME object export directly AND through the barrel, then compares
+  // identity in one event.
+  const makeConsumer = (id: string): RandomModuleDraft => {
+    const directBinding = `od_${id}`;
+    const barrelBinding = `ob_${id}`;
+    return {
+      id,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: definerId,
+          importedName: definerName,
+          localName: directBinding,
+          objectRef: true,
+        },
+        {
+          kind: "esm-value-import",
+          target: barrelId,
+          importedName: definerName,
+          localName: barrelBinding,
+          objectRef: true,
+        },
+      ],
+      forceEntry: true,
+      identityCheck: { leftBinding: directBinding, rightBinding: barrelBinding },
+    };
+  };
+  return [definer, barrel, makeConsumer(`objcA${counter}`), makeConsumer(`objcB${counter}`)];
+}
+
 /// Kinds an existing forward edge may hold and still be a candidate for multi-edge augmentation.
 /// Namespace imports, hoisted-function CALL imports (cycle edges only), and re-exports are excluded:
 /// they are not the plain static/lazy shape this pass builds, and the forward-only gate already keeps
@@ -1258,6 +1508,11 @@ function chooseSideEffectFreeModules(
     (module) =>
       module.format === "esm" &&
       module.inferredPure !== true &&
+      // The wave-8 witness definers carry their own export rendering and must not be flagged: an
+      // objectExport must not be sideEffectFree (a dropped object export defeats the identity witness),
+      // and a callable-own-state definer's state must not be stripped.
+      module.objectExport !== true &&
+      module.callableOwnState !== true &&
       module.dependencies.length === 0 &&
       !entryIds.has(module.id) &&
       valueReadTargets.has(module.id),
@@ -1639,6 +1894,20 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   ) {
     tags.add("variation:computed-member-read");
   }
+  // A callable-reads-own-state definer (Task 2): an exported function reads its module's own
+  // init-assigned state var, called by consumers — the d3-scale/shadcn read-side witness.
+  if (program.modules.some((module) => module.callableOwnState === true)) {
+    tags.add("variation:callable-own-state");
+  }
+  // An object-identity witness (Task 3): an event compares two captures of one object export for
+  // identity, catching a silent double-init that idempotent numbers cannot.
+  if (
+    program.modules.some((module) =>
+      module.events.some((event) => event.identityCheck !== undefined),
+    )
+  ) {
+    tags.add("variation:object-identity");
+  }
   // The COMPLETE family-A conjunction: an inferred-pure definer STAR-re-exported through a barrel
   // that >= 2 modules namespace-import, at least one reading the definer's value via the star. Only a
   // complete conjunction is tagged, so a campaign summary's count proves conjunction DENSITY (the
@@ -1735,8 +2004,13 @@ function hasCompletePureDefinerConjunction(
   program: ProgramModel,
   modulesById: ReadonlyMap<string, ModuleModel>,
 ): boolean {
+  // Only the family-A VALUE-read shape counts here: a callable-own-state definer (whose export is read
+  // via a CALL, not a value) is a distinct wave-8 witness tagged `variation:callable-own-state`, so it
+  // is excluded to keep `mechanism:pure-definer-behind-barrel` specific to the family-A conjunction.
   const pureDefinerIds = new Set(
-    program.modules.filter((module) => module.inferredPure === true).map((module) => module.id),
+    program.modules
+      .filter((module) => module.inferredPure === true && module.callableOwnState !== true)
+      .map((module) => module.id),
   );
   if (pureDefinerIds.size === 0) {
     return false;

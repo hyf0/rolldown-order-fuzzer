@@ -158,8 +158,17 @@ function collectRequestedExports(program: ProgramModel): RequestedExports {
           markCallable(dependency.target, dependency.importedName);
         }
       } else if (dependency.kind === "esm-namespace-import") {
+        // A call member (`ns.member()`) demands a CALLABLE export on the direct target, so a flat
+        // model calling a plain module's member synthesizes `export function member()` rather than a
+        // const a call would crash on. Like the value-import call marking, callable-ness is only
+        // demanded on the direct target, never forwarded through a star re-export — a barrel-mediated
+        // call member expects a `callableOwnState` definer (which synthesizes functions regardless).
+        const callMembers = new Set(dependency.callMembers ?? []);
         for (const member of dependency.readMembers) {
           demand(dependency.target, member);
+          if (callMembers.has(member)) {
+            markCallable(dependency.target, member);
+          }
         }
       } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
         demand(dependency.target, dependency.readName);
@@ -332,6 +341,13 @@ function renderModule(
 /// crashing identically on both sides. See the `guard` flag in model.ts.
 const PARTIAL_READ_SENTINEL = -1;
 
+/// The offset an object-identity event folds in when the two captured references are NOT the same
+/// object (`identityCheck`). Any large, distinctive number works: on a correct build the captures are
+/// one object (`+ 0`, value unchanged); only a silently double-run init makes a late capture a new
+/// object, shifting the value by this sentinel so the differential oracle catches it. Far above the
+/// generator's bounded folds, so it never collides with a legitimate value.
+const OBJECT_IDENTITY_MISMATCH_SENTINEL = 987_654_321;
+
 function renderRead(read: ValueRead): string {
   let access: string;
   if (read.member === undefined) {
@@ -386,6 +402,21 @@ function renderEvents(module: ModuleModel): string[] {
   const lines: string[] = [];
   let hiddenReadCounter = 0;
   for (const event of module.events) {
+    if (event.identityCheck !== undefined) {
+      // Fold an object-identity comparison: `value + ((left === right) ? 0 : sentinel)`. The two
+      // bindings capture the same object export through different paths; a correct build keeps them
+      // one object (`+ 0`), a silently double-run init makes a late capture a new object (`+ sentinel`).
+      const identityBase = typeof event.value === "number" ? event.value : 0;
+      const { leftBinding, rightBinding } = event.identityCheck;
+      lines.push(
+        `globalThis.__orderEvent({ module: ${serializeJavaScriptValue(
+          event.module,
+        )}, phase: ${serializeJavaScriptValue(
+          event.phase,
+        )}, value: ${identityBase} + ((${leftBinding} === ${rightBinding}) ? 0 : ${OBJECT_IDENTITY_MISMATCH_SENTINEL}) });`,
+      );
+      continue;
+    }
     if (event.reads === undefined || event.reads.length === 0) {
       // No reads: keep the exact compact-JSON payload the oracle has always emitted.
       lines.push(
@@ -489,6 +520,59 @@ function renderInferredPureExports(
   return lines;
 }
 
+/// A module-scope MUTABLE state variable assigned during init from a non-inlinable
+/// `/* @__PURE__ */`-annotated build call, plus every demanded export rendered as a FUNCTION that
+/// READS that state (`export function name() { return __ownState + <k> }`). This is the d3-scale
+/// `unit`/`rescale` shape: a consumer that CALLS the export folds `__ownState + <k>`, so a dropped
+/// init (which never assigns `__ownState`) surfaces as an `undefined` read → NaN downstream. The
+/// build-call form keeps the state a runtime binding (a plain literal would be constant-folded and
+/// inlined into the function body, masking the dropped init), exactly as an inferred-pure definer's
+/// value does. All statements are pure (a `let` from a pure call, function declarations), so the
+/// bundler still infers the module side-effect-free when it carries no events. The state base is the
+/// module's `pureBase` when inferred-pure, else its first event value. See
+/// `.agents/docs/object-identity-and-callable-own-state.md`.
+function renderCallableOwnStateExports(
+  module: ModuleModel,
+  requestedExports: readonly string[],
+  usedBindings: Set<string>,
+): string[] {
+  const base = module.inferredPure === true ? (module.pureBase ?? 0) : moduleStateBase(module);
+  const buildName = freshBinding(usedBindings, "__ownStateBuild");
+  const stateName = freshBinding(usedBindings, "__ownState");
+  const lines = [
+    `function ${buildName}() { return ${base}; }`,
+    `let ${stateName} = /* @__PURE__ */ ${buildName}();`,
+  ];
+  for (const [index, exportName] of requestedExports.entries()) {
+    lines.push(`export function ${exportName}() { return ${stateName} + ${index + 1}; }`);
+  }
+  return lines;
+}
+
+/// Each demanded export rendered as a fresh OBJECT literal (`export const name = { v: <base> }`).
+/// The object's own value is immaterial to the witness — identity is compared, not the number — but a
+/// base keeps it non-empty. Every module evaluation creates a distinct object, so a consumer that
+/// captures the export through two paths sees one object on a correct (single-evaluation) build and
+/// two on a silently double-run init. Object exports emit no events (the invisible double-init
+/// target). See `.agents/docs/object-identity-and-callable-own-state.md`.
+function renderObjectExports(module: ModuleModel, requestedExports: readonly string[]): string[] {
+  const base = moduleStateBase(module);
+  return requestedExports.map((exportName) => `export const ${exportName} = { v: ${base} };`);
+}
+
+/// A fresh module-local binding with the given prefix that does not collide with any already-used
+/// binding (import locals, other synthesized names). Registers the chosen name so later calls avoid it.
+function freshBinding(usedBindings: Set<string>, prefix: string): string {
+  let index = 0;
+  let name = `${prefix}${index}`;
+  while (usedBindings.has(name)) {
+    index += 1;
+    name = `${prefix}${index}`;
+  }
+  usedBindings.add(name);
+  return name;
+}
+
 function renderEsmExports(
   module: ModuleModel,
   requestedExports: readonly string[],
@@ -496,6 +580,14 @@ function renderEsmExports(
   readable: readonly ValueRead[],
   callableExports: ReadonlySet<string>,
 ): string[] {
+  if (module.objectExport === true) {
+    return renderObjectExports(module, requestedExports);
+  }
+  // Checked before `inferredPure`: a callable-own-state definer may ALSO be inferred-pure, and it must
+  // render its state-reading callables rather than the pure-const value form.
+  if (module.callableOwnState === true) {
+    return renderCallableOwnStateExports(module, requestedExports, usedBindings);
+  }
   if (module.inferredPure === true) {
     return renderInferredPureExports(module, requestedExports, usedBindings, readable);
   }

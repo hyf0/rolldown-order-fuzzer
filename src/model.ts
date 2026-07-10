@@ -53,6 +53,22 @@ export interface EventRecord {
   /// statically visible). Valid only on an event that carries a non-empty `reads` (see
   /// `validate-model.ts` and `.agents/docs/real-app-bug-families.md`).
   readonly hiddenReadFn?: true;
+  /// An OBJECT-IDENTITY comparison folded into the payload: the value renders `value + ((leftBinding
+  /// === rightBinding) ? 0 : <mismatch sentinel>)`, where both bindings are `objectRef` imports of
+  /// the SAME object export captured through two different paths (e.g. a direct import and a
+  /// barrel-forwarded one). Source ESM evaluates the definer once, so the two captures are the same
+  /// object → `+ 0` → the value equals `value`, identical to the bundle on a correct build. If a
+  /// bundler ever re-runs the definer, a late capture references a NEW object → `false` → the value
+  /// shifts by the sentinel and the differential oracle catches it. This witnesses a SILENT
+  /// double-init: a no-events module run twice is invisible to a numeric oracle (numbers are
+  /// idempotent), but object identity is not. Mutually exclusive with `reads`/`hiddenReadFn` on one
+  /// event, and `value` must be a finite number (see `validate-model.ts`). The legality of preserved
+  /// identity across import paths was probed on healthy builds before integrating — see
+  /// `.agents/docs/object-identity-and-callable-own-state.md`.
+  readonly identityCheck?: {
+    readonly leftBinding: string;
+    readonly rightBinding: string;
+  };
 }
 
 export interface EsmSideEffectImportOperation {
@@ -71,6 +87,15 @@ export interface EsmValueImportOperation {
   /// is the sound way to fold a value across an ESM cycle edge without TDZ. `validate-model.ts`
   /// requires it on a value edge that closes a cycle and requires the target be ESM.
   readonly call?: true;
+  /// When `true`, the import binds an OBJECT REFERENCE (from an `objectExport` target, reached
+  /// directly or forwarded through a barrel), NOT a folded number. `localName` is never summed into
+  /// an event or export (`readableBindingsOf` excludes it, `validate-model.ts` registers it as an
+  /// `object` binding a numeric read cannot reference); it is compared for identity in an event's
+  /// `identityCheck`. Capturing the SAME object export through two paths and comparing `a === b`
+  /// witnesses a silently double-run init: in source ESM the two captures are one object (`true`),
+  /// but if a bundler re-runs the definer a late capture is a NEW object (`false`) — a divergence
+  /// numbers alone cannot see. See `.agents/docs/object-identity-and-callable-own-state.md`.
+  readonly objectRef?: true;
 }
 
 /// `import * as <localName> from "..."` — a whole-module namespace binding. Every name in
@@ -86,6 +111,14 @@ export interface EsmNamespaceImportOperation {
   readonly target: string;
   readonly localName: string;
   readonly readMembers: readonly string[];
+  /// The subset of `readMembers` read as CALLS (`localName.member()`), folding the callable export's
+  /// RETURN value instead of the binding itself. A call member targets a `callableOwnState` definer's
+  /// function export (reached directly or forwarded through a barrel), so the read witnesses the
+  /// definer's own-state read through a function call rather than a direct value read — the exact
+  /// shape (callable export + own-state read) the shadcn breakage manifested in. Forward-only like any
+  /// namespace read (a namespace import may not close a cycle). Must be a subset of `readMembers`;
+  /// `validate-model.ts` enforces it. See `.agents/docs/object-identity-and-callable-own-state.md`.
+  readonly callMembers?: readonly string[];
 }
 
 export interface EsmDynamicImportOperation {
@@ -182,6 +215,33 @@ interface ModuleModelBase {
   /// is set (a finite number); ignored otherwise. A distinct nonzero base per definer keeps folded
   /// values meaningful and un-foldable to a shared literal.
   readonly pureBase?: number;
+  /// When `true`, the module is a "callable reads own state" definer — the real d3-scale
+  /// `unit`/`rescale` shape and the exact construct the shadcn breakage manifested in. It declares a
+  /// module-scope MUTABLE state variable assigned during init from a non-inlinable
+  /// `/* @__PURE__ */`-annotated build call (`let __ownState = /* @__PURE__ */ __ownStateBuild()`),
+  /// and renders every export it synthesizes LOCALLY as a FUNCTION that READS that state
+  /// (`export function name() { return __ownState + <k> }`), not a constant. A consumer imports the
+  /// function and CALLS it (a `call` value import or a namespace `callMembers` read), folding the
+  /// returned value; the call witnesses "the module's init assigned __ownState before my call ran". A
+  /// dropped init leaves __ownState `undefined`, so the call folds to NaN (the event channel rejects
+  /// it → a bundle-only crash) — the read-side ingredient wave 7 named for isolating on-demand-only
+  /// bugs (the existing `call` import returns a CONSTANT, never its module's own init-assigned state).
+  /// The state base is `pureBase` when also `inferredPure`, else the module's first event value. May
+  /// be combined with `inferredPure` (the whole module is then only pure statements — a `let` from a
+  /// pure call plus a function declaration — so the bundler infers it side-effect-free and drops it
+  /// when unused) OR left event-carrying (a real side-effecting module). ESM only; the callable reads
+  /// ONLY its own state (never its dependencies), so it never recurses around a cycle. Mutually
+  /// exclusive with `objectExport`. See `.agents/docs/object-identity-and-callable-own-state.md`.
+  readonly callableOwnState?: true;
+  /// When `true`, the module is an OBJECT-EXPORT definer: it synthesizes each demanded export as a
+  /// fresh object literal (`export const name = { v: <base> }`) rather than a folded number, and emits
+  /// NO events. It is the invisible double-init target of the object-identity witness — a no-events
+  /// module whose init running twice is undetectable by a numeric oracle but detectable by object
+  /// identity (two evaluations produce two distinct objects). Consumers capture it through `objectRef`
+  /// imports and compare identity in an event's `identityCheck`. ESM only, no events; mutually
+  /// exclusive with `inferredPure`, `sideEffectFree`, and `callableOwnState` (each has a different
+  /// export rendering). See `.agents/docs/object-identity-and-callable-own-state.md`.
+  readonly objectExport?: true;
 }
 
 export interface EsmModuleModel extends ModuleModelBase {
@@ -279,6 +339,11 @@ export function readableBindingsOf(
   const reads: ValueRead[] = [];
   for (const dependency of dependencies) {
     if (dependency.kind === "esm-value-import") {
+      // An objectRef import binds an object reference, never a folded number: it is compared for
+      // identity, not summed, so it contributes no numeric readable binding.
+      if (dependency.objectRef === true) {
+        continue;
+      }
       // A call import binds a hoisted function; every read of it is a call (`localName()`).
       reads.push(
         dependency.call === true
@@ -286,8 +351,15 @@ export function readableBindingsOf(
           : { binding: dependency.localName },
       );
     } else if (dependency.kind === "esm-namespace-import") {
+      // A member in `callMembers` reads a callable export's RETURN value (`localName.member()`); the
+      // rest read the member directly.
+      const callMembers = new Set(dependency.callMembers ?? []);
       for (const member of dependency.readMembers) {
-        reads.push({ binding: dependency.localName, member });
+        reads.push(
+          callMembers.has(member)
+            ? { binding: dependency.localName, member, call: true }
+            : { binding: dependency.localName, member },
+        );
       }
     } else if (
       dependency.kind === "cjs-require" &&

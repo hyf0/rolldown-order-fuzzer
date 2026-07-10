@@ -274,6 +274,47 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
     delete (plain as { pureBase?: number }).pureBase;
     yield editModule(program, moduleIndex, plain);
   }
+  // Drop the callable-own-state flag from a definer (wave 8). Its exports then render as constants
+  // (or, when a caller demands them callable on a direct edge, constant-returning functions), so if
+  // the own-state read through the callable is load-bearing the failure vanishes and the flag is
+  // kept. Behind a barrel this usually changes the verdict kind (a call of a const crashes both
+  // sides) and is rejected — sound either way, since candidates must preserve the failure kind.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.callableOwnState !== true) {
+      continue;
+    }
+    const plain = { ...module };
+    delete (plain as { callableOwnState?: true }).callableOwnState;
+    yield editModule(program, moduleIndex, plain);
+  }
+  // Drop an object-identity comparison from an event (wave 8), reverting it to a plain constant
+  // event. The objectRef imports become unreferenced (still valid) so later passes can drop them.
+  // If the identity witness is load-bearing the failure vanishes and the check is kept.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [eventIndex, event] of module.events.entries()) {
+      if (event.identityCheck === undefined) {
+        continue;
+      }
+      const plain = { ...event };
+      delete (plain as { identityCheck?: unknown }).identityCheck;
+      const events = module.events.map((candidate, index) =>
+        index === eventIndex ? plain : candidate,
+      );
+      yield editModule(program, moduleIndex, { ...module, events } as typeof module);
+    }
+  }
+  // Drop the object-export flag from a definer (wave 8). Its exports then render as folded numbers;
+  // an identity check comparing two captures of the SAME number is still `true` on a correct build,
+  // so the model stays sound, but the object-ness witness goes dead — if it was load-bearing the
+  // failure vanishes and the flag is kept.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.objectExport !== true) {
+      continue;
+    }
+    const plain = { ...module };
+    delete (plain as { objectExport?: true }).objectExport;
+    yield editModule(program, moduleIndex, plain);
+  }
   // Drop a function-hidden read (family B) or a computed member access, revealing whether the
   // statically-invisible read shape is load-bearing (the read becomes a plain top-level read).
   for (const [moduleIndex, module] of program.modules.entries()) {

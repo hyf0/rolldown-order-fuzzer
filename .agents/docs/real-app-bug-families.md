@@ -148,7 +148,9 @@ form.
   predicted-order deviation large enough to make on-demand skip the init while wrap-all runs it — not
   assembled at fuzzer scale. The family-A version of the same own-state-read construct reproduces
   immediately (BOTH modes) through a star barrel, so the oracle can observe it; the gap is generation,
-  not observation.
+  not observation. Wave 8 built the named callable-own-state ingredient and proved family-A closure
+  on the fixed build — see
+  [object-identity-and-callable-own-state](./object-identity-and-callable-own-state.md).
 
 ## Shrinking (wave-6 residual closed)
 
