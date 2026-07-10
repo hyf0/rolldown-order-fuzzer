@@ -24,6 +24,14 @@ export interface ValueRead {
   readonly member?: string;
   readonly call?: true;
   readonly guard?: true;
+  /// When `true`, a namespace member read renders as a COMPUTED access `binding[<runtime key>]`
+  /// instead of `binding.member`, where the key is a module-level string built at runtime so the
+  /// bundler's static analysis cannot see which export is used (the shadcn `ns[k]` consumer shape).
+  /// The observed value is identical to the plain member read; only the syntactic visibility differs.
+  /// Valid only on a namespace member read (a read with a `member` whose binding is a namespace
+  /// import) — see `validate-model.ts`. A statically-invisible use is what family B needs to slip past
+  /// on-demand wrapping's per-export liveness (see `.agents/docs/real-app-bug-families.md`).
+  readonly computed?: true;
 }
 
 export interface EventRecord {
@@ -36,6 +44,15 @@ export interface EventRecord {
   /// bindings. Folding a dependency's exported value into an event makes a wrong, dropped, or
   /// reordered upstream initialization observable as a changed number.
   readonly reads?: readonly ValueRead[];
+  /// When `true`, the folded reads are rendered INSIDE a local function whose body reads the imported
+  /// bindings, and top-level code CALLS that function in the event payload: `value: base + hidden()`
+  /// where `function hidden() { return read0 + read1 + … }`. The emitted value is identical to a
+  /// plain top-level read (deterministic, synchronous, settles at once), but the read is lexically
+  /// hidden inside a function body rather than directly at module top level — the statically-invisible
+  /// startup use family B needs (the fuzzer otherwise only emits top-level direct reads, all
+  /// statically visible). Valid only on an event that carries a non-empty `reads` (see
+  /// `validate-model.ts` and `.agents/docs/real-app-bug-families.md`).
+  readonly hiddenReadFn?: true;
 }
 
 export interface EsmSideEffectImportOperation {
@@ -146,6 +163,25 @@ interface ModuleModelBase {
   /// a reordering) is a real bug. `validate-model.ts` enforces the no-events invariant; the flag is
   /// only valid on ESM modules whose dependencies are all value edges (see validate-model.ts).
   readonly sideEffectFree?: true;
+  /// When `true`, the module is an INFERRED-pure definer: its top level is only statements the
+  /// bundler's side-effect analysis judges pure by INFERENCE (local function declarations, a
+  /// `const` assigned from a `/* @__PURE__ */`-annotated call of a local function, exports of those
+  /// bindings) — NO events. This is a DIFFERENT mechanism from `sideEffectFree`: there is no
+  /// `package.json` `"sideEffects": false` flag; the bundler infers purity from the statements
+  /// themselves. The exported value is a NON-INLINABLE runtime binding (a plain `const = <literal>`
+  /// would be constant-folded and inlined, masking a dropped init), so a downstream reader that
+  /// observes a dropped init sees `undefined` → a NaN fold or a TypeError. Like `sideEffectFree`, an
+  /// inferred-pure module must be ESM, emit no events, and carry only value-only ESM dependencies
+  /// (a side-effect import would make its top level impure). The two flags are mutually exclusive.
+  /// A re-export barrel that STAR-forwards an inferred-pure definer, shared by importers that split
+  /// their reads across the barrel's exports, is the family-A conjunction — see
+  /// `.agents/docs/real-app-bug-families.md`.
+  readonly inferredPure?: true;
+  /// The numeric base an inferred-pure definer's synthesized value folds onto (`base + reads`),
+  /// returned by its `/* @__PURE__ */`-annotated local build function. Required when `inferredPure`
+  /// is set (a finite number); ignored otherwise. A distinct nonzero base per definer keeps folded
+  /// values meaningful and un-foldable to a shared literal.
+  readonly pureBase?: number;
 }
 
 export interface EsmModuleModel extends ModuleModelBase {

@@ -204,6 +204,7 @@ function validateModules(
 ): void {
   for (const [moduleIndex, module] of modules.entries()) {
     validateSideEffectFreeModule(module, moduleIndex, errors);
+    validateInferredPureModule(module, moduleIndex, errors);
 
     const localBindings = new Set<string>();
     // Each readable binding maps its local name to how it may be read: an ESM value-import (read
@@ -309,6 +310,46 @@ function validateSideEffectFreeModule(
   }
 }
 
+/// An inferred-pure definer (`inferredPure`) is judged side-effect-free by the bundler from its
+/// STATEMENTS (not a `package.json` flag): local pure functions, a `const` assigned from a
+/// `/* @__PURE__ */` call, exports of those bindings. Like a `sideEffects: false` module it must be
+/// ESM, emit no events (an event is a side effect that would make its top level impure), and carry
+/// only value-only ESM dependencies. It also carries a finite numeric `pureBase` (the build
+/// function's return value) and is MUTUALLY EXCLUSIVE with `sideEffectFree` — the two are distinct
+/// mechanisms. See the `inferredPure` doc in model.ts and `.agents/docs/real-app-bug-families.md`.
+function validateInferredPureModule(
+  module: ModuleModel,
+  moduleIndex: number,
+  errors: string[],
+): void {
+  if (module.inferredPure !== true) {
+    return;
+  }
+
+  const path = `modules[${moduleIndex}]`;
+  if (module.sideEffectFree === true) {
+    errors.push(`${path}: a module cannot be both inferredPure and sideEffectFree`);
+  }
+  if (module.format !== "esm") {
+    errors.push(`${path}: an inferred-pure module must be ESM, received ${module.format}`);
+  }
+  if (module.events.length > 0) {
+    errors.push(
+      `${path}: an inferred-pure module must not emit events; an event is a top-level side effect`,
+    );
+  }
+  if (module.pureBase === undefined || !Number.isFinite(module.pureBase)) {
+    errors.push(`${path}.pureBase: an inferred-pure module requires a finite numeric pureBase`);
+  }
+  for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
+    if (!SIDE_EFFECT_FREE_DEPENDENCY_KINDS.has(dependency.kind)) {
+      errors.push(
+        `${path}.dependencies[${dependencyIndex}]: an inferred-pure module may only carry value-only ESM dependencies, received ${dependency.kind}`,
+      );
+    }
+  }
+}
+
 function validateEventReads(
   event: ModuleModel["events"][number],
   eventPath: string,
@@ -316,6 +357,11 @@ function validateEventReads(
   errors: string[],
 ): void {
   if (event.reads === undefined || event.reads.length === 0) {
+    // A function-hidden read wraps the folded reads in a local function; it is meaningless with no
+    // reads to hide.
+    if (event.hiddenReadFn === true) {
+      errors.push(`${eventPath}: hiddenReadFn requires a non-empty reads array`);
+    }
     return;
   }
 
@@ -340,6 +386,13 @@ function validateEventReads(
         );
       }
       continue;
+    }
+    // A computed member access (`binding[k]`) is only meaningful on a namespace import; a value
+    // import or require binding is read directly, not by a runtime key.
+    if (read.computed === true) {
+      errors.push(
+        `${readPath}.computed: a computed member read is only valid on a namespace import binding, ${quote(read.binding)} is a ${binding.kind} binding`,
+      );
     }
     const expectedMember = binding.kind === "require" ? binding.member : undefined;
     if (read.member !== expectedMember) {

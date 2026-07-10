@@ -333,7 +333,17 @@ function renderModule(
 const PARTIAL_READ_SENTINEL = -1;
 
 function renderRead(read: ValueRead): string {
-  const access = read.member === undefined ? read.binding : `${read.binding}.${read.member}`;
+  let access: string;
+  if (read.member === undefined) {
+    access = read.binding;
+  } else if (read.computed === true) {
+    // `binding[<runtime key>]` — the member name is built at runtime (a split literal the bundler
+    // cannot fold to `binding.member`), so which export is used stays statically invisible. Same
+    // observed value as `binding.member` (validated to a namespace member).
+    access = `${read.binding}[${computedMemberKey(read.member)}]`;
+  } else {
+    access = `${read.binding}.${read.member}`;
+  }
   // A call read folds a hoisted function's return value; safe to call before the defining module's
   // body has run (function declarations initialize first), so it never hits TDZ across a cycle edge.
   const expression = read.call === true ? `${access}()` : access;
@@ -341,6 +351,18 @@ function renderRead(read: ValueRead): string {
   return read.guard === true
     ? `(Number.isFinite(${expression}) ? ${expression} : ${PARTIAL_READ_SENTINEL})`
     : expression;
+}
+
+/// A runtime-built key for a computed member read `binding[key]`. Splitting the member name into two
+/// non-empty string literals joined with `+` yields the exact member name at runtime while keeping
+/// the access statically unresolvable (the bundler cannot fold it to `binding.member`), so on-demand
+/// wrapping's per-export liveness cannot see which export is used. A single-character name repeats
+/// the empty-string base, which is still a runtime concatenation.
+function computedMemberKey(member: string): string {
+  const split = member.length > 1 ? Math.floor(member.length / 2) : member.length;
+  const head = serializeJavaScriptValue(member.slice(0, split));
+  const tail = serializeJavaScriptValue(member.slice(split));
+  return `${head} + ${tail}`;
 }
 
 /// A numeric fold: a constant base plus every read, as a JavaScript expression. Used for both
@@ -361,23 +383,41 @@ function moduleStateBase(module: ModuleModel): number {
 }
 
 function renderEvents(module: ModuleModel): string[] {
-  return module.events.map((event) => {
+  const lines: string[] = [];
+  let hiddenReadCounter = 0;
+  for (const event of module.events) {
     if (event.reads === undefined || event.reads.length === 0) {
       // No reads: keep the exact compact-JSON payload the oracle has always emitted.
-      return `globalThis.__orderEvent(${serializeJavaScriptValue({
-        module: event.module,
-        phase: event.phase,
-        value: event.value,
-      })});`;
+      lines.push(
+        `globalThis.__orderEvent(${serializeJavaScriptValue({
+          module: event.module,
+          phase: event.phase,
+          value: event.value,
+        })});`,
+      );
+      continue;
     }
     // Fold the read dependency values into the payload so cross-module data flow is observed.
     // Validation guarantees a finite numeric base whenever reads are present.
     const base = typeof event.value === "number" ? event.value : 0;
-    const valueExpression = renderFold(base, event.reads);
-    return `globalThis.__orderEvent({ module: ${serializeJavaScriptValue(
+    const eventHead = `globalThis.__orderEvent({ module: ${serializeJavaScriptValue(
       event.module,
-    )}, phase: ${serializeJavaScriptValue(event.phase)}, value: ${valueExpression} });`;
-  });
+    )}, phase: ${serializeJavaScriptValue(event.phase)}, value: `;
+    if (event.hiddenReadFn === true) {
+      // Hide the reads inside a local function called at top level: the observed value is identical
+      // to a direct read (`base + hidden()`), but the read is lexically inside a function body, so a
+      // bundler that determines init order from top-level uses alone can miss it (family B).
+      const functionName = `__hiddenRead${hiddenReadCounter}`;
+      hiddenReadCounter += 1;
+      lines.push(
+        `function ${functionName}() { return ${event.reads.map(renderRead).join(" + ")}; }`,
+        `${eventHead}${base} + ${functionName}() });`,
+      );
+      continue;
+    }
+    lines.push(`${eventHead}${renderFold(base, event.reads)} });`);
+  }
+  return lines;
 }
 
 function renderCjsExports(
@@ -415,6 +455,40 @@ function renderCjsNamedExport(
     : `${target}.${name} = ${value};`;
 }
 
+/// An inferred-pure definer synthesizes each demanded export as a NON-INLINABLE value: a
+/// `/* @__PURE__ */`-annotated call of a local build function (folding the module's own forward
+/// reads). The bundler infers the top level pure (so it may order-wrap or drop the module), yet the
+/// call form prevents constant-folding the value to a literal, so a dropped init surfaces as an
+/// `undefined` read downstream. No events are emitted (validated).
+function renderInferredPureExports(
+  module: ModuleModel,
+  requestedExports: readonly string[],
+  usedBindings: Set<string>,
+  readable: readonly ValueRead[],
+): string[] {
+  const base = module.pureBase ?? moduleStateBase(module);
+  const lines: string[] = [];
+  let index = 0;
+  for (const exportName of requestedExports) {
+    let buildName: string;
+    let valueName: string;
+    do {
+      buildName = `__pureBuild${index}`;
+      valueName = `__pureValue${index}`;
+      index += 1;
+    } while (usedBindings.has(buildName) || usedBindings.has(valueName));
+    usedBindings.add(buildName);
+    usedBindings.add(valueName);
+    const folded = [`/* @__PURE__ */ ${buildName}()`, ...readable.map(renderRead)].join(" + ");
+    lines.push(
+      `function ${buildName}() { return ${base}; }`,
+      `const ${valueName} = ${folded};`,
+      `export { ${valueName} as ${exportName} };`,
+    );
+  }
+  return lines;
+}
+
 function renderEsmExports(
   module: ModuleModel,
   requestedExports: readonly string[],
@@ -422,6 +496,10 @@ function renderEsmExports(
   readable: readonly ValueRead[],
   callableExports: ReadonlySet<string>,
 ): string[] {
+  if (module.inferredPure === true) {
+    return renderInferredPureExports(module, requestedExports, usedBindings, readable);
+  }
+
   const base = moduleStateBase(module);
   const lines: string[] = [];
   let candidateIndex = 0;

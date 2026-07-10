@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { GeneratedCase } from "./generate.ts";
 import { deriveCoverageTags } from "./generate.ts";
@@ -11,13 +12,38 @@ interface ShrinkOptions {
   readonly modelPath: string;
   readonly outPath: string;
   readonly rolldownPackage: string;
+  /// The wrap mode the shrink runs under. A family-A failure reproduces in BOTH modes, but a
+  /// wrap-all-ONLY failure (family B is the opposite, on-demand-only) will NOT reproduce under the
+  /// wrong mode, so the shrinker must replay it under the mode that fails. Defaults to on-demand;
+  /// `--wrap-all` selects wrap-all, and when the model lives inside a failure artifact the failing
+  /// mode is auto-read from the sibling `replay.json` unless an explicit flag overrides it.
+  readonly onDemandWrapping: boolean;
 }
 
 /// Greedy model shrinker. Keeps a candidate edit only when the program stays valid and the
 /// verdict keeps the same failure kind (and error identity for crashes). Kind-level
 /// preservation is for root-cause analysis; re-verify the mechanism before filing issues.
 async function main(): Promise<void> {
-  const options = parseArgs(process.argv.slice(2));
+  const parsed = parseArgs(process.argv.slice(2));
+  let onDemandWrapping = parsed.onDemandWrapping;
+  if (!parsed.wrapModeExplicit) {
+    const detected = await detectArtifactWrapMode(parsed.modelPath);
+    if (detected !== undefined) {
+      onDemandWrapping = detected;
+      process.stderr.write(
+        `Wrap mode from artifact replay.json: ${detected ? "on-demand" : "wrap-all"}\n`,
+      );
+    }
+  }
+  const options: ShrinkOptions = {
+    modelPath: parsed.modelPath,
+    outPath: parsed.outPath,
+    rolldownPackage: parsed.rolldownPackage,
+    onDemandWrapping,
+  };
+  process.stderr.write(
+    `Shrinking under ${onDemandWrapping ? "on-demand" : "wrap-all"} wrapping.\n`,
+  );
   const original = JSON.parse(await readFile(options.modelPath, "utf8")) as ProgramModel;
   const baseline = await run(original, options);
   if (baseline === undefined) {
@@ -236,6 +262,49 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
     delete (unflagged as { sideEffectFree?: true }).sideEffectFree;
     yield editModule(program, moduleIndex, unflagged);
   }
+  // Drop the inferred-pure flag from a definer (family A). Without it the value renders as a plain
+  // (inlinable) export, so if inference-based purity is load-bearing the failure vanishes and the
+  // greedy pass keeps the flag — proving the bug depends on the definer being inferred pure.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.inferredPure !== true) {
+      continue;
+    }
+    const plain = { ...module };
+    delete (plain as { inferredPure?: true }).inferredPure;
+    delete (plain as { pureBase?: number }).pureBase;
+    yield editModule(program, moduleIndex, plain);
+  }
+  // Drop a function-hidden read (family B) or a computed member access, revealing whether the
+  // statically-invisible read shape is load-bearing (the read becomes a plain top-level read).
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [eventIndex, event] of module.events.entries()) {
+      if (event.hiddenReadFn === true) {
+        const revealed = { ...event };
+        delete (revealed as { hiddenReadFn?: true }).hiddenReadFn;
+        const events = module.events.map((candidate, index) =>
+          index === eventIndex ? revealed : candidate,
+        );
+        yield editModule(program, moduleIndex, { ...module, events } as typeof module);
+      }
+      for (let readIndex = 0; readIndex < (event.reads?.length ?? 0); readIndex += 1) {
+        if (event.reads?.[readIndex]?.computed !== true) {
+          continue;
+        }
+        const reads = event.reads.map((read, index) => {
+          if (index !== readIndex) {
+            return read;
+          }
+          const plainRead = { ...read };
+          delete (plainRead as { computed?: true }).computed;
+          return plainRead;
+        });
+        const events = module.events.map((candidate, index) =>
+          index === eventIndex ? { ...event, reads } : candidate,
+        );
+        yield editModule(program, moduleIndex, { ...module, events } as typeof module);
+      }
+    }
+  }
 }
 
 /// Synchronous (non-dynamic) reachability from each module, for detecting cycle edges when shrinking.
@@ -422,7 +491,7 @@ async function run(program: ProgramModel, options: ShrinkOptions): Promise<strin
     caseSize: DEFAULT_CASE_SIZE,
     // The shrinker replays the loaded model as-is (size is cosmetic here), so the size mix is off.
     sizeMix: false,
-    onDemandWrapping: true,
+    onDemandWrapping: options.onDemandWrapping,
     rolldownPackage: options.rolldownPackage,
     outDir: "failures",
     continueOnFail: false,
@@ -449,10 +518,18 @@ function sameFailure(baseline: string, candidate: string): boolean {
   return true;
 }
 
-function parseArgs(argv: readonly string[]): ShrinkOptions {
+export function parseArgs(argv: readonly string[]): {
+  readonly modelPath: string;
+  readonly outPath: string;
+  readonly rolldownPackage: string;
+  readonly onDemandWrapping: boolean;
+  readonly wrapModeExplicit: boolean;
+} {
   let modelPath: string | undefined;
   let outPath = "shrunk-model.json";
   let rolldownPackage = process.env.ROLLDOWN_PACKAGE ?? "rolldown";
+  let onDemandWrapping = true;
+  let wrapModeExplicit = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--model") {
@@ -461,16 +538,46 @@ function parseArgs(argv: readonly string[]): ShrinkOptions {
       outPath = argv[++index] ?? outPath;
     } else if (argument === "--rolldown-package") {
       rolldownPackage = argv[++index] ?? rolldownPackage;
+    } else if (argument === "--wrap-all") {
+      onDemandWrapping = false;
+      wrapModeExplicit = true;
+    } else if (argument === "--on-demand") {
+      onDemandWrapping = true;
+      wrapModeExplicit = true;
     } else {
       throw new Error(`Unknown argument: ${String(argument)}`);
     }
   }
   if (modelPath === undefined) {
     throw new Error(
-      "Usage: vp exec node src/shrink.ts --model <model.json> [--out <path>] [--rolldown-package <specifier>]",
+      "Usage: vp exec node src/shrink.ts --model <model.json> [--out <path>] [--rolldown-package <specifier>] [--wrap-all|--on-demand]",
     );
   }
-  return { modelPath: resolve(modelPath), outPath: resolve(outPath), rolldownPackage };
+  return {
+    modelPath: resolve(modelPath),
+    outPath: resolve(outPath),
+    rolldownPackage,
+    onDemandWrapping,
+    wrapModeExplicit,
+  };
 }
 
-await main();
+/// When the model sits inside a failure artifact and no wrap flag was given, read the failing wrap
+/// mode from the sibling `replay.json` so a wrap-all-only failure replays under the mode that fails
+/// without the operator having to remember it. Best-effort: any read/parse issue keeps the default.
+export async function detectArtifactWrapMode(modelPath: string): Promise<boolean | undefined> {
+  try {
+    const replayText = await readFile(join(dirname(modelPath), "replay.json"), "utf8");
+    const replay = JSON.parse(replayText) as { options?: { onDemandWrapping?: unknown } };
+    const value = replay.options?.onDemandWrapping;
+    return typeof value === "boolean" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// Only run the shrinker when this module is executed directly, so tests can import `parseArgs` and
+// `detectArtifactWrapMode` without kicking off a shrink pass.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  await main();
+}

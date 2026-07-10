@@ -44,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 15", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(15);
+  test("uses artifact schema version 16", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(16);
   });
 
   test("parses and validates --format-regime", () => {

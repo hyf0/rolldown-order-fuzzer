@@ -284,6 +284,13 @@ interface RandomModuleDraft {
   readonly id: string;
   readonly format: ModuleFormat;
   readonly dependencies: DependencyOperation[];
+  /// A family-A inferred-pure definer draft: converted to a `ModuleModel` with `inferredPure: true`,
+  /// no events, and the `pureBase` below. See `injectPureDefinerConjunctions`.
+  inferredPure?: boolean;
+  pureBase?: number;
+  /// A family-A conjunction consumer that must become an entry (a barrel importer, so the barrel is
+  /// shared by >= 2 entry chunks — the "barrel not flattened" ingredient).
+  forceEntry?: boolean;
 }
 
 /// Random mixed graphs: a forward-edge DAG over ESM/CJS modules, an optional self-contained
@@ -605,10 +612,32 @@ function buildRandomMixed(
   // like — after barrels so an augmented value edge is never rerouted through one.
   augmentMultiEdgePairs(rng, drafts, registrations);
 
+  // Inject complete family-A conjunctions (inferred-pure definer star-re-exported through a shared
+  // barrel, split reads) — biased HARD so a double-digit fraction of random-mixed cases carry the
+  // real-app shape a green 25,000-case corpus missed. Self-contained clusters, appended last.
+  const conjunctionDrafts = injectPureDefinerConjunctions(rng, drafts, regime);
+  drafts.push(...conjunctionDrafts);
+  const conjunctionConsumerIds = new Set(
+    conjunctionDrafts.filter((draft) => draft.forceEntry === true).map((draft) => draft.id),
+  );
+
   const modules = drafts.map((draft): ModuleModel => {
     // A draft only ever accumulates dependency kinds legal for its format, so the filters below are
     // defensive; the reads are chosen from the same forward-only bindings the renderer will fold.
-    // A barrel (a pure re-exporter) emits no events — it only forwards a value onward.
+    // An inferred-pure definer emits NO events (an event would make its top level impure) and carries
+    // its build-function base; a barrel (a pure re-exporter) emits no events — it only forwards.
+    if (draft.inferredPure === true) {
+      return {
+        id: draft.id,
+        format: "esm",
+        dependencies: draft.dependencies.filter(
+          (dependency) => dependency.kind !== "cjs-require",
+        ) as EsmModuleModel["dependencies"],
+        events: [],
+        inferredPure: true,
+        pureBase: draft.pureBase ?? 1 + rng.integer(900_000),
+      };
+    }
     const isBarrel = draft.dependencies.some(isReexportDependency);
     const moduleEvents = isBarrel
       ? []
@@ -648,6 +677,13 @@ function buildRandomMixed(
       }
     }
   }
+  // A family-A conjunction's consumers MUST be entries — the barrel is then shared by >= 2 entry
+  // chunks, the "barrel not flattened" ingredient, and the split reads land in distinct entry chunks.
+  for (const [index, draft] of drafts.entries()) {
+    if (draft.forceEntry === true) {
+      entryIndices.add(index);
+    }
+  }
   const entries = [...entryIndices]
     .map((index) => drafts[index])
     .filter((draft) => draft !== undefined)
@@ -662,13 +698,25 @@ function buildRandomMixed(
   // observed side effect; only their folded value survives downstream. The rolls come last so the
   // rest of a given seed's structure is unchanged.
   const flagged = chooseSideEffectFreeModules(rng, modules, entries);
-  const finalModules =
+  const flaggedModules =
     flagged.size === 0
       ? modules
       : modules.map(
           (module): ModuleModel =>
             flagged.has(module.id) ? { ...module, events: [], sideEffectFree: true } : module,
         );
+
+  // Statically-invisible reads (family B): rewrite some folded reads to happen INSIDE a local
+  // function called at init, and some namespace member reads to a computed `ns[k]` access, biased
+  // toward ENTRIES reading cross-chunk targets. Applied LAST so the rest of a seed's structure
+  // (deps, entries, schedule, chunking, flagging) is byte-identical; only the events change. The
+  // family-A conjunction consumers are left untouched so that proven shape is unchanged.
+  const finalModules = applyStaticallyInvisibleReads(
+    rng,
+    flaggedModules,
+    new Set(entries.map((entry) => entry.moduleId)),
+    conjunctionConsumerIds,
+  );
 
   return {
     program: {
@@ -902,6 +950,120 @@ function insertBarrelChains(
   return barrels;
 }
 
+/// Inject complete family-A conjunctions (`.agents/docs/real-app-bug-families.md`): an inferred-pure
+/// definer whose value is STAR-re-exported through a barrel (so it is not flattened to a direct init
+/// edge and the definer's `init_*` is a barrel-forwarded target), the barrel shared by >= 2 importers
+/// that become entries, with SPLIT reads — one entry reads the pure definer's value through the
+/// namespace, another reads a side-effectful sibling's value. This is the real-app shape a green
+/// 25,000-case corpus missed; biasing HARD toward completing the whole conjunction (not sprinkling
+/// ingredients that rarely meet) is the point. Each cluster is self-contained (fresh ids, forward
+/// edges only), so acyclicity and every read invariant hold. The star re-export of the pure definer
+/// is essential: a NAMED re-export resolves the binding directly and the bug does not fire (verified
+/// against the frozen snapshot). Returns the appended drafts; the caller forces the consumers to be
+/// entries. Bounded by the module budget.
+function injectPureDefinerConjunctions(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  regime: FormatRegime,
+): RandomModuleDraft[] {
+  // The conjunction is an inherently ESM shape (star re-exports, namespace imports, an inferred-pure
+  // ESM definer), so it cannot appear in a pure-CJS case without breaking the single-format invariant.
+  const budget = MAX_RANDOM_MODULES - drafts.length;
+  // A cluster is 5 modules (definer, sibling, barrel, two consumers); a 2-hop barrel adds one.
+  if (regime === "pure-cjs" || budget < 5 || rng.integer(100) >= 22) {
+    return [];
+  }
+  const counter = drafts.length;
+  const definerId = `pdef${counter}`;
+  const siblingId = `psib${counter}`;
+  const outerBarrelId = `pbar${counter}`;
+  const consumerAId = `pconsA${counter}`;
+  const consumerBId = `pconsB${counter}`;
+  const definerName = `v${definerId}`;
+  const siblingName = `v${siblingId}`;
+
+  const definer: RandomModuleDraft = {
+    id: definerId,
+    format: "esm",
+    dependencies: [],
+    inferredPure: true,
+    pureBase: 1 + rng.integer(900_000),
+  };
+  const sibling: RandomModuleDraft = { id: siblingId, format: "esm", dependencies: [] };
+
+  // The barrel chain: 1 hop (outer forwards both), or 2 hops when budget allows (outer star-forwards
+  // an inner that forwards both) — both defeat flattening (verified). The definer is always reached
+  // through a STAR re-export; the sibling through a NAMED re-export on the same barrel.
+  const barrels: RandomModuleDraft[] = [];
+  if (budget >= 6 && rng.boolean()) {
+    const innerBarrelId = `pbarin${counter}`;
+    barrels.push({
+      id: innerBarrelId,
+      format: "esm",
+      dependencies: [
+        { kind: "esm-reexport-star", target: definerId },
+        {
+          kind: "esm-reexport-named",
+          target: siblingId,
+          sourceName: siblingName,
+          exportedName: siblingName,
+        },
+      ],
+    });
+    barrels.push({
+      id: outerBarrelId,
+      format: "esm",
+      dependencies: [{ kind: "esm-reexport-star", target: innerBarrelId }],
+    });
+  } else {
+    barrels.push({
+      id: outerBarrelId,
+      format: "esm",
+      dependencies: [
+        { kind: "esm-reexport-star", target: definerId },
+        {
+          kind: "esm-reexport-named",
+          target: siblingId,
+          sourceName: siblingName,
+          exportedName: siblingName,
+        },
+      ],
+    });
+  }
+
+  // Consumers namespace-import the barrel; the split read (definer vs sibling) is what makes on-demand
+  // omit the definer's init and fail od too (family A fails BOTH modes). `withValueReads` folds the
+  // single readable member into each consumer's events; a fresh namespace binding per consumer.
+  const consumerA: RandomModuleDraft = {
+    id: consumerAId,
+    format: "esm",
+    dependencies: [
+      {
+        kind: "esm-namespace-import",
+        target: outerBarrelId,
+        localName: `ns_${consumerAId}`,
+        readMembers: [definerName],
+      },
+    ],
+    forceEntry: true,
+  };
+  const consumerB: RandomModuleDraft = {
+    id: consumerBId,
+    format: "esm",
+    dependencies: [
+      {
+        kind: "esm-namespace-import",
+        target: outerBarrelId,
+        localName: `ns_${consumerBId}`,
+        readMembers: [siblingName],
+      },
+    ],
+    forceEntry: true,
+  };
+
+  return [definer, sibling, ...barrels, consumerA, consumerB];
+}
+
 /// Kinds an existing forward edge may hold and still be a candidate for multi-edge augmentation.
 /// Namespace imports, hoisted-function CALL imports (cycle edges only), and re-exports are excluded:
 /// they are not the plain static/lazy shape this pass builds, and the forward-only gate already keeps
@@ -1095,6 +1257,7 @@ function chooseSideEffectFreeModules(
   const eligible = modules.filter(
     (module) =>
       module.format === "esm" &&
+      module.inferredPure !== true &&
       module.dependencies.length === 0 &&
       !entryIds.has(module.id) &&
       valueReadTargets.has(module.id),
@@ -1458,6 +1621,32 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     tags.add("variation:side-effect-free-metadata");
   }
 
+  // Family A/B mechanisms (`.agents/docs/real-app-bug-families.md`). An inferred-pure definer (judged
+  // side-effect-free by STATEMENT inference, not a package flag); a function-hidden read (a folded
+  // read run inside a local function called at init); a computed namespace member access (`ns[k]`).
+  if (program.modules.some((module) => module.inferredPure === true)) {
+    tags.add("variation:inferred-pure-definer");
+  }
+  if (
+    program.modules.some((module) => module.events.some((event) => event.hiddenReadFn === true))
+  ) {
+    tags.add("variation:function-hidden-read");
+  }
+  if (
+    program.modules.some((module) =>
+      module.events.some((event) => (event.reads ?? []).some((read) => read.computed === true)),
+    )
+  ) {
+    tags.add("variation:computed-member-read");
+  }
+  // The COMPLETE family-A conjunction: an inferred-pure definer STAR-re-exported through a barrel
+  // that >= 2 modules namespace-import, at least one reading the definer's value via the star. Only a
+  // complete conjunction is tagged, so a campaign summary's count proves conjunction DENSITY (the
+  // failure mode that made the old corpus miss these bugs was ingredients that rarely all met).
+  if (hasCompletePureDefinerConjunction(program, modulesById)) {
+    tags.add("mechanism:pure-definer-behind-barrel");
+  }
+
   // Namespace imports (`import * as ns`) with a folded member read exercise the namespace-shape
   // interop surface; re-export (barrel) chains forward a value several hops from its definer.
   const dependencyKinds = new Set(
@@ -1534,6 +1723,86 @@ function hasNestedDynamicChain(
       !syncReachableFromEntries.has(module.id) &&
       module.dependencies.some((dependency) => dependency.kind === "esm-dynamic-import"),
   );
+}
+
+/// A COMPLETE family-A conjunction (`.agents/docs/real-app-bug-families.md`): an inferred-pure
+/// definer whose value is STAR-re-exported (transitively) through a barrel that at least two modules
+/// namespace-import, with at least one importer reading, via the star (a member the barrel does not
+/// provide by a NAMED re-export), the definer's value. The star re-export is essential — a named
+/// re-export resolves the binding directly and the bug does not fire. Purely structural, so it holds
+/// for generated, handwritten, and shrunk models alike (the barrel chain is forward-only acyclic).
+function hasCompletePureDefinerConjunction(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): boolean {
+  const pureDefinerIds = new Set(
+    program.modules.filter((module) => module.inferredPure === true).map((module) => module.id),
+  );
+  if (pureDefinerIds.size === 0) {
+    return false;
+  }
+  // Whether a module star-re-exports (transitively) a pure definer. Barrels are forward-only acyclic,
+  // so a visited set is enough to guard the recursion.
+  const memo = new Map<string, boolean>();
+  const starReachesPureDefiner = (id: string, visited: Set<string>): boolean => {
+    const cached = memo.get(id);
+    if (cached !== undefined) {
+      return cached;
+    }
+    if (visited.has(id)) {
+      return false;
+    }
+    visited.add(id);
+    let result = false;
+    for (const dependency of modulesById.get(id)?.dependencies ?? []) {
+      if (
+        dependency.kind === "esm-reexport-star" &&
+        (pureDefinerIds.has(dependency.target) ||
+          starReachesPureDefiner(dependency.target, visited))
+      ) {
+        result = true;
+        break;
+      }
+    }
+    visited.delete(id);
+    memo.set(id, result);
+    return result;
+  };
+
+  for (const barrel of program.modules) {
+    if (
+      !barrel.dependencies.some((dependency) => dependency.kind === "esm-reexport-star") ||
+      !starReachesPureDefiner(barrel.id, new Set())
+    ) {
+      continue;
+    }
+    const namedProvided = new Set(
+      barrel.dependencies.flatMap((dependency) =>
+        dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
+      ),
+    );
+    const namespaceImporters = program.modules.filter((module) =>
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-namespace-import" && dependency.target === barrel.id,
+      ),
+    );
+    if (namespaceImporters.length < 2) {
+      continue;
+    }
+    const readsDefinerViaStar = namespaceImporters.some((module) =>
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-namespace-import" &&
+          dependency.target === barrel.id &&
+          dependency.readMembers.some((member) => !namedProvided.has(member)),
+      ),
+    );
+    if (readsDefinerViaStar) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function deriveTemplateName(
@@ -1827,4 +2096,63 @@ function withValueReads(
     }
   }
   return enriched;
+}
+
+/// Rewrite some folded reads to be STATICALLY INVISIBLE (family B): a function-hidden read (the fold
+/// runs inside a local function called at init — `value: base + hidden()`) and/or a computed
+/// namespace member access (`ns[k]`, k built at runtime). Both keep the observed value identical
+/// (deterministic, synchronous), but move the read out of direct top-level view, so a bundler that
+/// decides init order from top-level uses alone can miss that the module needs its cross-chunk target
+/// initialized first. Biased toward ENTRIES (family B specifically needs the entry to hide a read of
+/// a cross-chunk order-wrapped target); the campaign's chunking variety supplies the cross-chunk,
+/// order-wrapped targets. Applied LAST, so it only decorates events and never perturbs graph
+/// structure. The family-A conjunction consumers are skipped so that proven shape stays intact.
+function applyStaticallyInvisibleReads(
+  rng: SeededRng,
+  modules: readonly ModuleModel[],
+  entryIds: ReadonlySet<string>,
+  skipIds: ReadonlySet<string>,
+): readonly ModuleModel[] {
+  return modules.map((module) => {
+    if (skipIds.has(module.id) || module.events.length === 0) {
+      return module;
+    }
+    const namespaceBindings = new Set(
+      module.dependencies.flatMap((dependency) =>
+        dependency.kind === "esm-namespace-import" ? [dependency.localName] : [],
+      ),
+    );
+    const isEntry = entryIds.has(module.id);
+    let changed = false;
+    const events = module.events.map((event): EventRecord => {
+      if (event.reads === undefined || event.reads.length === 0) {
+        return event;
+      }
+      let reads = event.reads;
+      // Computed member access on a minority of namespace member reads (the `ns[k]` shadcn shape).
+      if (namespaceBindings.size > 0) {
+        const rewritten = reads.map(
+          (read): ValueRead =>
+            read.member !== undefined &&
+            read.computed !== true &&
+            namespaceBindings.has(read.binding) &&
+            rng.integer(3) === 0
+              ? { ...read, computed: true }
+              : read,
+        );
+        if (rewritten.some((read, index) => read !== reads[index])) {
+          reads = rewritten;
+          changed = true;
+        }
+      }
+      // Function-hidden fold: entries hide about half their folded events, others about a quarter.
+      const hide = isEntry ? rng.boolean() : rng.integer(4) === 0;
+      if (hide) {
+        changed = true;
+        return { ...event, reads, hiddenReadFn: true };
+      }
+      return reads === event.reads ? event : { ...event, reads };
+    });
+    return changed ? ({ ...module, events } as ModuleModel) : module;
+  });
 }

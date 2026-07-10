@@ -37,11 +37,13 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
+// 16: wave 7 — inferred-pure definers, function-hidden and computed-member reads in the model (the
+// two real-app bug families A/B), and the shrinker's failing wrap-mode carried in the artifact.
 // 15: wave 6 — organic (size/share-driven) chunk groups in the model, the raised size ceiling with a
 // per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 15 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 16 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
