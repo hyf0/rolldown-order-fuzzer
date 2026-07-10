@@ -679,20 +679,30 @@ function signatureKind(signature: string): string {
 /// NUMERIC-generated forms are normalized: a non-numeric chunk symbol (`init_alpha` vs `init_beta`) is
 /// left literal, so a shrink can never swap one named root cause for another and still claim an exact
 /// match — the over-normalization that made every `init_*` compare equal.
+///
+/// The canonical index is keyed by the CAPTURED NUMERIC MODULE IDENTITY (the shared `NNNN`), NOT the
+/// whole token, so the three chunk-internal forms Rolldown derives from ONE `module-NNNN` basename
+/// (`module_NNNN`, `init_module_NNNN`, `require_module_NNNN`) — which all name the SAME module — collapse
+/// to the SAME index while keeping their prefix distinct. Keying by the whole token instead let a
+/// two-module failure (`init_module_0001` + `module_0002`) compare equal to a one-module failure
+/// (`init_module_0002` + `module_0002`), because each token became a fresh index by first appearance —
+/// the cross-prefix soundness hole this fixes.
 function normalizeSignature(signature: string): string {
   const withoutPaths = signature.replaceAll(/(?:\/[^\s"':]+)+\/(module-\d+\.[mc]js)/g, "$1");
   let counter = 0;
-  const canonicalByToken = new Map<string, string>();
-  return withoutPaths.replaceAll(/(?:init_module_|require_module_|module_)\d+/g, (token) => {
-    const existing = canonicalByToken.get(token);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const canonical = `${token.replace(/\d+$/, "")}N${counter}`;
-    counter += 1;
-    canonicalByToken.set(token, canonical);
-    return canonical;
-  });
+  const canonicalByNumber = new Map<string, string>();
+  return withoutPaths.replaceAll(
+    /(init_module_|require_module_|module_)(\d+)/g,
+    (_match, prefix: string, digits: string) => {
+      let index = canonicalByNumber.get(digits);
+      if (index === undefined) {
+        index = `N${counter}`;
+        counter += 1;
+        canonicalByNumber.set(digits, index);
+      }
+      return `${prefix}${index}`;
+    },
+  );
 }
 
 function normalizeCrashIdentity(signature: string): string {

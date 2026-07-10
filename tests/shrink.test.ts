@@ -275,6 +275,24 @@ describe("shrink exact-equivalence normalizer (finding D)", () => {
     // First-appearance mapping: the two-module signature maps to N0/N1, the one-module to N0/N0.
     expect(sameFailure(twoModules, oneModule)).toBe(false);
   });
+
+  test("a CROSS-PREFIX two-module failure does not collapse to a one-module one (finding 4)", () => {
+    // The reviewer's exact repro: `init_module_0001` + `module_0002` name TWO modules (0001 and 0002);
+    // `init_module_0002` + `module_0002` name ONE module (0002) twice. The old normalizer keyed by the
+    // whole token, so both mapped to init_module_N0 + module_N1 and compared EQUAL. Keying by the shared
+    // numeric identity (preserving init_/require_/plain prefix) keeps them distinct: N0/N1 vs N0/N0.
+    const twoModules = "events-reordered:init_module_0001:module_0002";
+    const oneModule = "events-reordered:init_module_0002:module_0002";
+    expect(sameFailure(twoModules, oneModule)).toBe(false);
+    // Each still compares equal to itself, and renumbering the SAME shared identity stays equal.
+    expect(sameFailure(twoModules, twoModules)).toBe(true);
+    expect(
+      sameFailure(
+        "events-reordered:init_module_0001:module_0001",
+        "events-reordered:init_module_0007:module_0007",
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("shrink candidate fixes (finding E)", () => {
