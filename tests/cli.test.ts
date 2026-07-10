@@ -291,6 +291,34 @@ describe("runCampaign", () => {
     expect(summary).toEqual({ casesRun: 1, passed: 0, failed: 1, exitCode: 1 });
   });
 
+  test("classifies a MISSING_EXPORT link failure as a first-class build-failure:link catch", () => {
+    // A Rolldown link-time resolution failure (the #10044 family): the linker cannot resolve an export
+    // a retained consumer references. It classifies to a distinct `build-failure:link` verdict carrying
+    // the missing (export, module) identity — NOT a generic build error and NOT a runtime crash — so a
+    // link-time regression deduplicates to one signature and reads as a real, first-class catch.
+    const bundleOutcome = {
+      status: "not-run",
+      reason: "adapter-failure",
+      adapterFailure: {
+        status: "build-error",
+        stage: "build",
+        packageSpecifier: "rolldown",
+        error: {
+          name: "Error",
+          message:
+            '[MISSING_EXPORT] "RESET" is not exported by "node_modules/@griffel/core/src/index.js".',
+        },
+      },
+    } as const satisfies BundleNotRunOutcome;
+
+    const verdict = classifyCampaignVerdict(ok([event("entry", 1)]), bundleOutcome);
+    expect(verdict).toEqual({
+      kind: "build-failure",
+      reason: "link",
+      signature: 'build-failure:link:["RESET","node_modules/@griffel/core/src/index.js"]',
+    });
+  });
+
   test("keeps source invalidity ahead of an adapter failure", () => {
     const bundleOutcome = {
       status: "not-run",

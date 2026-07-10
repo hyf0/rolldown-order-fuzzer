@@ -1,9 +1,27 @@
-# Build-panic verdict
+# Build-failure verdicts (panic and link)
 
-A reproducible Rolldown build panic on a Node-legal program is a real bug, not a harness problem
-(rolldown #9038 SIGILL/SIGSEGV, #9651, #4447, #8216). The oracle reclassifies it as a distinct
-**failing** verdict instead of an invalid-harness discard, while keeping genuine harness
-misconfiguration (package load errors, timeouts, spawn failures) as harness errors.
+A reproducible Rolldown BUILD failure on a Node-legal program is a real bug, not a harness problem. The
+oracle reclassifies it as a distinct **failing** verdict family (`build-failure:*`) instead of an
+invalid-harness discard, while keeping genuine harness misconfiguration (package load errors, timeouts,
+spawn failures) as harness errors. Two build-failure shapes are first-class catches:
+
+- **panic** — a Rolldown crash / Rust panic (below). rolldown #9038 SIGILL/SIGSEGV, #9651, #4447, #8216.
+- **link** — a link-time resolution failure (`MISSING_EXPORT`: an export a retained consumer references
+  that the linker cannot resolve — the #10044 family). W14a added it as `build-failure:link`, carrying
+  the missing `(export, module)` identity so a link-time regression deduplicates to ONE signature and
+  reads as a first-class catch, distinct from a runtime `bundle-only-crash` (a bad build that runs and
+  throws) and from a generic build error.
+
+  **Invariant — a GENERATED model never produces a `build-failure:link`.** The plan's supply-status
+  validation (`validateExportDemand` over the `ExportDemandPlan`) rejects any `unsupplied` or `ambiguous`
+  demand, and `renderProgram` validates BEFORE rendering and throws on an invalid model — so an
+  unsupplied model can never reach Rolldown with an unresolvable export. A crafted test
+  (`model.test.ts`: "rejects a default import through a star-only barrel") pins this: the unsupplied
+  model is rejected and `renderProgram` throws `Cannot render invalid program`. A `build-failure:link` is
+  therefore ALWAYS a genuine Rolldown linker bug on a model the fuzzer proved fully supplied, never the
+  fuzzer's own model defect. `detectLinkFailure` (`program-run.ts`) parses the missing (export, module)
+  from the `"<name>" is not exported by "<module>"` phrase (stable across Rolldown versions), normalizing
+  the module path.
 
 ## Two panic shapes
 

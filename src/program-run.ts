@@ -70,7 +70,14 @@ export type CampaignBundleOutcome = ExecutionOutcome | BundleNotRunOutcome;
 
 export interface BuildFailureVerdict {
   readonly kind: "build-failure";
-  readonly reason: FailedRolldownAdapterResult["stage"] | "panic";
+  /// The build-failure family. `panic` is a Rolldown crash; `link` is a link-time resolution failure
+  /// (a `MISSING_EXPORT` — an export a retained consumer references that the linker cannot resolve, the
+  /// #10044 family), carrying the missing (export, module) identity so a link-time regression is a
+  /// first-class, deduplicated catch distinct from a runtime `bundle-only-crash`; the rest are the raw
+  /// adapter stage. A GENERATED model never produces a `link` failure — the plan's supply-status
+  /// validation rejects any unsupplied/ambiguous demand BEFORE build — so a `build-failure:link` is
+  /// always a genuine Rolldown linker bug on a model the fuzzer proved is fully supplied.
+  readonly reason: FailedRolldownAdapterResult["stage"] | "panic" | "link";
   readonly signature: string;
 }
 
@@ -366,6 +373,19 @@ function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailure
       ])}`,
     };
   }
+  // A link-time resolution failure (MISSING_EXPORT) is a FIRST-CLASS catch distinct from a runtime
+  // crash: the linker cannot resolve an export a retained consumer references (#10044 family). Its
+  // identity is the missing (export, module) pair, not the volatile full message, so a link-time
+  // regression deduplicates to one signature. Only fires on a genuine linker bug — the plan's
+  // supply-status validation rejects any unsupplied model before it ever reaches the build.
+  const link = detectLinkFailure(failure.error.name, failure.error.message);
+  if (link !== undefined) {
+    return {
+      kind: "build-failure",
+      reason: "link",
+      signature: `build-failure:link:${JSON.stringify([link.exportName, link.module])}`,
+    };
+  }
   return {
     kind: "build-failure",
     reason: failure.stage,
@@ -374,6 +394,27 @@ function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailure
       normalizeBuildFailureMessage(failure.error.message),
     ])}`,
   };
+}
+
+/// A Rolldown link-time MISSING_EXPORT failure: `[MISSING_EXPORT] "<name>" is not exported by
+/// "<module>"`. Returns the missing (export name, normalized module) pair, or `undefined` when the
+/// build error is not a link failure. Matches the `is not exported by` phrase (the stable core of the
+/// message across Rolldown versions), and also accepts a bare `MISSING_EXPORT` error name/code.
+const MISSING_EXPORT_PATTERN = /"([^"]+)"\s+is not exported by\s+"([^"]+)"/;
+export function detectLinkFailure(
+  name: string,
+  message: string,
+): { readonly exportName: string; readonly module: string } | undefined {
+  const match = MISSING_EXPORT_PATTERN.exec(message);
+  if (match !== null && match[1] !== undefined && match[2] !== undefined) {
+    return { exportName: match[1], module: normalizeBuildFailureMessage(match[2]) };
+  }
+  // A message that only carries the code, no quoted phrase — still a link failure, but without a
+  // parseable identity; fall back to the normalized message so it is at least classified as `link`.
+  if (name.includes("MISSING_EXPORT") || message.includes("MISSING_EXPORT")) {
+    return { exportName: "<unknown>", module: normalizeBuildFailureMessage(message) };
+  }
+  return undefined;
 }
 
 /// Rewrite the volatile absolute paths in a Rolldown build-failure message to stable placeholders, so a

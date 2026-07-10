@@ -4,6 +4,7 @@ import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { BuildConfig, ProgramModel } from "../src/model.ts";
 import type { ModuleModel } from "../src/model.ts";
 import { buildConfigOf, DEFAULT_BUILD_CONFIG, programChunking } from "../src/model.ts";
+import { renderProgram } from "../src/render.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import { sideEffectFreeTransitiveProgram } from "./fixtures.ts";
 
@@ -1572,6 +1573,11 @@ describe("validateProgramModel", () => {
       expect(
         validateProgramModel(analyzeProgram(program)).some((error) => error.includes("unsupplied")),
       ).toBe(true);
+      // Invariant behind build-failure:link — an unsupplied model is rejected BEFORE build: renderProgram
+      // validates first and throws, so the plan's supply-status validation guarantees a generated model
+      // can never reach Rolldown with an unresolvable export (a model-caused link failure). A
+      // build-failure:link is therefore always a genuine Rolldown linker bug, never the fuzzer's own model.
+      expect(() => renderProgram(analyzeProgram(program))).toThrow(/Cannot render invalid program/);
     });
 
     test("rejects a name provided by two star re-exports (ambiguous)", () => {
