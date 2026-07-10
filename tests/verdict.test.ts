@@ -13,6 +13,29 @@ describe("classifyVerdict", () => {
     });
   });
 
+  test("catches a premature execution that a flat event stream judged equal (schedule markers)", () => {
+    // The oracle hole: source runs A in schedule step 0 and B in step 1; a premature bundle runs
+    // BOTH in step 0. Stripped to module events alone, both are [A, B] — judged EQUAL — yet module B
+    // ran a whole schedule step early. The runner-emitted schedule markers make each step boundary
+    // observable, so B landing on the wrong side of the step-0 marker is now caught.
+    const source = ok([event("a", 1), marker(0, "entry"), event("b", 2), marker(1, "dynamic")]);
+    const bundle = ok([event("a", 1), event("b", 2), marker(0, "entry"), marker(1, "dynamic")]);
+
+    // Stripping the markers leaves identical module streams, so the flat oracle would still PASS.
+    const stripMarkers = (outcome: ExecutionOutcome): ExecutionOutcome =>
+      ok(outcome.events.filter((candidate) => !("marker" in candidate)));
+    expect(classifyVerdict(stripMarkers(source), stripMarkers(bundle))).toEqual({
+      kind: "pass",
+      signature: "pass",
+    });
+
+    // With the markers present, the phase difference surfaces as a reordering in a readable signature.
+    const verdict = classifyVerdict(source, bundle);
+    expect(verdict.kind).toBe("mismatch");
+    expect(verdict).toMatchObject({ reason: "events-reordered" });
+    expect(verdict.signature).toContain('["@schedule",0,"entry"]');
+  });
+
   test("classifies a source timeout as an invalid oracle before inspecting the bundle", () => {
     expect(classifyVerdict(timeout(), error({ name: "Error", message: "bundle failed" }))).toEqual({
       kind: "invalid-source",
@@ -294,6 +317,15 @@ function event(module: string, value: string | number): ExecutionEvent {
     module,
     phase: "evaluate",
     value,
+  };
+}
+
+function marker(schedule: number, kind: "entry" | "dynamic"): ExecutionEvent {
+  return {
+    version: 1,
+    marker: "schedule",
+    schedule,
+    kind,
   };
 }
 

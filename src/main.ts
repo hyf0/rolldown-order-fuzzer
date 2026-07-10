@@ -35,7 +35,9 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 13 as const;
+// 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
+// per (importer, target) pair in the model.
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 14 as const;
 
 export interface CampaignOptions {
   readonly seed: number;

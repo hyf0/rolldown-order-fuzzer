@@ -5,9 +5,11 @@ import { readFile, realpath, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { ScheduleOperation } from "./model.ts";
 import {
   collectExecutionEvent,
   EXECUTION_PROTOCOL_VERSION,
+  makeScheduleMarker,
   MAX_EXECUTION_EVENTS,
   parseExecutionManifest,
   type ExecutionEvent,
@@ -46,7 +48,12 @@ export async function runExecutionManifest(manifestPath: string): Promise<Execut
   }
 
   try {
-    await executeSchedule(manifest, manifestPath, dynamicImports);
+    await executeSchedule(manifest, manifestPath, dynamicImports, (index, operation) => {
+      // A runner-emitted phase marker after each settled operation. It bypasses the module-event cap
+      // (schedules carry only a handful of operations) and, being emitted symmetrically by this same
+      // runner for source and bundle, makes the stream phase-aware without any false-positive surface.
+      events.push(makeScheduleMarker(index, operation));
+    });
     return {
       version: EXECUTION_PROTOCOL_VERSION,
       status: "ok",
@@ -93,12 +100,13 @@ async function executeSchedule(
   manifest: ExecutionManifest,
   manifestPath: string,
   dynamicImports: Record<string, () => Promise<unknown>>,
+  emitScheduleMarker: (index: number, operation: ScheduleOperation) => void,
 ): Promise<void> {
   const manifestDirectory = dirname(manifestPath);
   const entries = new Map(manifest.entries.map((entry) => [entry.name, entry]));
   const requireFromManifest = createRequire(pathToFileURL(manifestPath));
 
-  for (const operation of manifest.operations) {
+  for (const [index, operation] of manifest.operations.entries()) {
     if (operation.kind === "trigger-dynamic-import") {
       const trigger = dynamicImports[operation.registration];
       if (trigger === undefined) {
@@ -107,6 +115,8 @@ async function executeSchedule(
         );
       }
       await trigger();
+      // Mark the boundary only once the dynamic trigger has fully settled.
+      emitScheduleMarker(index, operation);
       continue;
     }
 
@@ -127,6 +137,8 @@ async function executeSchedule(
       }
       requireFromManifest(entryPath);
     }
+    // Mark the boundary only once the entry has fully evaluated its synchronous subtree.
+    emitScheduleMarker(index, operation);
   }
 }
 

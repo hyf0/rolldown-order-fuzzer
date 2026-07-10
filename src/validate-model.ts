@@ -208,6 +208,9 @@ function validateModules(
     // Each readable binding maps its local name to how it may be read: an ESM value-import (read
     // directly), a CJS readable require (one member), or an ESM namespace import (a member set).
     const readableBindings = new Map<string, ReadableBinding>();
+    // Per target, the pair "slots" already used from this module. A (importer, target) pair may carry
+    // several DISTINCT dependency kinds (the wave-5 mixed pairs), but at most one edge per slot.
+    const pairSlots = new Map<string, Set<string>>();
 
     for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
       const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
@@ -215,6 +218,7 @@ function validateModules(
 
       validateDependencySyntax(module, operation, path, errors);
       validateDependencyBinding(operation, path, localBindings, readableBindings, errors);
+      validatePairSlot(operation, path, pairSlots, errors);
 
       const target = modulesById.get(operation.target);
       if (target === undefined) {
@@ -502,6 +506,48 @@ function validateLocalBinding(
   }
   localBindings.add(name);
   return true;
+}
+
+/// The per-pair "slot" a dependency occupies, or `undefined` when it may repeat for one pair. This
+/// permits the wave-5 mixed pairs (several DISTINCT kinds to one target — `{side-effect + value}`,
+/// `{value + dynamic}`, `{side-effect + dynamic}`, `{value + side-effect + dynamic}` for ESM
+/// importers, `{require + dynamic}` for CJS) while rejecting the two same-kind duplicates that are
+/// genuinely degenerate: a second side-effect import (`import "./t"` twice is identical, carrying no
+/// new binding) and a second dynamic import (at most one `__orderDynamicImports` registration per
+/// pair). Value, namespace, and readable-require imports may REPEAT for one pair — two named imports
+/// from a module (`import { a } from "./t"; import { b } from "./t"`) are common, sound code, and
+/// each binds a distinct local name already checked for collisions. Re-exports may repeat too (a
+/// barrel forwards several names from one target).
+function dependencyPairSlot(kind: DependencyOperation["kind"]): string | undefined {
+  switch (kind) {
+    case "esm-side-effect-import":
+      return "side-effect";
+    case "esm-dynamic-import":
+      return "dynamic";
+    default:
+      return undefined;
+  }
+}
+
+function validatePairSlot(
+  dependency: DependencyOperation,
+  path: string,
+  pairSlots: Map<string, Set<string>>,
+  errors: string[],
+): void {
+  const slot = dependencyPairSlot(dependency.kind);
+  if (slot === undefined) {
+    return;
+  }
+  const slots = pairSlots.get(dependency.target) ?? new Set<string>();
+  if (slots.has(slot)) {
+    errors.push(
+      `${path}: a (importer, target) pair to ${quote(dependency.target)} may carry at most one ${slot} dependency`,
+    );
+    return;
+  }
+  slots.add(slot);
+  pairSlots.set(dependency.target, slots);
 }
 
 function validateDependencySyntax(

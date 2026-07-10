@@ -8,12 +8,21 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
-import type { ExecutionManifest, ExecutionOutcome } from "../src/protocol.ts";
+import type { ExecutionEvent, ExecutionManifest, ExecutionOutcome } from "../src/protocol.ts";
 import { renderProgram, type RenderedProgram } from "../src/render.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import { classifyVerdict } from "../src/verdict.ts";
 
 const EXECUTION_TEST_TIMEOUT_MS = 10_000;
+
+// The runner appends a phase marker after each settled schedule operation. Both entry-evaluation
+// kinds collapse to "entry"; a dynamic trigger is "dynamic".
+function entryMarker(schedule: number): ExecutionEvent {
+  return { version: 1, marker: "schedule", schedule, kind: "entry" };
+}
+function dynamicMarker(schedule: number): ExecutionEvent {
+  return { version: 1, marker: "schedule", schedule, kind: "dynamic" };
+}
 
 describe("executeManifest", () => {
   test("runs an ESM source schedule in a fresh Node child process", async () => {
@@ -55,6 +64,7 @@ describe("executeManifest", () => {
             phase: "evaluate",
             value: "ready",
           },
+          entryMarker(0),
         ],
       });
     });
@@ -99,7 +109,9 @@ describe("executeManifest", () => {
         status: "ok",
         events: [
           { version: 1, module: "entry", phase: "evaluate", value: "entry" },
+          entryMarker(0),
           { version: 1, module: "lazy", phase: "evaluate", value: "lazy" },
+          dynamicMarker(1),
         ],
       });
     });
@@ -124,7 +136,7 @@ describe("executeManifest", () => {
         executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
       ).resolves.toMatchObject({
         status: "ok",
-        events: [{ version: 1, module: "entry", phase: "evaluate", value: "cjs" }],
+        events: [{ version: 1, module: "entry", phase: "evaluate", value: "cjs" }, entryMarker(0)],
       });
     });
   });
@@ -152,7 +164,7 @@ describe("executeManifest", () => {
       expect(first).toEqual(second);
       expect(first).toMatchObject({
         status: "ok",
-        events: [{ version: 1, module: "entry", phase: "evaluate", value: 1 }],
+        events: [{ version: 1, module: "entry", phase: "evaluate", value: 1 }, entryMarker(0)],
       });
     });
   });
@@ -342,7 +354,8 @@ describe("executeManifest", () => {
     expect(bundle).toEqual({
       version: 1,
       status: "error",
-      events: [],
+      // The entry import settled and marked its boundary before the missing trigger threw.
+      events: [entryMarker(0)],
       error: {
         name: "Error",
         message: 'Missing dynamic import registration "load"',
@@ -483,7 +496,8 @@ describe("executeManifest", () => {
     expect(outcome).toEqual({
       version: 1,
       status: "error",
-      events: [],
+      // The entry import settled and marked its boundary before the dynamic trigger rejected.
+      events: [entryMarker(0)],
       error: {
         name: "StatefulError",
         message: "stateful message",
@@ -505,7 +519,8 @@ describe("executeManifest", () => {
     expect(outcome).toEqual({
       version: 1,
       status: "error",
-      events: [],
+      // The entry import settled and marked its boundary before the dynamic trigger rejected.
+      events: [entryMarker(0)],
       error: {
         name: "Error",
         message: "<unreadable error message>",
@@ -798,9 +813,10 @@ async function expectRoundTrip(
 ): Promise<void> {
   expect(validateProgramModel(program)).toEqual([]);
   await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    // Every shape here runs a single `import-entry`, so the runner appends one entry marker.
     await expect(
       executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
-    ).resolves.toEqual({ version: 1, status: "ok", events });
+    ).resolves.toEqual({ version: 1, status: "ok", events: [...events, entryMarker(0)] });
   });
 }
 

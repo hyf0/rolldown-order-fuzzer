@@ -254,6 +254,54 @@ describe("generateCase", () => {
     expect(density).toBeLessThan(0.5);
   });
 
+  test("random-mixed reaches multi-edge-pair coverage densely with valid programs", () => {
+    let randomTotal = 0;
+    let multiEdge = 0;
+    let sawStaticPlusDynamic = false;
+    for (let seed = 0; seed < 3_000; seed += 1) {
+      const generated = generateCase(seed, 8);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      randomTotal += 1;
+      if (!generated.coverageTags.includes("variation:multi-edge-pair")) {
+        continue;
+      }
+      multiEdge += 1;
+      expect(validateProgramModel(generated.program), `seed ${seed}`).toEqual([]);
+      for (const module of generated.program.modules) {
+        const kindsByTarget = new Map<string, string[]>();
+        for (const dependency of module.dependencies) {
+          const kinds = kindsByTarget.get(dependency.target) ?? [];
+          kinds.push(dependency.kind);
+          kindsByTarget.set(dependency.target, kinds);
+        }
+        for (const kinds of kindsByTarget.values()) {
+          // The validator's per-pair rule: at most one side-effect and one dynamic edge per pair.
+          expect(
+            kinds.filter((kind) => kind === "esm-side-effect-import").length,
+          ).toBeLessThanOrEqual(1);
+          expect(kinds.filter((kind) => kind === "esm-dynamic-import").length).toBeLessThanOrEqual(
+            1,
+          );
+          if (
+            kinds.length >= 2 &&
+            kinds.includes("esm-dynamic-import") &&
+            kinds.some((kind) => kind !== "esm-dynamic-import")
+          ) {
+            // The key order surface: a dynamic import of an already-statically-loaded module.
+            sawStaticPlusDynamic = true;
+          }
+        }
+      }
+    }
+    expect(randomTotal).toBeGreaterThan(0);
+    // Multi-kind pairs are dense across a campaign, not incidental.
+    expect(multiEdge / randomTotal).toBeGreaterThan(0.15);
+    // The static-plus-dynamic surface (dynamic import of an already-loaded module) actually occurs.
+    expect(sawStaticPlusDynamic).toBe(true);
+  });
+
   test("cycle-closing value reads are hoisted calls (ESM) or guarded (CJS), never plain", () => {
     let callEdges = 0;
     let guardEdges = 0;

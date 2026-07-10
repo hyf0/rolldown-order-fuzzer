@@ -224,6 +224,9 @@ function localExportsFor(module: ModuleModel, requested: readonly string[]): rea
   return requested.filter((name) => !namedProvided.has(name) && !hasStar);
 }
 
+/// Dependencies render in array order, one statement each, so a multi-kind pair (the same target
+/// imported statically AND dynamically, say) emits several legal statements for one specifier in a
+/// deterministic order — no dedup by specifier.
 function renderModule(
   module: ModuleModel,
   modulePaths: ReadonlyMap<string, string>,

@@ -1,3 +1,4 @@
+import { isScheduleMarker } from "./protocol.ts";
 import type { ExecutionEvent, ExecutionOutcome, NormalizedError } from "./protocol.ts";
 
 export interface PassingVerdict {
@@ -344,6 +345,12 @@ function serializeEvents(events: readonly ExecutionEvent[]): string {
 function serializeEvent(event: ExecutionEvent | undefined): string {
   if (event === undefined) {
     return "null";
+  }
+  // A schedule marker serializes to a readable, distinct tuple so a module event that ran in the
+  // wrong schedule step lands on the wrong side of a marker and the comparison (and signature) sees
+  // it. The `@` prefix keeps it visually apart from module ids in a failure signature.
+  if (isScheduleMarker(event)) {
+    return JSON.stringify(["@schedule", event.schedule, event.kind]);
   }
   return JSON.stringify([event.module, event.phase, event.value]);
 }

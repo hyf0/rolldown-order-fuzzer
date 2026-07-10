@@ -124,6 +124,15 @@ export type EsmDependencyOperation =
 
 export type DependencyOperation = EsmDependencyOperation | CjsRequireOperation;
 
+/// A module's `dependencies` may hold MORE THAN ONE edge to the same target — the multi-kind pairs
+/// real code constantly writes: `import { a } from "./x"` AND `import("./x")` (static + lazy), a
+/// side-effect plus a value import of one module, or `require` + `import()`. `validate-model.ts`
+/// permits distinct kinds per (importer, target) pair, rejecting only a second side-effect import or
+/// a second dynamic registration for one pair (both degenerate); value, namespace, readable-require,
+/// and re-export edges may repeat, so `import { a } from "./x"; import { b } from "./x"` and a barrel
+/// forwarding several names stay expressible. Value edges still obey the forward-only / TDZ / cycle
+/// rules. See `.agents/docs/multi-edge-pairs.md`.
+
 interface ModuleModelBase {
   readonly id: string;
   readonly events: readonly EventRecord[];

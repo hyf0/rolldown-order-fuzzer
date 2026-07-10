@@ -20,7 +20,12 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { executeManifest } from "../src/execute.ts";
 import { generateCase } from "../src/generate.ts";
-import type { ProgramModel } from "../src/model.ts";
+import type { EventValue, ProgramModel } from "../src/model.ts";
+import {
+  isScheduleMarker,
+  type ExecutionEvent,
+  type ModuleExecutionEvent,
+} from "../src/protocol.ts";
 import {
   inspectRolldownRuntimeIdentity,
   buildChildExecArgv,
@@ -375,7 +380,7 @@ describe("withRolldownBuild", () => {
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        sourceEvents: sourceOutcome.events.map((e) => [e.module, e.value]),
+        sourceEvents: moduleEventPairs(sourceOutcome.events),
         packageJson,
       };
     });
@@ -434,7 +439,7 @@ describe("withRolldownBuild", () => {
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+        events: moduleEventPairs(sourceOutcome.events),
       };
     });
 
@@ -445,6 +450,77 @@ describe("withRolldownBuild", () => {
         ["entry", 41],
       ],
     });
+  });
+
+  test("builds a static+dynamic multi-edge target grouped with its entry (facade-sensitive shape)", async () => {
+    // The target is imported statically (value) AND dynamically by the same entry, and shares a
+    // manual chunk group with that entry — the shape that stresses the entry-facade machinery (the
+    // dynamic import must reference the target in the entry chunk without re-running it or firing
+    // foreign triggers). The SOURCE run is the oracle; the differential against a FIXED rolldown is
+    // the campaign's job. This test locks expressibility, rendering, the adapter's facade mapping,
+    // and source soundness — all version-independent — so it does not assert the execution verdict
+    // kind (rolldown 1.1.4 mis-orders this shape; the marker-aware oracle is what catches that).
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "target", importedName: "v", localName: "tv" },
+            { kind: "esm-dynamic-import", target: "target", registration: "load-target" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "tv" }] }],
+        },
+        {
+          id: "target",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "target", phase: "evaluate", value: 5 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [
+        { kind: "import-entry", entry: "main" },
+        { kind: "trigger-dynamic-import", registration: "load-target" },
+      ],
+      manualChunkGroups: [{ name: "core", moduleIds: ["entry", "target"] }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+
+    const rendered = renderProgram(program);
+    const entryFile =
+      rendered.files.find((file) => file.path === "module-0000.mjs")?.contents ?? "";
+    // One specifier, a static value import AND a dynamic registration.
+    expect(entryFile).toContain('import { v as tv } from "./module-0001.mjs";');
+    expect(entryFile).toContain(
+      'globalThis.__orderDynamicImports["load-target"] = () => import("./module-0001.mjs");',
+    );
+
+    const result = await withRolldownBuild(program, rendered, async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return {
+        entryCount: artifacts.manifest.entries.length,
+        sourceEvents: sourceOutcome.events,
+        verdictKind: classifyVerdict(sourceOutcome, bundleOutcome).kind,
+      };
+    });
+
+    const value = successValue(result);
+    // The facade machinery mapped the single model entry to one output chunk.
+    expect(value.entryCount).toBe(1);
+    // Source oracle: the target evaluates EXACTLY once (the dynamic trigger finds it already loaded),
+    // bounded by the runner-emitted phase markers after each settled step.
+    expect(value.sourceEvents).toEqual([
+      { version: 1, module: "target", phase: "evaluate", value: 5 },
+      { version: 1, module: "entry", phase: "evaluate", value: 6 },
+      { version: 1, marker: "schedule", schedule: 0, kind: "entry" },
+      { version: 1, marker: "schedule", schedule: 1, kind: "dynamic" },
+    ]);
+    // A verdict was produced (build + facade mapping succeeded); the kind is rolldown-version specific.
+    expect(["pass", "mismatch"]).toContain(value.verdictKind);
   });
 
   test("builds and round-trips an ESM namespace import of a CJS target's named member", async () => {
@@ -536,7 +612,7 @@ describe("withRolldownBuild", () => {
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+        events: moduleEventPairs(sourceOutcome.events),
       };
     });
 
@@ -588,7 +664,7 @@ describe("withRolldownBuild", () => {
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+        events: moduleEventPairs(sourceOutcome.events),
         packageJson,
       };
     });
@@ -701,7 +777,7 @@ describe("withRolldownBuild", () => {
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+        events: moduleEventPairs(sourceOutcome.events),
       };
     });
 
@@ -796,7 +872,7 @@ describe("withRolldownBuild", () => {
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: sourceOutcome.events.map((event) => [event.module, event.value]),
+        events: moduleEventPairs(sourceOutcome.events),
       };
     });
 
@@ -1655,6 +1731,15 @@ function collectOutputIdentity(artifacts: RolldownBuildArtifacts): {
     manifest: artifacts.manifest,
     outputFiles: artifacts.outputFiles,
   };
+}
+
+/// The `[module, value]` pairs of an outcome's MODULE events, dropping the runner-emitted schedule
+/// markers so these value-shape assertions stay focused on module output. Marker behavior has its own
+/// dedicated tests.
+function moduleEventPairs(events: readonly ExecutionEvent[]): [string, EventValue][] {
+  return events
+    .filter((event): event is ModuleExecutionEvent => !isScheduleMarker(event))
+    .map((event) => [event.module, event.value]);
 }
 
 function successValue<T>(result: RolldownAdapterResult<T>): T {

@@ -11,9 +11,19 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
+import type { ExecutionEvent } from "../src/protocol.ts";
 import { renderProgram } from "../src/render.ts";
 
 const execFileAsync = promisify(execFile);
+
+// The runner appends a phase marker after each settled schedule operation (both entry kinds collapse
+// to "entry"; a dynamic trigger is "dynamic").
+function entryMarker(schedule: number): ExecutionEvent {
+  return { version: 1, marker: "schedule", schedule, kind: "entry" };
+}
+function dynamicMarker(schedule: number): ExecutionEvent {
+  return { version: 1, marker: "schedule", schedule, kind: "dynamic" };
+}
 
 describe("renderProgram", () => {
   test("renders only ProgramModel modules and the schedule manifest", () => {
@@ -219,7 +229,10 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "esm-target", phase: "evaluate", value: 2 },
           { version: 1, module: "cjs-entry", phase: "evaluate", value: null },
+          entryMarker(0),
           { version: 1, module: "shared-cjs", phase: "evaluate", value: "once" },
+          entryMarker(1),
+          entryMarker(2),
         ],
       });
     });
@@ -279,7 +292,9 @@ describe("renderProgram", () => {
             phase: "evaluate",
             value: "after-await",
           },
+          entryMarker(0),
           { version: 1, module: "lazy", phase: "evaluate", value: 3 },
+          dynamicMarker(1),
         ],
       });
     });
@@ -820,6 +835,7 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "source", phase: "evaluate", value: 7 },
           { version: 1, module: "reader", phase: "evaluate", value: 107 },
+          entryMarker(0),
         ],
       });
     });
@@ -905,6 +921,7 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "source", phase: "evaluate", value: 7 },
           { version: 1, module: "entry", phase: "evaluate", value: 8 },
+          entryMarker(0),
         ],
       });
     });
@@ -970,6 +987,7 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "cjs-source", phase: "evaluate", value: 40 },
           { version: 1, module: "cjs-reader", phase: "evaluate", value: 41 },
+          entryMarker(0),
         ],
       });
     });
@@ -1030,6 +1048,7 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "target", phase: "evaluate", value: 40 },
           { version: 1, module: "entry", phase: "evaluate", value: 41 },
+          entryMarker(0),
         ],
       });
     });
@@ -1100,6 +1119,7 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "def", phase: "evaluate", value: 7 },
           { version: 1, module: "reader", phase: "evaluate", value: 8 },
+          entryMarker(0),
         ],
       });
     });
@@ -1157,6 +1177,7 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "def", phase: "evaluate", value: 5 },
           { version: 1, module: "reader", phase: "evaluate", value: 7 },
+          entryMarker(0),
         ],
       });
     });
@@ -1219,6 +1240,66 @@ describe("renderProgram", () => {
         events: [
           { version: 1, module: "def", phase: "evaluate", value: 9 },
           { version: 1, module: "cjs-reader", phase: "evaluate", value: 10 },
+          entryMarker(0),
+        ],
+      });
+    });
+  });
+
+  test("renders a multi-kind pair as several statements for one specifier, then round-trips", async () => {
+    // The same target is imported for side effect AND value AND dynamically — the wave-5 multi-edge
+    // pair. Rendering emits one statement per dependency (deterministic array order), and the dynamic
+    // import of the already-statically-loaded module must not re-run it: `lib` evaluates exactly once.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-side-effect-import", target: "lib" },
+            { kind: "esm-value-import", target: "lib", importedName: "v", localName: "libV" },
+            { kind: "esm-dynamic-import", target: "lib", registration: "load-lib" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "libV" }] }],
+        },
+        {
+          id: "lib",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "lib", phase: "evaluate", value: 5 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [
+        { kind: "import-entry", entry: "main" },
+        { kind: "trigger-dynamic-import", registration: "load-lib" },
+      ],
+    } satisfies ProgramModel;
+
+    const rendered = renderProgram(program);
+
+    expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
+      [
+        'import "./module-0001.mjs";',
+        'import { v as libV } from "./module-0001.mjs";',
+        "",
+        'globalThis.__orderDynamicImports["load-lib"] = () => import("./module-0001.mjs");',
+        "",
+        'globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: 1 + libV });',
+        "",
+      ].join("\n"),
+    );
+
+    await withRenderedProgram(rendered.files, async (directory) => {
+      await expect(executeManifest(join(directory, rendered.schedulePath))).resolves.toEqual({
+        version: 1,
+        status: "ok",
+        // `lib` appears once: the dynamic trigger finds it already loaded and does not re-run it.
+        events: [
+          { version: 1, module: "lib", phase: "evaluate", value: 5 },
+          { version: 1, module: "entry", phase: "evaluate", value: 6 },
+          entryMarker(0),
+          dynamicMarker(1),
         ],
       });
     });

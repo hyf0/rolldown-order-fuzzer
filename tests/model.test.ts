@@ -1221,4 +1221,138 @@ describe("validateProgramModel", () => {
       'modules[0].dependencies[0]: a hoisted-function call import must target an ESM module, target "b" is cjs',
     ]);
   });
+
+  test("permits an ESM {side-effect + value + dynamic} multi-kind pair to one target", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-side-effect-import", target: "target" },
+            { kind: "esm-value-import", target: "target", importedName: "v", localName: "tv" },
+            { kind: "esm-dynamic-import", target: "target", registration: "load-target" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "tv" }] }],
+        },
+        {
+          id: "target",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "target", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("permits a CJS {require + dynamic} multi-kind pair to one target", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "target", resultBinding: "t", readName: "v" },
+            { kind: "esm-dynamic-import", target: "target", registration: "load-target" },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "t", member: "v" }],
+            },
+          ],
+        },
+        {
+          id: "target",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "target", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("permits repeated value imports for one pair (two named imports)", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "t", importedName: "a", localName: "la" },
+            { kind: "esm-value-import", target: "t", importedName: "b", localName: "lb" },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "la" }, { binding: "lb" }],
+            },
+          ],
+        },
+        {
+          id: "t",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "t", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+  });
+
+  test("rejects a second side-effect import for one pair", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-side-effect-import", target: "t" },
+            { kind: "esm-side-effect-import", target: "t" },
+          ],
+          events: [],
+        },
+        { id: "t", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].dependencies[1]: a (importer, target) pair to "t" may carry at most one side-effect dependency',
+    ]);
+  });
+
+  test("rejects a second dynamic registration for one pair", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-dynamic-import", target: "t", registration: "r0" },
+            { kind: "esm-dynamic-import", target: "t", registration: "r1" },
+          ],
+          events: [],
+        },
+        { id: "t", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].dependencies[1]: a (importer, target) pair to "t" may carry at most one dynamic dependency',
+    ]);
+  });
 });

@@ -3,6 +3,13 @@ import type { EventRecord, EventValue, ModuleFormat, ScheduleOperation } from ".
 export const EXECUTION_PROTOCOL_VERSION = 1 as const;
 export const MAX_EXECUTION_EVENTS = 512 as const;
 
+/// The kind category a schedule marker records. Both entry-evaluation operations (`import-entry` and
+/// `require-entry`) collapse to `entry`, and a dynamic trigger is `dynamic`. The collapse is what
+/// keeps markers symmetric across source and bundle: a CJS source entry runs with `require` while its
+/// all-ESM bundle entry runs with `import` (the adapter rewrites `require-entry` to `import-entry`),
+/// yet both are the SAME logical schedule step, so they must emit the SAME marker.
+export type ScheduleMarkerKind = "entry" | "dynamic";
+
 export interface ExecutionManifestEntry {
   readonly name: string;
   readonly path: string;
@@ -15,8 +22,50 @@ export interface ExecutionManifest {
   readonly operations: readonly ScheduleOperation[];
 }
 
-export interface ExecutionEvent extends EventRecord {
+/// A module event emitted by generated code through `globalThis.__orderEvent`: the
+/// `[module, phase, value]` record the oracle has always compared.
+export interface ModuleExecutionEvent extends EventRecord {
   readonly version: typeof EXECUTION_PROTOCOL_VERSION;
+}
+
+/// A RUNNER-emitted boundary appended to the event stream after each schedule operation SETTLES
+/// (an entry import/require returned, a dynamic trigger awaited). It closes an oracle hole: the flat
+/// event sequence alone cannot tell `[step1: A][step2: B]` from `[step1: A,B][step2: -]` — both are
+/// `A,B` flat and judged EQUAL — yet the second ran module B a whole schedule step early (the
+/// premature-execution family this fuzzer hunts). Interleaving a marker at every step boundary makes
+/// the stream PHASE-AWARE: a module event that ran in the wrong step now lands on the wrong side of a
+/// marker, so the comparison catches it. Markers are emitted by the shared child runner for BOTH
+/// source and bundle, and the bundle's operation list is the source's with only `require-entry`
+/// rewritten to `import-entry` (normalized away by `kind`), so markers are identical by construction
+/// — they add ZERO false-positive surface. See `.agents/docs/schedule-phase-markers.md`.
+export interface ScheduleMarkerEvent {
+  readonly version: typeof EXECUTION_PROTOCOL_VERSION;
+  readonly marker: "schedule";
+  /// The zero-based index of the settled operation in the schedule.
+  readonly schedule: number;
+  readonly kind: ScheduleMarkerKind;
+}
+
+export type ExecutionEvent = ModuleExecutionEvent | ScheduleMarkerEvent;
+
+export function isScheduleMarker(event: ExecutionEvent): event is ScheduleMarkerEvent {
+  return "marker" in event && event.marker === "schedule";
+}
+
+export function scheduleMarkerKind(operation: ScheduleOperation): ScheduleMarkerKind {
+  return operation.kind === "trigger-dynamic-import" ? "dynamic" : "entry";
+}
+
+export function makeScheduleMarker(
+  index: number,
+  operation: ScheduleOperation,
+): ScheduleMarkerEvent {
+  return {
+    version: EXECUTION_PROTOCOL_VERSION,
+    marker: "schedule",
+    schedule: index,
+    kind: scheduleMarkerKind(operation),
+  };
 }
 
 export interface NormalizedError {
@@ -141,11 +190,36 @@ function parseScheduleOperation(value: unknown): ScheduleOperation {
 function parseExecutionEvent(value: unknown): ExecutionEvent {
   const event = requireRecord(value, "execution event");
   requireVersion(event.version, "execution event");
+  if (event.marker !== undefined) {
+    return parseScheduleMarker(event);
+  }
   return {
     version: EXECUTION_PROTOCOL_VERSION,
     module: requireString(event.module, "execution event module"),
     phase: requireString(event.phase, "execution event phase"),
     value: requireEventValue(event.value),
+  };
+}
+
+function parseScheduleMarker(event: Record<string, unknown>): ScheduleMarkerEvent {
+  if (event.marker !== "schedule") {
+    throw new Error(`Unsupported execution event marker ${JSON.stringify(event.marker)}`);
+  }
+  if (
+    typeof event.schedule !== "number" ||
+    !Number.isInteger(event.schedule) ||
+    event.schedule < 0
+  ) {
+    throw new Error("Schedule marker index must be a non-negative integer");
+  }
+  if (event.kind !== "entry" && event.kind !== "dynamic") {
+    throw new Error(`Unsupported schedule marker kind ${JSON.stringify(event.kind)}`);
+  }
+  return {
+    version: EXECUTION_PROTOCOL_VERSION,
+    marker: "schedule",
+    schedule: event.schedule,
+    kind: event.kind,
   };
 }
 

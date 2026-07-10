@@ -536,6 +536,11 @@ function buildRandomMixed(
   // flows through pure re-exporter modules (forward edges only), the classic barrel shape.
   drafts.push(...insertBarrelChains(rng, drafts));
 
+  // Turn a meaningful minority of forward pairs into real multi-kind pairs — `import { a } from "./x"`
+  // AND `import("./x")` (static + lazy), a side-effect plus a value import of one module, and the
+  // like — after barrels so an augmented value edge is never rerouted through one.
+  augmentMultiEdgePairs(rng, drafts, registrations);
+
   const modules = drafts.map((draft): ModuleModel => {
     // A draft only ever accumulates dependency kinds legal for its format, so the filters below are
     // defensive; the reads are chosen from the same forward-only bindings the renderer will fold.
@@ -717,6 +722,168 @@ function insertBarrelChains(
     }
   }
   return barrels;
+}
+
+/// Kinds an existing forward edge may hold and still be a candidate for multi-edge augmentation.
+/// Namespace imports, hoisted-function CALL imports (cycle edges only), and re-exports are excluded:
+/// they are not the plain static/lazy shape this pass builds, and the forward-only gate already keeps
+/// cycle edges out.
+const AUGMENTABLE_EXISTING_KINDS = new Set<DependencyOperation["kind"]>([
+  "esm-side-effect-import",
+  "esm-value-import",
+  "esm-dynamic-import",
+  "cjs-require",
+]);
+
+/// The per-pair slot a candidate edge occupies (mirrors `dependencyPairSlot` in validate-model.ts):
+/// value and namespace share one binding slot, but augmentation never adds a namespace edge.
+function augmentSlot(kind: DependencyOperation["kind"]): string | undefined {
+  switch (kind) {
+    case "esm-value-import":
+      return "value";
+    case "esm-side-effect-import":
+      return "side-effect";
+    case "esm-dynamic-import":
+      return "dynamic";
+    case "cjs-require":
+      return "require";
+    default:
+      return undefined;
+  }
+}
+
+/// Synchronous (non-dynamic) reachability over drafts, for the forward-only augmentation gate.
+function draftSyncReachability(
+  drafts: readonly RandomModuleDraft[],
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
+  const reachability = new Map<string, ReadonlySet<string>>();
+  for (const start of draftsById.keys()) {
+    const reached = new Set<string>();
+    const pending = [start];
+    while (pending.length > 0) {
+      const id = pending.pop();
+      if (id === undefined) {
+        continue;
+      }
+      for (const dependency of draftsById.get(id)?.dependencies ?? []) {
+        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
+          continue;
+        }
+        reached.add(dependency.target);
+        pending.push(dependency.target);
+      }
+    }
+    reachability.set(start, reached);
+  }
+  return reachability;
+}
+
+/// Turn a meaningful minority of FORWARD pairs into real multi-kind pairs — the shape real code
+/// constantly writes: `import { a } from "./x"` AND `import("./x")` (static + lazy), or a side-effect
+/// import plus a value import of one module. The same (importer, target), already joined by one edge,
+/// gains a compatible SECOND (or third) kind from a per-format slot menu — {side-effect, value,
+/// dynamic} for ESM importers, {require, dynamic} for CJS — never a duplicate slot (the validator's
+/// per-pair rule). Forward-only: it augments a pair only when the target does NOT synchronously reach
+/// back to the importer, so an added value read stays forward (fully evaluated target, no TDZ, no
+/// cycle) and an added side-effect edge never closes a cycle. Any added dynamic registers through the
+/// standard `__orderDynamicImports` mechanism and joins the schedule's trigger pool, so the key order
+/// surface — a dynamic import of an ALREADY-STATICALLY-LOADED module — is exercised without re-running
+/// the target. Barrels (pure re-exporters) are never touched, as importer or target.
+function augmentMultiEdgePairs(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  registrations: { owner: string; registration: string }[],
+): void {
+  // Attempt in a meaningful minority of cases; a per-pair roll then decides each eligible pair.
+  if (rng.boolean()) {
+    return;
+  }
+  const barrelIds = new Set(
+    drafts
+      .filter((draft) => draft.dependencies.some(isReexportDependency))
+      .map((draft) => draft.id),
+  );
+  const reach = draftSyncReachability(drafts);
+
+  for (const importer of drafts) {
+    if (barrelIds.has(importer.id)) {
+      continue;
+    }
+    const slotMenu =
+      importer.format === "esm" ? ["value", "side-effect", "dynamic"] : ["require", "dynamic"];
+    // Every pair holds at most one edge before this pass, but grouping by target keeps it robust.
+    for (const targetId of new Set(importer.dependencies.map((dependency) => dependency.target))) {
+      if (
+        targetId === importer.id ||
+        barrelIds.has(targetId) ||
+        reach.get(targetId)?.has(importer.id) === true
+      ) {
+        continue; // self-edge, a barrel, or a cycle-closing pair — never augment.
+      }
+      const existing = importer.dependencies.filter((dependency) => dependency.target === targetId);
+      if (
+        !existing.every((dependency) => AUGMENTABLE_EXISTING_KINDS.has(dependency.kind)) ||
+        existing.some(
+          (dependency) => dependency.kind === "esm-value-import" && dependency.call === true,
+        )
+      ) {
+        continue;
+      }
+      const usedSlots = new Set(
+        existing.flatMap((dependency) => {
+          const slot = augmentSlot(dependency.kind);
+          return slot === undefined ? [] : [slot];
+        }),
+      );
+      const candidateSlots = slotMenu.filter((slot) => !usedSlots.has(slot));
+      if (candidateSlots.length === 0 || rng.boolean()) {
+        continue;
+      }
+      let added = candidateSlots.filter(() => rng.boolean());
+      if (added.length === 0) {
+        added = [rng.pick(candidateSlots)];
+      }
+      for (const slot of added) {
+        appendAugmentedEdge(importer, targetId, slot, registrations);
+      }
+    }
+  }
+}
+
+/// Append one augmented edge of `slot` from `importer` to `targetId`, with binding / registration
+/// names distinctly prefixed so they never collide with a primary edge's names.
+function appendAugmentedEdge(
+  importer: RandomModuleDraft,
+  targetId: string,
+  slot: string,
+  registrations: { owner: string; registration: string }[],
+): void {
+  if (slot === "side-effect") {
+    importer.dependencies.push({ kind: "esm-side-effect-import", target: targetId });
+    return;
+  }
+  if (slot === "value") {
+    importer.dependencies.push({
+      kind: "esm-value-import",
+      target: targetId,
+      importedName: `v${targetId}`,
+      localName: `me_${importer.id}_${targetId}`,
+    });
+    return;
+  }
+  if (slot === "require") {
+    importer.dependencies.push({
+      kind: "cjs-require",
+      target: targetId,
+      resultBinding: `mr_${importer.id}_${targetId}`,
+      readName: `v${targetId}`,
+    });
+    return;
+  }
+  const registration = `dynm-${importer.id}-${targetId}`;
+  importer.dependencies.push({ kind: "esm-dynamic-import", target: targetId, registration });
+  registrations.push({ owner: importer.id, registration });
 }
 
 /// Choose a meaningful minority of leaf, value-contributing ESM modules to carry `sideEffects:false`
@@ -1122,6 +1289,21 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     )
   ) {
     tags.add("variation:reexport-default");
+  }
+
+  // A module reaches the SAME target through more than one dependency kind — a real multi-edge pair
+  // (static + lazy, side-effect + value, require + dynamic, …), the most common shape real code
+  // writes that a single edge per pair could not express.
+  if (
+    program.modules.some((module) => {
+      const perTarget = new Map<string, number>();
+      for (const dependency of module.dependencies) {
+        perTarget.set(dependency.target, (perTarget.get(dependency.target) ?? 0) + 1);
+      }
+      return [...perTarget.values()].some((count) => count >= 2);
+    })
+  ) {
+    tags.add("variation:multi-edge-pair");
   }
 
   const template = deriveTemplateName(program, tags, hasOverlappingEntries, esmCarriersByCjsTarget);

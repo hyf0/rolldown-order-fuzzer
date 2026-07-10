@@ -67,6 +67,28 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
       } as typeof module);
     }
   }
+  // Drop one kind from a MIXED pair — a (importer, target) joined by more than one dependency, the
+  // wave-5 multi-edge shape (static + lazy, side-effect + value, require + dynamic). Collapsing the
+  // pair toward a single kind also drops any event read bound to the removed edge, so the candidate
+  // is valid on its own; the generic dependency-drop above would leave a dangling read and be skipped.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    const targetCounts = new Map<string, number>();
+    for (const dependency of module.dependencies) {
+      targetCounts.set(dependency.target, (targetCounts.get(dependency.target) ?? 0) + 1);
+    }
+    for (const [depIndex, dependency] of module.dependencies.entries()) {
+      if ((targetCounts.get(dependency.target) ?? 0) < 2) {
+        continue;
+      }
+      const droppedBinding = droppedReadBinding(dependency);
+      const dependencies = module.dependencies.filter((_, index) => index !== depIndex);
+      const events =
+        droppedBinding === undefined
+          ? module.events
+          : module.events.map((event) => dropReadsOfBinding(event, droppedBinding));
+      yield editModule(program, moduleIndex, { ...module, dependencies, events } as typeof module);
+    }
+  }
   for (const entry of program.entries) {
     if (program.entries.length > 1) {
       yield {
@@ -286,6 +308,29 @@ function rewireReadPastBarrel(
 
 function withoutReads(event: EventRecord): EventRecord {
   return { module: event.module, phase: event.phase, value: event.value };
+}
+
+/// The local read binding a dependency introduces (dropped along with the dependency), or undefined
+/// when it binds nothing readable (side-effect / dynamic import, plain require, re-export).
+function droppedReadBinding(dependency: DependencyOperation): string | undefined {
+  if (dependency.kind === "esm-value-import" || dependency.kind === "esm-namespace-import") {
+    return dependency.localName;
+  }
+  if (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined) {
+    return dependency.resultBinding;
+  }
+  return undefined;
+}
+
+function dropReadsOfBinding(event: EventRecord, binding: string): EventRecord {
+  if (event.reads === undefined) {
+    return event;
+  }
+  const reads = event.reads.filter((read) => read.binding !== binding);
+  if (reads.length === event.reads.length) {
+    return event;
+  }
+  return reads.length > 0 ? { ...event, reads } : withoutReads(event);
 }
 
 function dropModule(program: ProgramModel, moduleId: string): ProgramModel {
