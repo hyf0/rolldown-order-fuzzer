@@ -217,7 +217,7 @@ export class ProgramFacts {
     if (module === undefined) {
       return undefined;
     }
-    const key = `${moduleId} ${exportName}`;
+    const key = `${moduleId}\0${exportName}`;
     if (visited.has(key)) {
       return { moduleId, exportName };
     }
