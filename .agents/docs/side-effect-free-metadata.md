@@ -1,5 +1,14 @@
 # `sideEffects: false` package metadata
 
+> **W14b migration note:** the module-level `sideEffectFree` flag this record introduced is now the
+> LEGACY representation. The package/layout model ([w14b-package-realism](./w14b-package-realism.md))
+> owns `sideEffects` metadata — boolean AND the array (partial) form — on named `node_modules`
+> packages; `packagesOf` (model.ts) normalizes a legacy flag to a single-member
+> `sideEffects: false` package, and the shared `side-effect-free/` rendering directory described
+> below is gone. The ORACLE-SOUNDNESS invariant in this record (a metadata-pure module contributes
+> only values and emits no events) is unchanged and now binds exactly the members the resolved
+> packages assert pure — under the array form, the UNMATCHED members.
+
 `sideEffects: false` in a `package.json` is a user assertion that importing a module runs no side
 effects. The bundler consumes it to justify aggressive dead-code elimination (drop the module, or
 its initializer, when only some of its bindings are used); Node ignores it entirely. It is the

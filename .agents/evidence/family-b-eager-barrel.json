@@ -1,0 +1,536 @@
+{
+  "proof": "family-B eager-barrel (vben initPreferences shape): same-seed od-RED / wa-GREEN split on the frozen snapshot",
+  "generatedAt": "2026-07-10T17:57:13.004Z",
+  "head": "dbad46db5acc0db4ad216d838684dcf196f6ccb5",
+  "dirty": true,
+  "node": "v24.18.0",
+  "cases": 20,
+  "catchTag": "mechanism:family-b-eager-barrel",
+  "target": {
+    "path": "/tmp/rolldown-strict-order-study/pr10104-runtime-snapshot/rolldown/dist/index.mjs",
+    "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+  },
+  "accepted": true,
+  "cells": {
+    "od-lazyBarrel-false": {
+      "red": 20,
+      "redNanFamily": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        }
+      ]
+    },
+    "wa-lazyBarrel-false": {
+      "red": 0,
+      "redNanFamily": 0,
+      "green": 20,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        }
+      ]
+    },
+    "od-lazyBarrel-true": {
+      "red": 20,
+      "redNanFamily": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+          "tagged": true
+        }
+      ]
+    },
+    "wa-lazyBarrel-true": {
+      "red": 0,
+      "redNanFamily": 0,
+      "green": 20,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        }
+      ]
+    }
+  }
+}

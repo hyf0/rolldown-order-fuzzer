@@ -1,0 +1,128 @@
+{
+  "modules": [
+    {
+      "id": "fb-ent",
+      "format": "esm",
+      "dependencies": [
+        {
+          "kind": "esm-side-effect-import",
+          "target": "fb-first"
+        },
+        {
+          "kind": "esm-value-import",
+          "target": "fb-bar",
+          "importedName": "vFacade",
+          "localName": "vf"
+        },
+        {
+          "kind": "esm-value-import",
+          "target": "fb-bar",
+          "importedName": "helper",
+          "localName": "vb",
+          "call": true
+        }
+      ],
+      "events": [
+        {
+          "module": "fb-ent",
+          "phase": "evaluate",
+          "value": 615979,
+          "reads": [
+            {
+              "binding": "vb",
+              "call": true
+            }
+          ]
+        },
+        {
+          "module": "fb-ent",
+          "phase": "evaluate-1",
+          "value": 448799,
+          "reads": [
+            {
+              "binding": "vf"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "fb-first",
+      "format": "esm",
+      "dependencies": [],
+      "events": [
+        {
+          "module": "fb-first",
+          "phase": "evaluate",
+          "value": 352913
+        }
+      ]
+    },
+    {
+      "id": "fb-bar",
+      "format": "esm",
+      "localExports": ["helper"],
+      "dependencies": [
+        {
+          "kind": "esm-reexport-star",
+          "target": "fb-def"
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "fb-def",
+      "format": "esm",
+      "dependencies": [
+        {
+          "kind": "esm-value-import",
+          "target": "fb-sib",
+          "importedName": "makePref",
+          "localName": "mk",
+          "call": true
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "fb-sib",
+      "format": "esm",
+      "dependencies": [],
+      "events": []
+    }
+  ],
+  "entries": [
+    {
+      "name": "entry-fb-ent",
+      "moduleId": "fb-ent"
+    }
+  ],
+  "schedule": [
+    {
+      "kind": "import-entry",
+      "entry": "entry-fb-ent"
+    }
+  ],
+  "packages": [
+    {
+      "name": "fbpkg",
+      "sideEffects": false,
+      "moduleIds": ["fb-def"]
+    }
+  ],
+  "build": {
+    "chunking": {
+      "kind": "manual",
+      "groups": [
+        {
+          "name": "fb-pref",
+          "moduleIds": ["fb-def", "fb-sib"]
+        }
+      ]
+    },
+    "includeDependenciesRecursively": true,
+    "preserveEntrySignatures": "allow-extension",
+    "lazyBarrel": false,
+    "strictExecutionOrder": true
+  }
+}

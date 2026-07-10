@@ -33,12 +33,16 @@ const CASES_PER_CELL = Number(process.env.CATCHING_POWER_CASES ?? "300");
 const FAMILY_A_TAG = "mechanism:pure-definer-behind-barrel";
 
 /// The committed catching-power band: the mixed-regime RED RATE (percent of runs the differential oracle
-/// catches against the buggy snapshot). Family A is the dominant mode — ~83% of the reds, and ~89% of
-/// family-A-tagged cases go red — with the wave-8 witnesses (callable-own-state, object-identity) supplying
-/// the rest. A move outside this band is a real regression (a witness weakened) or an improvement to
-/// re-accept, unlike tag density which counts structure a passing conjunction would inflate.
-/// Measured 2026-07-10 against pr10104-runtime-snapshot (rolldown 1.1.5): mixed-od 69/300 = 23.0%,
-/// mixed-wa 73/300 = 24.3%, combined 142/600 = 23.7% (family-A-red 118, 89.4% of family-A-tagged).
+/// catches against the buggy snapshot). Family A dominates, with the wave-8 witnesses and (since W14b)
+/// the od-only family-B eager-barrel conjunction supplying the rest. A move outside this band is a real
+/// regression (a witness weakened) or an improvement to re-accept, unlike tag density which counts
+/// structure a passing conjunction would inflate.
+/// Measured 2026-07-10 (W14a.1): mixed-od 69/300 = 23.0%, mixed-wa 73/300 = 24.3%, combined 23.7%
+/// (family-A-red 118, 89.4% of family-A-tagged).
+/// Re-measured 2026-07-11 (W14b): mixed-od 73/300 = 24.3%, mixed-wa 63/300 = 21.0%, combined 22.7% —
+/// IN BAND with the composition shifted, as the wave intends: family-B adds od-ONLY reds (the od/wa
+/// asymmetry is its fingerprint), while the deliberate family-A packaging/camunda variants trade some
+/// family-A redness for coverage (family-A-red 100, 75.8% of family-A-tagged; tag density unchanged).
 const BAND = { low: 21, high: 27 } as const;
 
 interface CellResult {

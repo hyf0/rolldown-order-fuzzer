@@ -243,12 +243,31 @@ the effective build.
 
 ## W14b must-not-repeat list (carried verbatim from the codex W14a findings)
 
-The next wave inherits these constraints in-repo so the W14a.1 fixes are not undone:
+The next wave inherits these constraints in-repo so the W14a.1 fixes are not undone. Status as of
+W14b ([w14b-package-realism](./w14b-package-realism.md)):
 
-- No child-side option overrides absent from persisted BuildConfig.
-- Fixed/directed builders must not bypass the common configuration/freeze/analyze seam.
-- No deadHop flag, no validator-only supply walk — link/live purpose lives on the canonical plan.
-- Don't extend shrink's manual barrel switch (shrink.ts:433); enrich canonical RouteHop (program-facts.ts:38) with target + name mapping.
-- No parallel namespace-member representation for `export * as ns` — extend ValueRead to ONE canonical member path threaded through render/validation/plan/tags/shrink.
-- No second CLI/evaluator switch for seo:false — one relaxed-order oracle policy derived from persisted BuildConfig, identical in campaign/replay/shrink/identity/tags.
-- Package model replaces (migrates) module-level sideEffectFree + synthetic directory via one legacy-normalization seam — never two live representations; package sideEffects metadata belongs to the package/layout model, NOT BuildConfig.
+- No child-side option overrides absent from persisted BuildConfig. — **HELD in W14b** (the family-B
+  chunk group and the directed builder's config are persisted on `build`; the child gained no new
+  option).
+- Fixed/directed builders must not bypass the common configuration/freeze/analyze seam. — **HELD**
+  (`buildFamilyBEagerBarrel` persists a full `BuildConfig`, deep-freezes, and analyzes once, exactly
+  like `buildCrossChunkInitCycle`).
+- No deadHop flag, no validator-only supply walk — link/live purpose lives on the canonical plan. —
+  **HELD** (the new local re-export records a LIVE demand on the one plan; no validator-side walk was
+  added).
+- Don't extend shrink's manual barrel switch (shrink.ts rewireReadPastBarrel); enrich canonical
+  RouteHop (program-facts.ts) with target + name mapping. — **HELD / deferred**: the barrel switch
+  was NOT extended for the new op (shrink downgrades a local re-export to the named form instead);
+  the full RouteHop target+name enrichment remains W14c scope (W14b only added the `local` hop kind).
+- No parallel namespace-member representation for `export * as ns` — extend ValueRead to ONE
+  canonical member path. — **untouched** (the `export * as ns` operation is still W14c scope).
+- No second CLI/evaluator switch for seo:false — one relaxed-order oracle policy derived from
+  persisted BuildConfig. — **untouched** (`seo:false` stays unrepresentable; the relaxed-order oracle
+  is still deferred).
+- Package model replaces (migrates) module-level sideEffectFree + synthetic directory via one
+  legacy-normalization seam — never two live representations; package sideEffects metadata belongs to
+  the package/layout model, NOT BuildConfig. — **CONSUMED in W14b**: `packagesOf` (model.ts) is the
+  one seam (a legacy flag normalizes to a single-member `sideEffects: false` package, the same
+  `sef-<id>` shape the generator now persists), the `side-effect-free/` renderer directory is gone,
+  metadata purity left `ModuleProfile`, and a program carrying both forms is rejected. `sideEffects`
+  metadata lives on `ProgramModel.packages`, not `BuildConfig`.

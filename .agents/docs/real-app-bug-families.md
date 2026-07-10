@@ -102,6 +102,15 @@ supplies the cross-chunk, order-wrapped targets. Applied last, so only events ch
 
 ### Reproduction status
 
+> **RESOLVED in W14b:** family B is reproduced — the missing ingredients were the PACKAGE metadata
+> and the eager-barrel topology, not the read side. The load-bearing conjunction (bisected against
+> the snapshot): a package whose `sideEffects` ARRAY lists only a side-effectful sibling, a
+> metadata-pure barrel with a STAR hop to a metadata-pure facade PLUS an own included (call-marked)
+> helper, a chunk group splitting {facade, sibling} from the entry chunk, and an effectful module the
+> entry imports before the package. Same-seed od-RED / wa-GREEN on the frozen snapshot, 20/20 —
+> see [w14b-package-realism](./w14b-package-realism.md) and
+> `.agents/evidence/family-b-eager-barrel.json`. The paragraph below records the pre-W14b state.
+
 Hand-probing (`scratchpad/smokeB*.mjs`) could NOT isolate family B against the snapshot in a small
 synthetic graph: this rolldown build robustly traces a locally-called function and a namespace access
 and still emits `init_target()`, and single-entry graphs collapse into one chunk (nothing is
