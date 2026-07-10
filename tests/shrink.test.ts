@@ -248,3 +248,135 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
     expect(stripped).toBeDefined();
   });
 });
+
+describe("shrink exact-equivalence normalizer (finding D)", () => {
+  test("distinct NON-NUMERIC chunk symbols (init_alpha vs init_beta) are NOT the same failure", () => {
+    const crashAlpha = 'bundle-only-crash:["TypeError","init_alpha is not a function"]';
+    const crashBeta = 'bundle-only-crash:["TypeError","init_beta is not a function"]';
+    // These name DIFFERENT root causes; the old normalizer rewrote every init_* to one token and
+    // wrongly compared them equal, letting a shrink swap the failing module while claiming exact.
+    expect(sameFailure(crashAlpha, crashBeta)).toBe(false);
+    expect(sameFailure(crashAlpha, crashAlpha)).toBe(true);
+  });
+
+  test("numeric-generated init_module_N still normalizes across renumbering", () => {
+    // The generated module basenames are module-NNNN, so init_module_NNNN is a numeric-generated form:
+    // a shrink drops modules and renumbers the survivors, so these still compare equal.
+    const before = 'bundle-only-crash:["TypeError","init_module_0006 is not a function"]';
+    const after = 'bundle-only-crash:["TypeError","init_module_0004 is not a function"]';
+    expect(sameFailure(before, after)).toBe(true);
+  });
+
+  test("a structurally different two-module failure does not collapse to a one-module one", () => {
+    const twoModules =
+      "events-reordered:source=[[init_module_0001,a,1]]:bundle=[[init_module_0002,b,2]]";
+    const oneModule =
+      "events-reordered:source=[[init_module_0001,a,1]]:bundle=[[init_module_0001,b,2]]";
+    // First-appearance mapping: the two-module signature maps to N0/N1, the one-module to N0/N0.
+    expect(sameFailure(twoModules, oneModule)).toBe(false);
+  });
+});
+
+describe("shrink candidate fixes (finding E)", () => {
+  test("rewiring a namespace CALL read past a barrel renames callMembers with readMembers", () => {
+    const program = {
+      modules: [
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "barrel",
+              localName: "ns",
+              readMembers: ["outer"],
+              callMembers: ["outer"],
+            },
+          ],
+          events: [
+            {
+              module: "consumer",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "ns", member: "outer", call: true }],
+            },
+          ],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-reexport-named",
+              target: "def",
+              sourceName: "inner",
+              exportedName: "outer",
+            },
+          ],
+          events: [],
+        },
+        { id: "def", format: "esm", dependencies: [], events: [], callableOwnState: true },
+      ],
+      entries: [{ name: "main", moduleId: "consumer" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    // The rewired candidate must target def directly, read "inner", AND carry "inner" in callMembers —
+    // else callMembers still names "outer" (no longer a read member) and the candidate is invalid.
+    const rewired = findValidCandidate(program, (candidate) => {
+      const dep = candidate.modules[0]?.dependencies[0];
+      return (
+        dep?.kind === "esm-namespace-import" &&
+        dep.target === "def" &&
+        dep.readMembers[0] === "inner" &&
+        dep.callMembers?.[0] === "inner"
+      );
+    });
+    expect(rewired).toBeDefined();
+  });
+
+  test("dropping the sole manual group deletes the field so the greedy loop terminates", () => {
+    const program = {
+      modules: [
+        { id: "a", format: "esm", dependencies: [], events: [] },
+        { id: "b", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [
+        { name: "ea", moduleId: "a" },
+        { name: "eb", moduleId: "b" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "ea" },
+        { kind: "import-entry", entry: "eb" },
+      ],
+      manualChunkGroups: [{ name: "g", moduleIds: ["a", "b"] }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+
+    // Mirror the shrinker's greedy loop (accept ANY candidate that stays "failing"): here the only
+    // structure-preserving edit is dropping the group. With the old bug the group-drop candidate was
+    // identical to the current program (the field was retained), so it was re-accepted forever.
+    const accept = (candidate: ProgramModel): boolean =>
+      candidate.modules.length === 2 &&
+      candidate.entries.length === 2 &&
+      candidate.schedule.length === 2;
+    let current = program as ProgramModel;
+    let terminated = false;
+    for (let step = 0; step < 200; step += 1) {
+      let progressed = false;
+      for (const candidate of candidates(current)) {
+        if (validateProgramModel(candidate).length === 0 && accept(candidate)) {
+          current = candidate;
+          progressed = true;
+          break;
+        }
+      }
+      if (!progressed) {
+        terminated = true;
+        break;
+      }
+    }
+    expect(terminated).toBe(true);
+    expect(current.manualChunkGroups).toBeUndefined();
+  });
+});

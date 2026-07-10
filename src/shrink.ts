@@ -147,7 +147,17 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
   }
   for (const [index] of (program.manualChunkGroups ?? []).entries()) {
     const groups = (program.manualChunkGroups ?? []).filter((_, i) => i !== index);
-    yield { ...program, ...(groups.length > 0 ? { manualChunkGroups: groups } : {}) };
+    if (groups.length > 0) {
+      yield { ...program, manualChunkGroups: groups };
+    } else {
+      // Dropping the SOLE group must DELETE the field, not spread the original program (which would
+      // retain `manualChunkGroups` and yield a candidate identical to the current one). An identical
+      // candidate keeps the same failure signature forever, so the greedy loop re-accepts it every pass
+      // and never terminates. Deleting the field makes the candidate genuinely smaller and progress.
+      const withoutGroups = { ...program };
+      delete (withoutGroups as { manualChunkGroups?: unknown }).manualChunkGroups;
+      yield withoutGroups;
+    }
   }
   // Drop the organic chunk config entirely (falling back to default chunking). When the failure does
   // not depend on the organic composition this simplifies the case; the greedy pass keeps it only if
@@ -450,7 +460,18 @@ function rewireReadPastBarrel(
     return { ...dependency, target, importedName: name };
   }
   if (dependency.kind === "esm-namespace-import") {
-    return { ...dependency, target, readMembers: [name] };
+    // The read member is renamed (barrel exportedName -> definer sourceName). A callMember (`ns.m()`)
+    // names a read member, so it must be renamed TOGETHER: leaving the old name in callMembers breaks
+    // the callMembers ⊆ readMembers invariant, so the candidate fails validation and is silently skipped.
+    const oldMember = dependency.readMembers[0];
+    const rewired = { ...dependency, target, readMembers: [name] };
+    if (dependency.callMembers === undefined) {
+      return rewired;
+    }
+    return {
+      ...rewired,
+      callMembers: dependency.callMembers.includes(oldMember ?? "") ? [name] : [],
+    };
   }
   if (dependency.kind === "cjs-require") {
     return { ...dependency, target, readName: name };
@@ -649,14 +670,29 @@ function signatureKind(signature: string): string {
   return signature.split(":", 1)[0] ?? signature;
 }
 
-/// Rewrite only the tokens that move as the model shrinks (Rolldown chunk-internal identifiers and
-/// absolute paths), preserving the rest of the signature so the concrete failure structure is compared.
+/// Rewrite ONLY the tokens that legitimately move as the model shrinks: Rolldown's chunk-internal
+/// identifiers derived from the GENERATED numeric module basenames (`module-NNNN` renders as
+/// `module_NNNN` / `init_module_NNNN` / `require_module_NNNN`) and absolute temp/root paths. A shrink
+/// step drops modules and RENUMBERS the survivors, so each such token is mapped to a stable
+/// per-signature index by first appearance — a renumbered failure compares equal, while a structurally
+/// DIFFERENT one (a different module failing, in a different position) does not. Crucially, only the
+/// NUMERIC-generated forms are normalized: a non-numeric chunk symbol (`init_alpha` vs `init_beta`) is
+/// left literal, so a shrink can never swap one named root cause for another and still claim an exact
+/// match — the over-normalization that made every `init_*` compare equal.
 function normalizeSignature(signature: string): string {
-  return signature
-    .replaceAll(/module_\d+/g, "module_N")
-    .replaceAll(/\binit_[A-Za-z0-9_$]+/g, "init_N")
-    .replaceAll(/\brequire_[A-Za-z0-9_$]+/g, "require_N")
-    .replaceAll(/(?:\/[^\s"':]+)+\/(module-\d+\.[mc]js)/g, "$1");
+  const withoutPaths = signature.replaceAll(/(?:\/[^\s"':]+)+\/(module-\d+\.[mc]js)/g, "$1");
+  let counter = 0;
+  const canonicalByToken = new Map<string, string>();
+  return withoutPaths.replaceAll(/(?:init_module_|require_module_|module_)\d+/g, (token) => {
+    const existing = canonicalByToken.get(token);
+    if (existing !== undefined) {
+      return existing;
+    }
+    const canonical = `${token.replace(/\d+$/, "")}N${counter}`;
+    counter += 1;
+    canonicalByToken.set(token, canonical);
+    return canonical;
+  });
 }
 
 function normalizeCrashIdentity(signature: string): string {
