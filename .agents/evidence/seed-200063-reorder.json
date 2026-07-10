@@ -1,9 +1,9 @@
 {
   "proof": "seed 200063 events-reordered triage — retained artifacts, both snapshots, packaging ablation",
   "seed": 200063,
-  "generatedAt": "2026-07-10T20:46:19.783Z",
-  "head": "a8a525d52d24493d8d10f206328ec85fa3546d74",
-  "dirty": true,
+  "generatedAt": "2026-07-10T21:03:02.840Z",
+  "head": "dc3ff5dafa36d43d9491224f9789fcda04b7a8ff",
+  "dirty": false,
   "node": "v24.18.0",
   "coverageTags": [
     "axis:include-dependencies-recursively:true",
