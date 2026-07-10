@@ -2,10 +2,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { GeneratedCase } from "./generate.ts";
-import { deriveCoverageTags } from "./generate.ts";
+import { failureSignatureOf } from "./case-evaluator.ts";
 import type { DependencyOperation, EventRecord, ProgramModel } from "./model.ts";
-import { DEFAULT_CASE_SIZE, executeGeneratedCase, type CampaignOptions } from "./main.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -19,6 +17,10 @@ interface ShrinkOptions {
   /// `--wrap-all` selects wrap-all, and when the model lives inside a failure artifact the failing
   /// mode is auto-read from the sibling `replay.json` unless an explicit flag overrides it.
   readonly onDemandWrapping: boolean;
+  /// When true (`--broad`), keep a candidate on any SAME-KIND failure (the legacy behavior) instead of
+  /// requiring the exact normalized signature. Off by default: a minimized case must preserve the
+  /// concrete failure, not merely its class.
+  readonly broad: boolean;
 }
 
 /// Greedy model shrinker. Keeps a candidate edit only when the program stays valid and the
@@ -41,6 +43,7 @@ async function main(): Promise<void> {
     outPath: parsed.outPath,
     rolldownPackage: parsed.rolldownPackage,
     onDemandWrapping,
+    broad: parsed.broad,
   };
   process.stderr.write(
     `Shrinking under ${onDemandWrapping ? "on-demand" : "wrap-all"} wrapping.\n`,
@@ -63,7 +66,7 @@ async function main(): Promise<void> {
         continue;
       }
       const signature = await run(candidate, options);
-      if (signature !== undefined && sameFailure(baseline, signature)) {
+      if (signature !== undefined && sameFailure(baseline, signature, options.broad)) {
         current = candidate;
         shrunk = true;
         process.stderr.write(
@@ -80,9 +83,19 @@ async function main(): Promise<void> {
   process.stderr.write(`Final signature: ${finalSignature}\n`);
 }
 
+/// The optional levers of an organic chunk group, each individually droppable when shrinking.
+const ORGANIC_OPTIONAL_FIELDS = [
+  "test",
+  "minSize",
+  "maxSize",
+  "minShareCount",
+  "priority",
+  "includeDependenciesRecursively",
+] as const;
+
 /// Candidate edits, most aggressive first: drop a module (with every reference to it),
 /// then drop a single dependency, an entry, a schedule operation, a manual group, an event.
-function* candidates(program: ProgramModel): Generator<ProgramModel> {
+export function* candidates(program: ProgramModel): Generator<ProgramModel> {
   for (const module of program.modules) {
     yield dropModule(program, module.id);
   }
@@ -139,16 +152,43 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
   // Drop the organic chunk config entirely (falling back to default chunking). When the failure does
   // not depend on the organic composition this simplifies the case; the greedy pass keeps it only if
   // the failure kind is preserved, which also reveals whether the chunking is load-bearing.
-  if ((program.organicChunkGroups ?? []).length > 0) {
+  const organicGroups = program.organicChunkGroups ?? [];
+  if (organicGroups.length > 0) {
     const withoutOrganic = { ...program };
     delete (withoutOrganic as { organicChunkGroups?: unknown }).organicChunkGroups;
     yield withoutOrganic;
   }
+  // Drop a WHOLE organic group (when more than one) or a SINGLE optional field of a group, so an
+  // organic config shrinks field-by-field toward the minimal lever the bug needs — not just
+  // all-or-nothing. Each candidate is validated and kept only if the failure kind is preserved.
+  for (const [groupIndex, group] of organicGroups.entries()) {
+    if (organicGroups.length > 1) {
+      yield {
+        ...program,
+        organicChunkGroups: organicGroups.filter((_, index) => index !== groupIndex),
+      };
+    }
+    for (const field of ORGANIC_OPTIONAL_FIELDS) {
+      if (group[field] === undefined) {
+        continue;
+      }
+      const trimmed = { ...group };
+      delete (trimmed as Record<string, unknown>)[field];
+      yield {
+        ...program,
+        organicChunkGroups: organicGroups.map((candidate, index) =>
+          index === groupIndex ? trimmed : candidate,
+        ),
+      };
+    }
+  }
+  // Remove ANY single event (not just the last), including a module's SOLE event — an irrelevant event
+  // on an otherwise load-bearing module could not be dropped before, so the case never minimized past it.
   for (const [moduleIndex, module] of program.modules.entries()) {
-    if (module.events.length > 1) {
+    for (const [eventIndex] of module.events.entries()) {
       yield editModule(program, moduleIndex, {
         ...module,
-        events: module.events.slice(0, -1),
+        events: module.events.filter((_, index) => index !== eventIndex),
       } as typeof module);
     }
   }
@@ -185,6 +225,16 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
             ? {
                 ...dependency,
                 readMembers: dependency.readMembers.filter((_, i) => i !== memberIndex),
+                // A callable member (`ns.member()`) must also leave callMembers, else the removed
+                // member lingers in callMembers (which must be a subset of readMembers) and the
+                // candidate fails validation and is silently skipped.
+                ...(dependency.callMembers !== undefined
+                  ? {
+                      callMembers: dependency.callMembers.filter(
+                        (member) => member !== removedMember,
+                      ),
+                    }
+                  : {}),
               }
             : candidate,
         );
@@ -219,7 +269,15 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
       const dependencies = module.dependencies.map((candidate, index) =>
         index === depIndex ? rewired : candidate,
       );
-      yield editModule(program, moduleIndex, { ...module, dependencies } as typeof module);
+      // A namespace or require rewire changes the demanded member/read NAME (the local binding is
+      // unchanged); the event reads of that binding must follow, else they reference a member no longer
+      // demanded and the candidate fails validation and is silently skipped.
+      const memberRename = barrelMemberRename(dependency, rewired);
+      const events =
+        memberRename === undefined
+          ? module.events
+          : module.events.map((event) => renameEventReadMember(event, memberRename));
+      yield editModule(program, moduleIndex, { ...module, dependencies, events } as typeof module);
     }
   }
   // Drop a redundant synchronous cycle edge — a chord, or one interlocking cycle's extra edge. An
@@ -400,8 +458,69 @@ function rewireReadPastBarrel(
   return undefined;
 }
 
+/// Strip the folded reads (and the now-meaningless function-hidden wrapper) from an event, PRESERVING
+/// every other field. Spread-and-delete instead of reconstructing a fixed `{module, phase, value}`, so
+/// a future event field is not silently dropped when the last read is removed.
 function withoutReads(event: EventRecord): EventRecord {
-  return { module: event.module, phase: event.phase, value: event.value };
+  const stripped = { ...event };
+  delete (stripped as { reads?: unknown }).reads;
+  delete (stripped as { hiddenReadFn?: unknown }).hiddenReadFn;
+  return stripped;
+}
+
+interface MemberRename {
+  readonly binding: string;
+  readonly from: string;
+  readonly to: string;
+}
+
+/// The event-read member rename a barrel rewire implies: rewiring a namespace/require read past a
+/// barrel changes the demanded member NAME (the barrel's `exportedName` becomes the definer's
+/// `sourceName`) while the local binding is unchanged, so event reads of that binding must follow. A
+/// value-import rewire changes only the imported name, not the local read (no member), so no rename.
+function barrelMemberRename(
+  before: DependencyOperation,
+  after: DependencyOperation,
+): MemberRename | undefined {
+  if (
+    before.kind === "esm-namespace-import" &&
+    after.kind === "esm-namespace-import" &&
+    before.readMembers.length === 1 &&
+    after.readMembers.length === 1 &&
+    before.readMembers[0] !== after.readMembers[0]
+  ) {
+    return {
+      binding: before.localName,
+      from: before.readMembers[0] as string,
+      to: after.readMembers[0] as string,
+    };
+  }
+  if (
+    before.kind === "cjs-require" &&
+    after.kind === "cjs-require" &&
+    before.resultBinding !== undefined &&
+    before.readName !== undefined &&
+    after.readName !== undefined &&
+    before.readName !== after.readName
+  ) {
+    return { binding: before.resultBinding, from: before.readName, to: after.readName };
+  }
+  return undefined;
+}
+
+function renameEventReadMember(event: EventRecord, rename: MemberRename): EventRecord {
+  if (event.reads === undefined) {
+    return event;
+  }
+  let changed = false;
+  const reads = event.reads.map((read) => {
+    if (read.binding === rename.binding && read.member === rename.from) {
+      changed = true;
+      return { ...read, member: rename.to };
+    }
+    return read;
+  });
+  return changed ? { ...event, reads } : event;
 }
 
 /// The local read binding a dependency introduces (dropped along with the dependency), or undefined
@@ -493,46 +612,55 @@ function countDeps(program: ProgramModel): number {
   return program.modules.reduce((sum, module) => sum + module.dependencies.length, 0);
 }
 
-/// Returns the failure signature, or undefined when the case passes.
+/// Returns the failure signature, or undefined when the case passes. Delegates to the CaseEvaluator
+/// seam, so the shrinker no longer fabricates a campaign case merely to replay one loaded model.
 async function run(program: ProgramModel, options: ShrinkOptions): Promise<string | undefined> {
-  const generated: GeneratedCase = {
-    seed: 0,
-    size: DEFAULT_CASE_SIZE,
-    template: "random-mixed",
-    coverageTags: deriveCoverageTags(program),
-    program,
-  };
-  const campaignOptions: CampaignOptions = {
-    seed: 0,
-    cases: 1,
-    caseSize: DEFAULT_CASE_SIZE,
-    // The shrinker replays the loaded model as-is (size is cosmetic here), so the size mix is off.
-    sizeMix: false,
-    onDemandWrapping: options.onDemandWrapping,
+  return failureSignatureOf(program, {
     rolldownPackage: options.rolldownPackage,
-    outDir: "failures",
-    continueOnFail: false,
-  };
-  const result = await executeGeneratedCase(generated, campaignOptions);
-  return result.verdict.kind === "pass" ? undefined : result.verdict.signature;
+    onDemandWrapping: options.onDemandWrapping,
+  });
 }
 
-function sameFailure(baseline: string, candidate: string): boolean {
-  const kind = (signature: string) => signature.split(":", 1)[0] ?? signature;
-  if (kind(baseline) !== kind(candidate)) {
+/// The failure-preservation contract for a shrink step. Per `.agents/docs/redesign-principles.md`, a
+/// minimized case must preserve the CONCRETE failure signature, not merely a broad verdict class — so
+/// the DEFAULT is EXACT: the candidate's NORMALIZED signature must equal the baseline's, where
+/// normalization only rewrites the parts that legitimately move as the model shrinks (Rolldown's
+/// numeric `module_N` / `init_*` / `require_*` chunk-internal names and absolute temp/root paths) while
+/// keeping the whole failure structure — the error identity of a crash, the changed-event slice of a
+/// reorder. A reorder can no longer minimize into an unrelated reorder or another changed-event slice.
+///
+/// `broad: true` (the shrinker's `--broad` flag) restores the looser same-KIND matching for aggressive
+/// exploration, keeping only the crash error-identity — useful to find a smaller case at the cost of
+/// possibly changing the concrete failure, which the operator then re-verifies before filing.
+export function sameFailure(baseline: string, candidate: string, broad = false): boolean {
+  if (signatureKind(baseline) !== signatureKind(candidate)) {
     return false;
   }
-  if (kind(baseline) === "bundle-only-crash") {
-    // Preserve error identity with module names normalized.
-    const normalize = (signature: string) =>
-      signature
-        .replaceAll(/module_\d+/g, "module_x")
-        .split(":")
-        .slice(0, 2)
-        .join(":");
-    return normalize(baseline) === normalize(candidate);
+  if (broad) {
+    // Same kind; for a crash keep the normalized error identity, else accept any same-kind failure.
+    return signatureKind(baseline) === "bundle-only-crash"
+      ? normalizeCrashIdentity(baseline) === normalizeCrashIdentity(candidate)
+      : true;
   }
-  return true;
+  return normalizeSignature(baseline) === normalizeSignature(candidate);
+}
+
+function signatureKind(signature: string): string {
+  return signature.split(":", 1)[0] ?? signature;
+}
+
+/// Rewrite only the tokens that move as the model shrinks (Rolldown chunk-internal identifiers and
+/// absolute paths), preserving the rest of the signature so the concrete failure structure is compared.
+function normalizeSignature(signature: string): string {
+  return signature
+    .replaceAll(/module_\d+/g, "module_N")
+    .replaceAll(/\binit_[A-Za-z0-9_$]+/g, "init_N")
+    .replaceAll(/\brequire_[A-Za-z0-9_$]+/g, "require_N")
+    .replaceAll(/(?:\/[^\s"':]+)+\/(module-\d+\.[mc]js)/g, "$1");
+}
+
+function normalizeCrashIdentity(signature: string): string {
+  return normalizeSignature(signature).split(":").slice(0, 2).join(":");
 }
 
 export function parseArgs(argv: readonly string[]): {
@@ -541,12 +669,14 @@ export function parseArgs(argv: readonly string[]): {
   readonly rolldownPackage: string;
   readonly onDemandWrapping: boolean;
   readonly wrapModeExplicit: boolean;
+  readonly broad: boolean;
 } {
   let modelPath: string | undefined;
   let outPath = "shrunk-model.json";
   let rolldownPackage = process.env.ROLLDOWN_PACKAGE ?? "rolldown";
   let onDemandWrapping = true;
   let wrapModeExplicit = false;
+  let broad = false;
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index];
     if (argument === "--model") {
@@ -561,13 +691,15 @@ export function parseArgs(argv: readonly string[]): {
     } else if (argument === "--on-demand") {
       onDemandWrapping = true;
       wrapModeExplicit = true;
+    } else if (argument === "--broad") {
+      broad = true;
     } else {
       throw new Error(`Unknown argument: ${String(argument)}`);
     }
   }
   if (modelPath === undefined) {
     throw new Error(
-      "Usage: vp exec node src/shrink.ts --model <model.json> [--out <path>] [--rolldown-package <specifier>] [--wrap-all|--on-demand]",
+      "Usage: vp exec node src/shrink.ts --model <model.json> [--out <path>] [--rolldown-package <specifier>] [--wrap-all|--on-demand] [--broad]",
     );
   }
   return {
@@ -576,6 +708,7 @@ export function parseArgs(argv: readonly string[]): {
     rolldownPackage,
     onDemandWrapping,
     wrapModeExplicit,
+    broad,
   };
 }
 
