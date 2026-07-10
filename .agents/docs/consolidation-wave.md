@@ -150,9 +150,12 @@ now records the consumer contract and the single form dispatch.
 ## Deferred (corpus-semantic — needs its own re-acceptance wave)
 
 The renderer's category-ordered dependency emission (see
-[renderer-dependency-order](./renderer-dependency-order.md)); domain-separated RNGs, feature-budget
-reservation, and pass reordering; persisted capture/profile/chunking schema migration. Each changes
-emitted source or RNG and is out of scope for a byte-identity-preserving consolidation. (Round 3 DID
-reconcile dynamic registrations against the finalized graph — finding 5 — but byte-identically, by sorting
-the graph's edges on their creation ordinal rather than re-deriving order from a module scan, so the
-seeded schedule is unchanged.)
+[renderer-dependency-order](./renderer-dependency-order.md) — **FIXED in W14a**, its first commit
+restored array order and re-accepted the golden); domain-separated RNGs, feature-budget
+reservation, and pass reordering; persisted capture/profile/chunking schema migration (the chunking
+half moved into the persisted BuildConfig in W14a — see
+[w14a-structural-foundation](./w14a-structural-foundation.md)). Each changed emitted source or RNG and
+was out of scope for a byte-identity-preserving consolidation. (Round 3 DID reconcile dynamic
+registrations against the finalized graph — finding 5 — but byte-identically, by sorting the graph's
+edges on their creation ordinal rather than re-deriving order from a module scan, so the seeded schedule
+is unchanged.)

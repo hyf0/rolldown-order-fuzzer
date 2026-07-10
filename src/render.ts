@@ -8,7 +8,14 @@ import {
   type AnalyzedProgram,
   type RenderedExportForm,
 } from "./analyzed-program.ts";
-import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
+import type {
+  EntryModel,
+  EsmDynamicImportOperation,
+  ModuleFormat,
+  ModuleModel,
+  ProgramModel,
+  ValueRead,
+} from "./model.ts";
 import { moduleProfile, readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
 import { EXECUTION_PROTOCOL_VERSION } from "./protocol.ts";
@@ -122,16 +129,17 @@ function importSpecifier(fromPath: string, toPath: string): string {
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
 }
 
-/// Dependencies render one statement each — no dedup by specifier, so a multi-kind pair (the same
-/// target imported statically AND dynamically) emits several legal statements for one specifier. The
-/// emission order is deterministic but currently BY CATEGORY, not by dependency-array position: CJS
-/// emits all requires, then all dynamic registrations; ESM emits all static imports, then all
-/// re-exports, then all dynamic registrations. Because generated barrels are re-export-only and a
-/// module never mixes imports with re-exports of overlapping requested-module order, this matches
-/// array order today — but the model permits a module that both imports and re-exports, whose
-/// requested-module evaluation order this category grouping would reorder. Correcting it to a single
-/// ordered requested-module stream is scheduled for the next interop wave (which re-accepts the
-/// corpus); the current category order is PINNED by `render.test.ts` so the change is deliberate. See
+/// Dependencies render ONE statement each in DEPENDENCY-ARRAY ORDER — a single ordered stream, not the
+/// category buckets this used to collect (all imports, then all re-exports, then all dynamics). No dedup
+/// by specifier, so a multi-kind pair (the same target imported statically AND dynamically) emits
+/// several legal statements for one specifier. ESM emits one ordered static-request stream spanning
+/// `import` and `export … from` re-exports (interleaved per model order), with dynamic-import
+/// registrations in their array slots too; CJS emits one ordered executable stream of requires and
+/// dynamic registrations in model order. This restores the long-standing "in array order" contract the
+/// consolidation wave had pinned to category order: the model permits a module that BOTH imports and
+/// re-exports (the coming interop/package barrels), whose requested-module evaluation order follows
+/// source position, so the emitted order MUST equal the model's dependency order for the validator's
+/// evaluation-order reasoning to match what Rolldown sees. See
 /// `.agents/docs/renderer-dependency-order.md`.
 function renderModule(
   module: ModuleModel,
@@ -141,31 +149,27 @@ function renderModule(
 ): string {
   const readable = readableBindingsOf(module.dependencies);
   const selfPath = getRequiredPath(modulePaths, module.id);
+  const dynamicRegistration = (dependency: EsmDynamicImportOperation, specifier: string): string =>
+    `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`;
 
   if (module.format === "cjs") {
-    const requireLines: string[] = [];
-    const dynamicRegistrationLines: string[] = [];
+    const dependencyLines: string[] = [];
     for (const dependency of module.dependencies) {
       const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
       if (dependency.kind === "esm-dynamic-import") {
         // `import()` is legal inside CommonJS in Node.
-        dynamicRegistrationLines.push(
-          `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`,
-        );
+        dependencyLines.push(dynamicRegistration(dependency, specifier));
       } else if (dependency.resultBinding !== undefined) {
         // Bind the require result so the target's exports can be read into events and exports.
-        requireLines.push(`const ${dependency.resultBinding} = require("${specifier}");`);
+        dependencyLines.push(`const ${dependency.resultBinding} = require("${specifier}");`);
       } else {
-        requireLines.push(`require("${specifier}");`);
+        dependencyLines.push(`require("${specifier}");`);
       }
     }
 
     const sections: string[][] = [];
-    if (requireLines.length > 0) {
-      sections.push(requireLines);
-    }
-    if (dynamicRegistrationLines.length > 0) {
-      sections.push(dynamicRegistrationLines);
+    if (dependencyLines.length > 0) {
+      sections.push(dependencyLines);
     }
     if (module.events.length > 0) {
       sections.push(renderEvents(module));
@@ -177,50 +181,40 @@ function renderModule(
     return renderSections(sections);
   }
 
-  const importLines: string[] = [];
-  const reexportLines: string[] = [];
-  const dynamicRegistrationLines: string[] = [];
+  const dependencyLines: string[] = [];
   const usedBindings = new Set<string>();
   for (const dependency of module.dependencies) {
     const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
     if (dependency.kind === "esm-side-effect-import") {
-      importLines.push(`import "${specifier}";`);
+      dependencyLines.push(`import "${specifier}";`);
     } else if (dependency.kind === "esm-value-import") {
       usedBindings.add(dependency.localName);
-      importLines.push(
+      dependencyLines.push(
         `import { ${dependency.importedName} as ${dependency.localName} } from "${specifier}";`,
       );
     } else if (dependency.kind === "esm-namespace-import") {
       usedBindings.add(dependency.localName);
-      importLines.push(`import * as ${dependency.localName} from "${specifier}";`);
+      dependencyLines.push(`import * as ${dependency.localName} from "${specifier}";`);
     } else if (dependency.kind === "esm-reexport-named") {
-      reexportLines.push(
+      dependencyLines.push(
         dependency.sourceName === dependency.exportedName
           ? `export { ${dependency.sourceName} } from "${specifier}";`
           : `export { ${dependency.sourceName} as ${dependency.exportedName} } from "${specifier}";`,
       );
     } else if (dependency.kind === "esm-reexport-star") {
-      reexportLines.push(`export * from "${specifier}";`);
+      dependencyLines.push(`export * from "${specifier}";`);
     } else {
-      dynamicRegistrationLines.push(
-        `globalThis.__orderDynamicImports[${serializeJavaScriptValue(dependency.registration)}] = () => import("${specifier}");`,
-      );
+      dependencyLines.push(dynamicRegistration(dependency, specifier));
     }
   }
 
   const localExports = localExportsFor(module, requestedExports);
   const sections: string[][] = [];
-  if (importLines.length > 0) {
-    sections.push(importLines);
-  }
-  if (reexportLines.length > 0) {
-    sections.push(reexportLines);
+  if (dependencyLines.length > 0) {
+    sections.push(dependencyLines);
   }
   if (module.hasTopLevelAwait === true) {
     sections.push(["await 0;"]);
-  }
-  if (dynamicRegistrationLines.length > 0) {
-    sections.push(dynamicRegistrationLines);
   }
   if (module.events.length > 0) {
     sections.push(renderEvents(module));

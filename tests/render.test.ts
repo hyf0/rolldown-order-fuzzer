@@ -275,9 +275,12 @@ describe("renderProgram", () => {
 
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
-        "await 0;",
-        "",
+        // The dynamic-import registration is a dependency, so it renders in the dependency stream
+        // before the top-level `await 0` body statement (imports hoist; a dynamic registration is a
+        // plain sync assignment, so its position relative to `await 0` does not change observed order).
         'globalThis.__orderDynamicImports["load-lazy"] = () => import("./module-0001.mjs");',
+        "",
+        "await 0;",
         "",
         'globalThis.__orderEvent({"module":"async-entry","phase":"evaluate","value":"after-await"});',
         "",
@@ -1285,9 +1288,10 @@ describe("renderProgram", () => {
 
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
+        // The three dependencies (side-effect import, value import, dynamic registration) render in
+        // ONE ordered stream — a single section, no blank line between them — in dependency-array order.
         'import "./module-0001.mjs";',
         'import { v as libV } from "./module-0001.mjs";',
-        "",
         'globalThis.__orderDynamicImports["load-lib"] = () => import("./module-0001.mjs");',
         "",
         'globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: 1 + libV });',
@@ -1310,12 +1314,11 @@ describe("renderProgram", () => {
     });
   });
 
-  // Finding 7 (renderer dependency order): PIN the CURRENT category-ordered emission. Dependencies
-  // render by category (ESM: imports, then re-exports, then dynamic registrations; CJS: requires, then
-  // dynamic registrations), NOT by dependency-array position. These cases put a dynamic import FIRST in
-  // the array yet expect the static edge to render FIRST, locking today's behavior so the scheduled
-  // interop-wave correction to a single ordered requested-module stream is deliberate and re-accepted.
-  test("PINS category-ordered dependency emission (ESM: imports before dynamic registrations)", () => {
+  // Renderer dependency order (fixed): dependencies render ONE statement each in dependency-ARRAY
+  // order, so a dynamic import first in the array renders its registration BEFORE a later static edge —
+  // the single ordered requested-module stream the interop/package barrels need (a module that both
+  // imports and re-exports emits in source position). See `.agents/docs/renderer-dependency-order.md`.
+  test("renders dependencies in array order (ESM: a leading dynamic import before a later static import)", () => {
     const program = {
       modules: [
         {
@@ -1345,11 +1348,65 @@ describe("renderProgram", () => {
     const dynamicAt = contents.indexOf("__orderDynamicImports");
     expect(importAt).toBeGreaterThanOrEqual(0);
     expect(dynamicAt).toBeGreaterThanOrEqual(0);
-    // The static import renders before the dynamic registration although the dynamic edge is first.
-    expect(importAt).toBeLessThan(dynamicAt);
+    // The dynamic registration renders first because the dynamic edge is first in the dependency array.
+    expect(dynamicAt).toBeLessThan(importAt);
   });
 
-  test("PINS category-ordered dependency emission (CJS: requires before dynamic registrations)", () => {
+  test("renders dependencies in array order (ESM: an interleaved import then re-export then import)", () => {
+    const program = {
+      modules: [
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "a", importedName: "va", localName: "la" },
+            { kind: "esm-reexport-star", target: "b" },
+            { kind: "esm-value-import", target: "c", importedName: "vc", localName: "lc" },
+          ],
+          events: [
+            {
+              module: "barrel",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "la" }, { binding: "lc" }],
+            },
+          ],
+        },
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "a", phase: "evaluate", value: 2 }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 3 }],
+        },
+        {
+          id: "c",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "c", phase: "evaluate", value: 4 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "barrel" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    const contents = fileContents(renderProgram(analyzeProgram(program)).files, "module-0000.mjs");
+    const importAAt = contents.indexOf("import { va as la }");
+    const reexportBAt = contents.indexOf("export * from");
+    const importCAt = contents.indexOf("import { vc as lc }");
+    expect(importAAt).toBeGreaterThanOrEqual(0);
+    expect(reexportBAt).toBeGreaterThanOrEqual(0);
+    expect(importCAt).toBeGreaterThanOrEqual(0);
+    // Imports and `export … from` re-exports interleave in dependency-array order, not by category.
+    expect(importAAt).toBeLessThan(reexportBAt);
+    expect(reexportBAt).toBeLessThan(importCAt);
+  });
+
+  test("renders dependencies in array order (CJS: a leading dynamic import before a later require)", () => {
     const program = {
       modules: [
         {
@@ -1384,8 +1441,8 @@ describe("renderProgram", () => {
     const dynamicAt = contents.indexOf("__orderDynamicImports");
     expect(requireAt).toBeGreaterThanOrEqual(0);
     expect(dynamicAt).toBeGreaterThanOrEqual(0);
-    // The require renders before the dynamic registration although the dynamic edge is first.
-    expect(requireAt).toBeLessThan(dynamicAt);
+    // The dynamic registration renders first because the dynamic edge is first in the dependency array.
+    expect(dynamicAt).toBeLessThan(requireAt);
   });
 });
 

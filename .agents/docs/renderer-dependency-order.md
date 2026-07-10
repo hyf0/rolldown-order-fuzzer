@@ -1,39 +1,40 @@
-# Renderer dependency order (pinned, correction deferred)
+# Renderer dependency order (fixed)
 
-The renderer emits one statement per dependency, but the ORDER is currently **by category**, not by
-dependency-array position:
+The renderer emits ONE statement per dependency in DEPENDENCY-ARRAY ORDER — a single ordered stream, not
+the category buckets it briefly used. `renderModule` (`render.ts`) iterates `module.dependencies` once
+and pushes one statement per edge:
 
-- **CJS** (`renderModule`): all `require(...)` statements first, then all dynamic-import registrations.
-- **ESM**: all static imports first, then all `export … from` re-exports, then all dynamic-import
-  registrations.
+- **ESM**: one ordered static-request stream spanning `import` and `export … from` re-exports
+  (interleaved per model order), with dynamic-import registrations emitted in their array slots too.
+- **CJS**: one ordered executable stream of `require(...)` statements and dynamic-import registrations in
+  model order.
 
-This contradicts the long-standing renderer comment that dependencies render "in array order". The
-comment was corrected (see `render.ts` `renderModule`) to describe the actual category grouping.
+Top-level await (`await 0;`), events, and synthesized exports follow the dependency stream, in that
+order. Because a dynamic-import registration and `await 0;` are plain synchronous body statements
+(static imports/re-exports hoist regardless of textual position), their relative order never changes the
+observed source-run event order — but the dependency stream itself now matches the model's array order
+exactly.
 
-## Why it does not currently matter
+## Why array order is the contract
 
-Generated barrels are re-export-only, and no generated module both imports a module AND re-exports in a
-way that makes the requested-module evaluation order observable across the category boundary. So for the
-CURRENT corpus, category order and array order coincide, and the differential oracle is unaffected.
+The model permits a module that BOTH imports a module AND re-exports (`import { x } from "./a"; export {
+y } from "./b"`) — the interop / package barrels of the W14 barrel wave (a plain-import-then-source-less
+re-export barrel, a mixed local-export + `export *` barrel). For such a module, requested-module
+evaluation order follows SOURCE POSITION, in both the Node source run and Rolldown. The renderer must
+therefore emit the requests in the model's dependency order so that:
 
-## Why it must be corrected in the next interop wave
+- the emitted source Rolldown sees matches the model the validator reasoned about (which edge closes a
+  cycle, which module evaluates first), and
+- a future mixed import/re-export module is not silently reordered by a category grouping that emitted
+  all imports before all re-exports.
 
-The MODEL permits a normal module that also re-exports (`import { x } from "./a"; export { y } from
-"./b"`). For such a module, requested-module evaluation order follows source position, but the category
-grouping would emit all imports before all re-exports regardless of their interleaving — silently
-changing the order Rolldown sees. A wave that generates mixed import/re-export modules must first replace
-the category grouping with a single ordered requested-module stream (one ESM static-request stream
-spanning imports and `export … from`, one ordered executable CJS dependency stream), and RE-ACCEPT the
-corpus (emitted-source equivalence checks plus Rolldown campaigns), because correcting the order changes
-emitted source bytes.
+## History (the earlier PIN-ONLY decision, now superseded)
 
-## Pinned, not changed (this consolidation wave)
-
-Correcting the order is an **emitted-corpus semantic change** and is out of scope for the consolidation
-wave (which preserves the corpus byte-for-byte). The current category order is therefore PINNED by two
-tests in `render.test.ts` ("PINS category-ordered dependency emission …") that place a dynamic import
-first in the dependency array yet assert the static edge renders first. Those pins make the future
-correction a deliberate, reviewed change rather than an accidental drift.
-
-The safe, corpus-preserving part of the review's proposal — extracting the duplicated dynamic-registration
-formatter shared by the CJS and ESM branches — can land independently; it does not change emitted bytes.
+The consolidation wave temporarily grouped dependencies BY CATEGORY (all imports, then all re-exports,
+then all dynamics for ESM; all requires, then all dynamics for CJS) and PINNED that order with two
+`render.test.ts` tests, because correcting it changes emitted source bytes and was out of scope for a
+byte-identity-preserving consolidation. W14a restored the array-order contract as its first commit: the
+category buckets and the pin tests are gone, the golden corpus was regenerated (labeled `golden:
+renderer array-order reacceptance`), and the corpus was re-accepted against the frozen Rolldown snapshot
+(catching-power in band, the family-A red rate unchanged). This is the deferred correction the
+consolidation wave's `renderer-dependency-order` note promised the interop wave would make.
