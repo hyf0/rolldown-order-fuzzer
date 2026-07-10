@@ -8,6 +8,7 @@ import type {
   ManualChunkGroup,
   ModuleFormat,
   ModuleModel,
+  OrganicChunkGroupConfig,
   ProgramModel,
   ScheduleOperation,
   ValueRead,
@@ -39,13 +40,30 @@ export interface GeneratedCase {
   readonly program: ProgramModel;
 }
 
-export const MAX_CASE_SIZE = 16;
+export const MAX_CASE_SIZE = 48;
 
 /// Upper bound on modules in a random-mixed program (DAG + optional cycle cluster + inserted
-/// barrels), so a case's rendered graph stays small enough to build and execute quickly. The DAG
-/// caps at 11; the cycle cluster (base ring + optional interlocking sub-cycle) is sized within
-/// `MAX_RANDOM_MODULES - dagCount - 2`, reserving two slots for barrel modules.
-const MAX_RANDOM_MODULES = 16;
+/// barrels). Raised from 16 to 48 (wave 6, scale axis) so a single case can host the dozens of
+/// modules a real chunk carries, stressing intra-chunk statement placement. The DAG scales with the
+/// requested size (capped at `MAX_RANDOM_MODULES - 2`); the cycle cluster (base ring + optional
+/// interlocking sub-cycle) is sized within `MAX_RANDOM_MODULES - dagCount - 2`, reserving two slots
+/// for barrel modules.
+const MAX_RANDOM_MODULES = 48;
+
+/// Sample a per-case generation size from a weighted small/medium/large spread. A campaign that does
+/// not pin `--case-size` draws one of these per case (seeded by the case seed) so a single run covers
+/// every scale — small graphs for density and large ones for intra-chunk placement. Deterministic:
+/// the same seed always yields the same size. All values stay within `[1, MAX_CASE_SIZE]`.
+export function sampleCaseSize(rng: SeededRng): number {
+  const roll = rng.integer(100);
+  if (roll < 45) {
+    return 6 + rng.integer(7); // small: 6..12
+  }
+  if (roll < 80) {
+    return 16 + rng.integer(9); // medium: 16..24
+  }
+  return 32 + rng.integer(17); // large: 32..48
+}
 
 export function generateCase(
   seed: number,
@@ -295,7 +313,10 @@ function buildRandomMixed(
     // Two thirds ESM keeps interop pairs frequent without starving pure-ESM shapes.
     return rng.integer(3) < 2 ? "esm" : "cjs";
   };
-  const dagCount = Math.min(3 + rng.integer(size + 1), 11);
+  // The DAG scales with the requested size (up to `MAX_RANDOM_MODULES - 2`, reserving room for the
+  // cycle cluster and barrels), so a large case really does host dozens of modules. Small sizes keep
+  // the historical `3 + rng.integer(size + 1)` shape since the raised cap never binds there.
+  const dagCount = Math.min(3 + rng.integer(size + 1), MAX_RANDOM_MODULES - 2);
   const ringCount = rng.integer(4) === 0 ? 2 + rng.integer(2) : 0;
   const drafts: RandomModuleDraft[] = Array.from({ length: dagCount }, (_, index) => ({
     id: `m${index}`,
@@ -321,7 +342,9 @@ function buildRandomMixed(
     }
     usedEdges.add(edgeKey);
     if (importer.format === "cjs") {
-      if (rng.integer(4) === 0) {
+      // Dynamic-edge density raised modestly (wave 6): CJS ~1/3 (was 1/4), so route-level dynamic
+      // chunks are dense, matching real apps with dozens of dynamically-imported modules.
+      if (rng.integer(3) === 0) {
         const registration = `dyn-${importer.id}-${target.id}`;
         importer.dependencies.push({
           kind: "esm-dynamic-import",
@@ -342,10 +365,12 @@ function buildRandomMixed(
       }
       return;
     }
-    const roll = rng.integer(6);
-    if (roll < 3 || (!allowRead && roll < 5)) {
+    // Dynamic-edge density raised modestly (wave 6): ESM ~1/4 (was 1/6). `roll >= 6` (of 8) is a
+    // dynamic import; side-effect and value each take three of the remaining bands.
+    const roll = rng.integer(8);
+    if (roll < 3 || (!allowRead && roll < 6)) {
       importer.dependencies.push({ kind: "esm-side-effect-import", target: target.id });
-    } else if (roll < 5) {
+    } else if (roll < 6) {
       // A value edge. When the target is ESM, a minority become namespace imports: `import * as ns`
       // + a folded `ns.v<target>` member read, exercising the namespace-shape interop surface. CJS
       // targets stay value imports — Node's `import * of CJS` namespace shape legitimately differs
@@ -387,6 +412,45 @@ function buildRandomMixed(
     const target = drafts[targetIndex];
     if (importer !== undefined && target !== undefined) {
       addDependency(importer, target);
+    }
+  }
+
+  // Nested dynamic chains (wave 6): bias some dynamic edges to ORIGINATE from a module that is
+  // itself a dynamic-import target — a dynamic import inside a dynamically-imported module, the
+  // dozens-of-nested-route-chunks shape real apps have and which happened only by rare accident
+  // before. Such an inner import only evaluates once the outer dynamic import fires. Forward-only
+  // (target index strictly greater), reusing `usedEdges` so no duplicate/cyclic edge is created.
+  if (rng.integer(3) !== 0) {
+    const dynamicTargets = new Set(
+      drafts.flatMap((draft) =>
+        draft.dependencies.flatMap((dependency) =>
+          dependency.kind === "esm-dynamic-import" ? [dependency.target] : [],
+        ),
+      ),
+    );
+    for (let importerIndex = 0; importerIndex < dagCount; importerIndex += 1) {
+      const importer = drafts[importerIndex];
+      if (importer === undefined || !dynamicTargets.has(importer.id) || rng.integer(3) === 0) {
+        continue;
+      }
+      const forwardCandidates: RandomModuleDraft[] = [];
+      for (let targetIndex = importerIndex + 1; targetIndex < dagCount; targetIndex += 1) {
+        const candidate = drafts[targetIndex];
+        if (candidate !== undefined && !usedEdges.has(dependencyKey(importer, candidate.id))) {
+          forwardCandidates.push(candidate);
+        }
+      }
+      if (forwardCandidates.length === 0) {
+        continue;
+      }
+      const target = forwardCandidates[rng.integer(forwardCandidates.length)];
+      if (target === undefined) {
+        continue;
+      }
+      usedEdges.add(dependencyKey(importer, target.id));
+      const registration = `dynnest-${importer.id}-${target.id}`;
+      importer.dependencies.push({ kind: "esm-dynamic-import", target: target.id, registration });
+      registrations.push({ owner: importer.id, registration });
     }
   }
 
@@ -591,7 +655,7 @@ function buildRandomMixed(
 
   const schedule = buildRandomSchedule(rng, modules, entries, registrations);
 
-  const manualChunkGroups = buildRandomManualGroups(rng, drafts, cycleMemberIds);
+  const chunking = buildChunkingConfig(rng, drafts, cycleMemberIds, entries.length);
 
   // Flag a minority of eligible modules with `sideEffects: false` package metadata. Flagged modules
   // emit no events (their events are stripped), so the bundler's legal DCE cannot silently drop an
@@ -611,9 +675,123 @@ function buildRandomMixed(
       modules: finalModules,
       entries,
       schedule,
-      ...(manualChunkGroups.length > 0 ? { manualChunkGroups } : {}),
+      ...(chunking.manualChunkGroups !== undefined
+        ? { manualChunkGroups: chunking.manualChunkGroups }
+        : {}),
+      ...(chunking.organicChunkGroups !== undefined
+        ? { organicChunkGroups: chunking.organicChunkGroups }
+        : {}),
     },
   };
+}
+
+/// The per-case chunking-config axis (wave 6): roll one of three modes and produce the matching
+/// config. The `roll < 9` band (45%) attempts `organic` — size/share-threshold groups whose
+/// composition rolldown decides — and always succeeds for a random-mixed graph (≥3 modules), so
+/// organic lands at ~43% of random-mixed cases, above the ≥40% target. The `[9, 15)` band attempts
+/// `explicit` (the audited manual groups — exact module lists, incl. splitting a cycle across groups),
+/// but `buildRandomManualGroups` declines by its own roll on many graphs, so realized explicit is
+/// lower (~12%) and every decline falls through to `default`; the `roll >= 15` band is `default`
+/// outright. Returns at most one of the two group fields — the modes are mutually exclusive
+/// (validated). Chunking is bundle-side only, so no source semantics change.
+function buildChunkingConfig(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  cycleMemberIds: ReadonlySet<string>,
+  entryCount: number,
+): {
+  readonly manualChunkGroups?: readonly ManualChunkGroup[];
+  readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
+} {
+  const roll = rng.integer(20);
+  if (roll < 9) {
+    const organicChunkGroups = buildOrganicChunkGroups(rng, drafts, entryCount);
+    if (organicChunkGroups.length > 0) {
+      return { organicChunkGroups };
+    }
+  }
+  const manualChunkGroups = buildRandomManualGroups(rng, drafts, cycleMemberIds);
+  if (roll < 15 && manualChunkGroups.length > 0) {
+    return { manualChunkGroups };
+  }
+  return {};
+}
+
+/// Build 1–2 organic (size/share-driven) chunk groups whose composition rolldown resolves. Rolls one
+/// of a few empirically-verified "flavors" so each run of the axis produces varied compositions
+/// rather than dead coverage (thresholds that never change the output). Every module is ~35–635
+/// bytes (measured), so the size thresholds below meaningfully split or merge; `minShareCount` is
+/// capped at the entry count so a share threshold can actually capture something. `test`, when set,
+/// is a regex SOURCE over the module's file path (`\.mjs$` / `\.cjs$` gives a format-vendor merge).
+function buildOrganicChunkGroups(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  entryCount: number,
+): readonly OrganicChunkGroupConfig[] {
+  if (drafts.length < 2) {
+    return [];
+  }
+  const idr = (): boolean => rng.boolean();
+  const shareCap = Math.max(1, entryCount);
+  const formatTest = (): string => (rng.boolean() ? "\\.mjs$" : "\\.cjs$");
+  switch (rng.integer(5)) {
+    case 0:
+      // Vendor-share merge: capture modules referenced by >= N entry chunks into one shared chunk.
+      return [
+        {
+          name: "organic-vendor",
+          minShareCount: Math.min(1 + rng.integer(3), shareCap),
+          includeDependenciesRecursively: idr(),
+        },
+      ];
+    case 1:
+      // Size-split: one broad group split by byte size into several close-to-maxSize chunks.
+      return [
+        {
+          name: "organic-sized",
+          minShareCount: 1,
+          maxSize: 200 + rng.integer(1000),
+          includeDependenciesRecursively: idr(),
+        },
+      ];
+    case 2:
+      // Broad merge: one group hosting many modules — stresses intra-chunk statement placement.
+      return [
+        {
+          name: "organic-broad",
+          minShareCount: 1,
+          ...(rng.boolean() ? { minSize: 128 + rng.integer(384) } : {}),
+          includeDependenciesRecursively: idr(),
+        },
+      ];
+    case 3:
+      // Format vendor: a `.mjs$` / `.cjs$` regex group, a share threshold on top.
+      return [
+        {
+          name: "organic-format",
+          test: formatTest(),
+          minShareCount: Math.min(1 + rng.integer(2), shareCap),
+          includeDependenciesRecursively: idr(),
+        },
+      ];
+    default:
+      // Two competing groups with distinct priorities — a "hot" format group and a shared group.
+      return [
+        {
+          name: "organic-hot",
+          test: formatTest(),
+          priority: 2,
+          includeDependenciesRecursively: idr(),
+        },
+        {
+          name: "organic-shared",
+          minShareCount: Math.min(2, shareCap),
+          priority: 1,
+          ...(rng.boolean() ? { maxSize: 300 + rng.integer(700) } : {}),
+          includeDependenciesRecursively: idr(),
+        },
+      ];
+  }
 }
 
 /// A dependency that forwards an export without binding it locally (a barrel edge).
@@ -1153,11 +1331,22 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   }
 
   const groups = program.manualChunkGroups ?? [];
+  const organicGroups = program.organicChunkGroups ?? [];
   if (groups.length > 0) {
     tags.add("mechanism:manual-chunks");
   }
   if (manualGroupsSeparateFormats(groups, modulesById)) {
     tags.add("mechanism:separate-interop");
+  }
+  // The per-case chunking-config axis (wave 6). Organic groups (rolldown decides composition) take
+  // precedence over manual groups; the two are mutually exclusive by construction.
+  if (organicGroups.length > 0) {
+    tags.add("chunking:organic");
+    tags.add("mechanism:organic-chunks");
+  } else if (groups.length > 0) {
+    tags.add("chunking:explicit");
+  } else {
+    tags.add("chunking:default");
   }
 
   const registrations = program.modules.flatMap((module) =>
@@ -1174,6 +1363,9 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     );
     if (registrations.some((registration) => !triggeredRegistrations.has(registration))) {
       tags.add("mechanism:untriggered-dynamic-import");
+    }
+    if (hasNestedDynamicChain(program, modulesById)) {
+      tags.add("mechanism:nested-dynamic");
     }
   }
 
@@ -1312,6 +1504,36 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   }
 
   return [...tags].sort();
+}
+
+/// A nested dynamic chain: a module that registers a dynamic import yet is itself NOT synchronously
+/// reachable from any entry (so it only evaluates once an outer dynamic import fires) and IS the
+/// target of a dynamic import — i.e. a dynamic import inside a dynamically-imported module. This is
+/// the dense route-splitting shape wave 6 deliberately produces; before, it occurred only by rare
+/// accident.
+function hasNestedDynamicChain(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): boolean {
+  const syncReachableFromEntries = new Set<string>();
+  for (const entry of program.entries) {
+    for (const reached of synchronouslyReachable(entry.moduleId, modulesById)) {
+      syncReachableFromEntries.add(reached);
+    }
+  }
+  const dynamicTargets = new Set(
+    program.modules.flatMap((module) =>
+      module.dependencies.flatMap((dependency) =>
+        dependency.kind === "esm-dynamic-import" ? [dependency.target] : [],
+      ),
+    ),
+  );
+  return program.modules.some(
+    (module) =>
+      dynamicTargets.has(module.id) &&
+      !syncReachableFromEntries.has(module.id) &&
+      module.dependencies.some((dependency) => dependency.kind === "esm-dynamic-import"),
+  );
 }
 
 function deriveTemplateName(

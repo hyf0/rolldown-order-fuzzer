@@ -44,8 +44,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 14", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(14);
+  test("uses artifact schema version 15", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(15);
   });
 
   test("parses and validates --format-regime", () => {
@@ -76,6 +76,7 @@ describe("parseCliArgs", () => {
       seed: 4_294_967_295,
       cases: 12,
       caseSize: 9,
+      sizeMix: false,
       onDemandWrapping: true,
       rolldownPackage: "file:///tmp/rolldown.mjs",
       outDir: "artifacts",
@@ -87,6 +88,14 @@ describe("parseCliArgs", () => {
     });
   });
 
+  test("enables the size mix by default and disables it when --case-size is given", () => {
+    // No --case-size: the campaign draws each case's size from the small/medium/large spread.
+    expect(parseCliArgs([])).toMatchObject({ sizeMix: true, caseSize: DEFAULT_CASE_SIZE });
+    expect(parseCliArgs(["--seed", "7"])).toMatchObject({ sizeMix: true });
+    // Explicit --case-size pins the size and turns the mix off.
+    expect(parseCliArgs(["--case-size", "32"])).toMatchObject({ sizeMix: false, caseSize: 32 });
+  });
+
   test("rejects unknown, missing, conflicting, and invalid arguments", () => {
     expect(() => parseCliArgs(["--unknown"])).toThrowError("Unknown argument: --unknown");
     expect(() => parseCliArgs(["--seed"])).toThrowError("Missing value for --seed");
@@ -95,11 +104,12 @@ describe("parseCliArgs", () => {
     );
     expect(() => parseCliArgs(["--cases", "0"])).toThrowError("--cases must be a positive integer");
     expect(() => parseCliArgs(["--case-size", "0"])).toThrowError(
-      "--case-size must be an integer from 1 through 16",
+      "--case-size must be an integer from 1 through 48",
     );
-    expect(() => parseCliArgs(["--case-size", "17"])).toThrowError(
-      "--case-size must be an integer from 1 through 16",
+    expect(() => parseCliArgs(["--case-size", "49"])).toThrowError(
+      "--case-size must be an integer from 1 through 48",
     );
+    expect(parseCliArgs(["--case-size", "48"])).toMatchObject({ caseSize: 48, sizeMix: false });
     expect(parseCliArgs(["--wrap-all"])).toMatchObject({ onDemandWrapping: false });
     expect(() => parseCliArgs(["--out-dir", ""])).toThrowError("--out-dir must not be empty");
     expect(() => parseCliArgs(["--out-dir", "--continue-on-fail"])).toThrowError(
@@ -1098,6 +1108,7 @@ describe("writeFailureArtifacts", () => {
           seed: generated.seed,
           cases: 1,
           caseSize: generated.size,
+          sizeMix: false,
           onDemandWrapping: true,
           rolldownPackage: options.rolldownPackage,
           outDir: directory,
@@ -1432,6 +1443,7 @@ function campaignOptions(overrides: Partial<CampaignOptions> = {}): CampaignOpti
     seed: 100,
     cases: 1,
     caseSize: DEFAULT_CASE_SIZE,
+    sizeMix: false,
     onDemandWrapping: true,
     rolldownPackage: "rolldown",
     outDir: "failures",

@@ -11,9 +11,11 @@ import {
   FORMAT_REGIMES,
   generateCase,
   MAX_CASE_SIZE,
+  sampleCaseSize,
   type FormatRegime,
   type GeneratedCase,
 } from "./generate.ts";
+import { SeededRng } from "./rng.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -35,14 +37,20 @@ const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
+// 15: wave 6 — organic (size/share-driven) chunk groups in the model, the raised size ceiling with a
+// per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 14 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 15 as const;
 
 export interface CampaignOptions {
   readonly seed: number;
   readonly cases: number;
   readonly caseSize: number;
+  /// When true (the default, i.e. `--case-size` was NOT given), each case draws its size from the
+  /// weighted small/medium/large spread (`sampleCaseSize`), so one campaign covers every scale;
+  /// `caseSize` is then only the fallback. When false, every case uses the fixed `caseSize`.
+  readonly sizeMix: boolean;
   readonly onDemandWrapping: boolean;
   /// Forces every case onto the random generator with a fixed format regime; absent means the
   /// generator's own weighted mix of regimes and fixed templates.
@@ -144,6 +152,7 @@ const DEFAULT_OPTIONS: CampaignOptions = {
   seed: 1,
   cases: 1,
   caseSize: DEFAULT_CASE_SIZE,
+  sizeMix: true,
   onDemandWrapping: true,
   rolldownPackage: process.env.ROLLDOWN_PACKAGE ?? "rolldown",
   outDir: "failures",
@@ -151,12 +160,14 @@ const DEFAULT_OPTIONS: CampaignOptions = {
 };
 
 const USAGE =
-  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--wrap-all] [--format-regime mixed|pure-esm|pure-cjs] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]";
+  "Usage: vp exec node src/main.ts [--seed N] [--cases N] [--case-size N] [--wrap-all] [--format-regime mixed|pure-esm|pure-cjs] [--rolldown-package SPECIFIER] [--out-dir DIRECTORY] [--continue-on-fail|--stop-on-fail]\n" +
+  "When --case-size is omitted, each case draws a size from a small/medium/large spread (up to 48).";
 
 export function parseCliArgs(argv: readonly string[]): CampaignOptions {
   let seed = DEFAULT_OPTIONS.seed;
   let cases = DEFAULT_OPTIONS.cases;
   let caseSize = DEFAULT_OPTIONS.caseSize;
+  let sizeMix = DEFAULT_OPTIONS.sizeMix;
   let onDemandWrapping = DEFAULT_OPTIONS.onDemandWrapping;
   let formatRegime: FormatRegime | undefined;
   let rolldownPackage = DEFAULT_OPTIONS.rolldownPackage;
@@ -175,7 +186,9 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
         cases = parsePositiveInteger(readArgumentValue(argv, ++index, argument), argument);
         break;
       case "--case-size":
+        // An explicit size pins every case to it and turns the campaign size mix OFF.
         caseSize = parseCaseSize(readArgumentValue(argv, ++index, argument), argument);
+        sizeMix = false;
         break;
       case "--wrap-all":
         onDemandWrapping = false;
@@ -216,6 +229,7 @@ export function parseCliArgs(argv: readonly string[]): CampaignOptions {
     seed,
     cases,
     caseSize,
+    sizeMix,
     onDemandWrapping,
     ...(formatRegime === undefined ? {} : { formatRegime }),
     rolldownPackage,
@@ -252,7 +266,11 @@ async function runCampaignCases(
 
   for (let caseIndex = 0; caseIndex < options.cases; caseIndex += 1) {
     const seed = (options.seed + caseIndex) % UINT32_RANGE;
-    const generated = dependencies.generate(seed, options.caseSize, options.formatRegime);
+    // With the size mix on, each case draws its size deterministically from the seed (a separate RNG
+    // instance from the generator's, both seeded by `seed`, so the draw and generation stay
+    // independent and reproducible). The drawn size is recorded on the case for exact replay.
+    const caseSize = options.sizeMix ? sampleCaseSize(new SeededRng(seed)) : options.caseSize;
+    const generated = dependencies.generate(seed, caseSize, options.formatRegime);
     const result = await dependencies.executeCase(generated, options);
     const didPass = result.verdict.kind === "pass";
     let artifactDirectory: string | undefined;
@@ -535,7 +553,10 @@ interface FailureArtifactIdentity {
     readonly buildOptions: typeof ROLLDOWN_BUILD_OPTIONS & {
       readonly codeSplitting:
         | true
-        | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> };
+        | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> }
+        | {
+            readonly organicGroups: NonNullable<GeneratedCase["program"]["organicChunkGroups"]>;
+          };
     };
     readonly sourceOutcome: ExecutionOutcome;
     readonly bundleOutcome: CampaignBundleOutcome;
@@ -584,10 +605,7 @@ function createFailureArtifactIdentity(
     runtimeIdentity: result.runtimeIdentity,
     buildOptions: {
       ...ROLLDOWN_BUILD_OPTIONS,
-      codeSplitting:
-        result.generated.program.manualChunkGroups === undefined
-          ? true
-          : { groups: result.generated.program.manualChunkGroups },
+      codeSplitting: effectiveCodeSplitting(result.generated.program),
     },
     sourceOutcome: result.sourceOutcome,
     bundleOutcome: normalizeBundleOutcomeForIdentity(result.bundleOutcome),
@@ -612,6 +630,21 @@ function createFailureArtifactIdentity(
     hash: createHash("sha256").update(canonicalJsonStringify(inputs)).digest("hex"),
     inputs,
   };
+}
+
+/// The effective `codeSplitting` descriptor a case builds with, recorded in the artifact identity so
+/// a different chunking config (default / explicit / organic) yields a distinct artifact. Mirrors the
+/// child's `createOutputOptions` precedence: organic groups win, then manual groups, then automatic.
+function effectiveCodeSplitting(
+  program: GeneratedCase["program"],
+): FailureArtifactIdentity["inputs"]["buildOptions"]["codeSplitting"] {
+  if (program.organicChunkGroups !== undefined && program.organicChunkGroups.length > 0) {
+    return { organicGroups: program.organicChunkGroups };
+  }
+  if (program.manualChunkGroups !== undefined) {
+    return { groups: program.manualChunkGroups };
+  }
+  return true;
 }
 
 function hashPathAndContents(path: string, contents: Uint8Array): string {
@@ -919,6 +952,8 @@ function createReplayMetadata(result: CampaignCaseResult): {
     seed: result.generated.seed,
     cases: 1,
     caseSize: result.generated.size,
+    // Replay pins the exact recorded size, so the size mix is off (the command passes --case-size).
+    sizeMix: false,
     onDemandWrapping: result.options.onDemandWrapping,
     ...(result.options.formatRegime === undefined
       ? {}

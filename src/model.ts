@@ -194,11 +194,40 @@ export interface ManualChunkGroup {
   readonly moduleIds: readonly string[];
 }
 
+/// A size/share-driven code-splitting group whose composition ROLLDOWN decides — the organic
+/// chunk shape real Vite apps produce, as opposed to the exact module lists of a `ManualChunkGroup`.
+/// It maps directly onto rolldown's `CodeSplittingGroup` (the `output.codeSplitting.groups` option):
+/// a `minShareCount` captures modules referenced by at least that many entry chunks (vendor-style
+/// merges / high-in-degree shared chunks), a `maxSize` splits an accumulated group by byte size, an
+/// absent/broad `test` lets a single group host many modules (intra-chunk statement placement), and
+/// `priority` lets groups compete for modules. `test`, when present, is a regular-expression SOURCE
+/// matched against a module's resolved file path (the child reconstructs `new RegExp(test)`); absent
+/// means every module matches. Chunking is bundle-side only, so it never changes source-run
+/// semantics and the differential oracle stays valid. See
+/// `.agents/docs/organic-chunking-and-scale.md`.
+export interface OrganicChunkGroupConfig {
+  readonly name: string;
+  /// Regular-expression source matched against a module's resolved file path. Absent = match all.
+  readonly test?: string;
+  readonly minSize?: number;
+  readonly maxSize?: number;
+  /// Capture a module only when at least this many entry chunks reference it (rolldown default 1).
+  readonly minShareCount?: number;
+  readonly priority?: number;
+  readonly includeDependenciesRecursively?: boolean;
+}
+
+/// A program carries at most ONE chunking config, the per-case axis rolled by the seeded RNG:
+/// `default` (neither field present, rolldown's automatic chunking), `explicit`
+/// (`manualChunkGroups` — exact module lists), or `organic` (`organicChunkGroups` — size/share
+/// thresholds rolldown resolves). The two group fields are mutually exclusive (`validate-model.ts`
+/// enforces it). `deriveCoverageTags` reads the fields to emit `chunking:default|explicit|organic`.
 export interface ProgramModel {
   readonly modules: readonly ModuleModel[];
   readonly entries: readonly EntryModel[];
   readonly schedule: readonly ScheduleOperation[];
   readonly manualChunkGroups?: readonly ManualChunkGroup[];
+  readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
 }
 
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an

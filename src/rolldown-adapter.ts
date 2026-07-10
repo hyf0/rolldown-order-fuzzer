@@ -685,6 +685,19 @@ async function buildWithChild(
         resolve(sourceDirectory, requiredPath(rendered.modulePaths, moduleId, "module")),
       ),
     })),
+    // Organic (size/share-driven) groups pass through as serializable descriptors; the child maps
+    // them onto rolldown's `codeSplitting.groups` and reconstructs each regex `test` from its source.
+    organicChunkGroups: (program.organicChunkGroups ?? []).map((group) => ({
+      name: group.name,
+      ...(group.test === undefined ? {} : { test: group.test }),
+      ...(group.minSize === undefined ? {} : { minSize: group.minSize }),
+      ...(group.maxSize === undefined ? {} : { maxSize: group.maxSize }),
+      ...(group.minShareCount === undefined ? {} : { minShareCount: group.minShareCount }),
+      ...(group.priority === undefined ? {} : { priority: group.priority }),
+      ...(group.includeDependenciesRecursively === undefined
+        ? {}
+        : { includeDependenciesRecursively: group.includeDependenciesRecursively }),
+    })),
     output: {
       format: ROLLDOWN_BUILD_OPTIONS.format,
       strictExecutionOrder: ROLLDOWN_BUILD_OPTIONS.strictExecutionOrder,

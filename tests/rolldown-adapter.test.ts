@@ -38,6 +38,7 @@ import {
 import { renderProgram } from "../src/render.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import {
+  createOutputOptions,
   looksLikePanic,
   parseBuildChildRequest,
   parseBuildChildResponse,
@@ -1708,6 +1709,122 @@ describe("withRolldownBuild", () => {
   });
 });
 
+describe("organic chunk groups (wave 6)", () => {
+  test("maps organic groups onto rolldown codeSplitting.groups with a reconstructed regex test", () => {
+    const request: BuildChildRequest = {
+      ...validBuildChildRequest(),
+      manualChunkGroups: [],
+      organicChunkGroups: [
+        {
+          name: "organic-vendor",
+          test: "\\.mjs$",
+          minShareCount: 2,
+          minSize: 128,
+          maxSize: 800,
+          priority: 1,
+          includeDependenciesRecursively: false,
+        },
+      ],
+    };
+    // The request round-trips through validation with the organic groups intact.
+    expect(parseBuildChildRequest(request)).toEqual(request);
+
+    const codeSplitting = createOutputOptions(request).codeSplitting;
+    expect(codeSplitting).not.toBe(true);
+    if (typeof codeSplitting !== "object" || codeSplitting === null) {
+      throw new Error("expected organic codeSplitting object");
+    }
+    const group = codeSplitting.groups?.[0];
+    expect(group?.name).toBe("organic-vendor");
+    // `test` is reconstructed as a real RegExp (not a substring string).
+    expect(group?.test).toBeInstanceOf(RegExp);
+    expect(String(group?.test)).toBe("/\\.mjs$/");
+    expect(group?.minShareCount).toBe(2);
+    expect(group?.minSize).toBe(128);
+    expect(group?.maxSize).toBe(800);
+    expect(group?.priority).toBe(1);
+    expect(group?.includeDependenciesRecursively).toBe(false);
+  });
+
+  test("rejects an invalid organic group in the build request", () => {
+    const base = validBuildChildRequest();
+    expect(() => parseBuildChildRequest({ ...base, organicChunkGroups: [{ name: "" }] })).toThrow(
+      TypeError,
+    );
+    expect(() =>
+      parseBuildChildRequest({ ...base, organicChunkGroups: [{ name: "g", minSize: -1 }] }),
+    ).toThrow(TypeError);
+    expect(() => parseBuildChildRequest({ ...base, organicChunkGroups: "nope" })).toThrow(
+      TypeError,
+    );
+  });
+
+  test("an organic build merges shared modules into one organic chunk (config takes effect)", async () => {
+    // Two entries both statically import a side-effectful shared leaf (uninlinable). A minShareCount
+    // >= 2 organic group must capture the shared leaf into one `chunks/organic-*.js` chunk — proving
+    // the size/share-driven config reached rolldown and changed the composition.
+    const program = {
+      modules: [
+        {
+          id: "entry-a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "shared", importedName: "v", localName: "av" },
+          ],
+          events: [{ module: "entry-a", phase: "evaluate", value: 1, reads: [{ binding: "av" }] }],
+        },
+        {
+          id: "entry-b",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "shared", importedName: "v", localName: "bv" },
+          ],
+          events: [{ module: "entry-b", phase: "evaluate", value: 2, reads: [{ binding: "bv" }] }],
+        },
+        {
+          id: "shared",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "shared", phase: "evaluate", value: 5 }],
+        },
+      ],
+      entries: [
+        { name: "a", moduleId: "entry-a" },
+        { name: "b", moduleId: "entry-b" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "a" },
+        { kind: "import-entry", entry: "b" },
+      ],
+      organicChunkGroups: [
+        { name: "organic-shared", minShareCount: 2, includeDependenciesRecursively: false },
+      ],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+
+    const rendered = renderProgram(program);
+    const result = await withRolldownBuild(program, rendered, async (artifacts) => {
+      const [sourceOutcome, bundleOutcome] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+      ]);
+      return {
+        entryCount: artifacts.manifest.entries.length,
+        outputFiles: artifacts.outputFiles,
+        verdictKind: classifyVerdict(sourceOutcome, bundleOutcome).kind,
+      };
+    });
+
+    const value = successValue(result);
+    // Both model entries mapped to output chunks despite the shared merge.
+    expect(value.entryCount).toBe(2);
+    // A distinct organic-named shared chunk appears — the config took effect.
+    expect(value.outputFiles.some((file) => file.includes("organic-shared"))).toBe(true);
+    // A verdict was produced (build + facade mapping succeeded); kind is rolldown-version specific.
+    expect(["pass", "mismatch"]).toContain(value.verdictKind);
+  });
+});
+
 function singleEntryProgram(): ProgramModel {
   return {
     modules: [
@@ -1828,6 +1945,7 @@ function validBuildChildRequest(): BuildChildRequest {
     onDemandWrapping: true,
     bundleDirectory: "/tmp/bundle",
     manualChunkGroups: [{ name: "shared", modulePaths: ["/tmp/source/shared.mjs"] }],
+    organicChunkGroups: [],
     output: {
       format: "esm",
       strictExecutionOrder: true,

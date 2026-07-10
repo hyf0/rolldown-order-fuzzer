@@ -1356,3 +1356,75 @@ describe("validateProgramModel", () => {
     ]);
   });
 });
+
+describe("organic chunk groups (wave 6)", () => {
+  function baseProgram(): ProgramModel {
+    return {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "leaf" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "leaf",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "leaf", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+  }
+
+  test("accepts and round-trips a program carrying organic chunk groups", () => {
+    const program: ProgramModel = {
+      ...baseProgram(),
+      organicChunkGroups: [
+        {
+          name: "organic-vendor",
+          test: "\\.mjs$",
+          minShareCount: 2,
+          maxSize: 800,
+          priority: 1,
+          includeDependenciesRecursively: false,
+        },
+        { name: "organic-sized", minShareCount: 1, minSize: 128 },
+      ],
+    };
+    expect(validateProgramModel(program)).toEqual([]);
+    // Serialize -> parse -> identical, and still valid (byte-identical replay through model.json).
+    const roundTripped = JSON.parse(JSON.stringify(program)) as ProgramModel;
+    expect(roundTripped).toEqual(program);
+    expect(JSON.stringify(roundTripped)).toBe(JSON.stringify(program));
+    expect(validateProgramModel(roundTripped)).toEqual([]);
+  });
+
+  test("rejects carrying both manual and organic chunk groups", () => {
+    const program: ProgramModel = {
+      ...baseProgram(),
+      manualChunkGroups: [{ name: "manual", moduleIds: ["leaf"] }],
+      organicChunkGroups: [{ name: "organic", minShareCount: 1 }],
+    };
+    expect(validateProgramModel(program)).toContain(
+      "a program may carry either manualChunkGroups or organicChunkGroups, not both",
+    );
+  });
+
+  test("rejects invalid organic group fields", () => {
+    const program: ProgramModel = {
+      ...baseProgram(),
+      organicChunkGroups: [{ name: "dup" }, { name: "dup", test: "([unclosed", minShareCount: -1 }],
+    };
+    const errors = validateProgramModel(program);
+    expect(errors).toContain('organicChunkGroups[1].name: duplicate group name "dup"');
+    expect(errors).toContain(
+      'organicChunkGroups[1].test: invalid regular-expression source "([unclosed"',
+    );
+    expect(errors).toContain(
+      "organicChunkGroups[1].minShareCount: must be a finite non-negative number",
+    );
+  });
+});

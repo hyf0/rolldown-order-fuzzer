@@ -109,6 +109,14 @@ function* candidates(program: ProgramModel): Generator<ProgramModel> {
     const groups = (program.manualChunkGroups ?? []).filter((_, i) => i !== index);
     yield { ...program, ...(groups.length > 0 ? { manualChunkGroups: groups } : {}) };
   }
+  // Drop the organic chunk config entirely (falling back to default chunking). When the failure does
+  // not depend on the organic composition this simplifies the case; the greedy pass keeps it only if
+  // the failure kind is preserved, which also reveals whether the chunking is load-bearing.
+  if ((program.organicChunkGroups ?? []).length > 0) {
+    const withoutOrganic = { ...program };
+    delete (withoutOrganic as { organicChunkGroups?: unknown }).organicChunkGroups;
+    yield withoutOrganic;
+  }
   for (const [moduleIndex, module] of program.modules.entries()) {
     if (module.events.length > 1) {
       yield editModule(program, moduleIndex, {
@@ -376,6 +384,11 @@ function dropModule(program: ProgramModel, moduleId: string): ProgramModel {
         : entryNames.has(op.entry),
     ),
     ...(groups.length > 0 ? { manualChunkGroups: groups } : {}),
+    // Organic chunk groups reference no module id (rolldown decides composition), so they survive a
+    // module drop unchanged and must be preserved for byte-identical replay.
+    ...(program.organicChunkGroups !== undefined
+      ? { organicChunkGroups: program.organicChunkGroups }
+      : {}),
   };
 }
 
@@ -407,6 +420,8 @@ async function run(program: ProgramModel, options: ShrinkOptions): Promise<strin
     seed: 0,
     cases: 1,
     caseSize: DEFAULT_CASE_SIZE,
+    // The shrinker replays the loaded model as-is (size is cosmetic here), so the size mix is off.
+    sizeMix: false,
     onDemandWrapping: true,
     rolldownPackage: options.rolldownPackage,
     outDir: "failures",

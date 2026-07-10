@@ -88,6 +88,7 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
   const entriesByName = collectEntries(program.entries, modulesById, errors);
   validateSchedule(program, entriesByName, modulesById, dynamicRegistrationOwners, errors);
   validateManualChunkGroups(program, modulesById, errors);
+  validateOrganicChunkGroups(program, errors);
 
   return errors;
 }
@@ -700,6 +701,48 @@ function validateManualChunkGroups(
           `manualChunkGroups[${groupIndex}].moduleIds[${moduleIndex}]: unknown module id ${quote(moduleId)}`,
         );
       }
+    }
+  }
+}
+
+/// The organic (size/share-driven) chunk groups: rolldown decides composition, so nothing references
+/// a module id. A program carries EITHER manual or organic groups, never both (the two are the
+/// distinct chunking-config modes). Each group needs a unique name, a compilable `test` regex source
+/// (when present), and finite non-negative numeric thresholds. Chunking is bundle-side only, so none
+/// of this can change source-run semantics.
+function validateOrganicChunkGroups(program: ProgramModel, errors: string[]): void {
+  const organicGroups = program.organicChunkGroups ?? [];
+  if (organicGroups.length > 0 && (program.manualChunkGroups?.length ?? 0) > 0) {
+    errors.push("a program may carry either manualChunkGroups or organicChunkGroups, not both");
+  }
+
+  const groupNames = new Set<string>();
+  for (const [groupIndex, group] of organicGroups.entries()) {
+    const path = `organicChunkGroups[${groupIndex}]`;
+    if (group.name.length === 0) {
+      errors.push(`${path}.name: must not be empty`);
+    } else if (groupNames.has(group.name)) {
+      errors.push(`${path}.name: duplicate group name ${quote(group.name)}`);
+    } else {
+      groupNames.add(group.name);
+    }
+
+    if (group.test !== undefined) {
+      try {
+        new RegExp(group.test);
+      } catch {
+        errors.push(`${path}.test: invalid regular-expression source ${quote(group.test)}`);
+      }
+    }
+
+    for (const field of ["minSize", "maxSize", "minShareCount", "priority"] as const) {
+      const value = group[field];
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        errors.push(`${path}.${field}: must be a finite non-negative number`);
+      }
+    }
+    if (group.minShareCount !== undefined && !Number.isInteger(group.minShareCount)) {
+      errors.push(`${path}.minShareCount: must be an integer`);
     }
   }
 }

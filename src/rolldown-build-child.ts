@@ -43,6 +43,20 @@ export interface BuildChildManualChunkGroup {
   readonly modulePaths: readonly string[];
 }
 
+/// The serializable form of a `ProgramModel.OrganicChunkGroupConfig`, mapped to a rolldown
+/// `CodeSplittingGroup` in `createOutputOptions`. `test` is a regex SOURCE (the child reconstructs
+/// `new RegExp(test)` so it matches by regular expression, not substring); the numeric thresholds
+/// pass straight through. Mutually exclusive with `manualChunkGroups` in one request.
+export interface BuildChildOrganicChunkGroup {
+  readonly name: string;
+  readonly test?: string;
+  readonly minSize?: number;
+  readonly maxSize?: number;
+  readonly minShareCount?: number;
+  readonly priority?: number;
+  readonly includeDependenciesRecursively?: boolean;
+}
+
 export interface BuildChildRequest {
   readonly version: typeof BUILD_CHILD_PROTOCOL_VERSION;
   readonly packageSpecifier: string;
@@ -51,6 +65,7 @@ export interface BuildChildRequest {
   readonly onDemandWrapping: boolean;
   readonly bundleDirectory: string;
   readonly manualChunkGroups: readonly BuildChildManualChunkGroup[];
+  readonly organicChunkGroups: readonly BuildChildOrganicChunkGroup[];
   readonly output: {
     readonly format: "esm";
     readonly strictExecutionOrder: true;
@@ -125,6 +140,46 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
       };
     },
   );
+  const organicChunkGroups = requireArray(
+    request.organicChunkGroups,
+    "build organicChunkGroups",
+  ).map((value, index): BuildChildOrganicChunkGroup => {
+    const group = requireRecord(value, `build organicChunkGroups[${index}]`);
+    return {
+      name: requireNonEmptyString(group.name, `build organicChunkGroups[${index}].name`),
+      ...(group.test === undefined
+        ? {}
+        : { test: requireNonEmptyString(group.test, `build organicChunkGroups[${index}].test`) }),
+      ...optionalNonNegativeNumber(
+        group.minSize,
+        `build organicChunkGroups[${index}].minSize`,
+        "minSize",
+      ),
+      ...optionalNonNegativeNumber(
+        group.maxSize,
+        `build organicChunkGroups[${index}].maxSize`,
+        "maxSize",
+      ),
+      ...optionalNonNegativeNumber(
+        group.minShareCount,
+        `build organicChunkGroups[${index}].minShareCount`,
+        "minShareCount",
+      ),
+      ...optionalNonNegativeNumber(
+        group.priority,
+        `build organicChunkGroups[${index}].priority`,
+        "priority",
+      ),
+      ...(group.includeDependenciesRecursively === undefined
+        ? {}
+        : {
+            includeDependenciesRecursively: requireBoolean(
+              group.includeDependenciesRecursively,
+              `build organicChunkGroups[${index}].includeDependenciesRecursively`,
+            ),
+          }),
+    };
+  });
   const output = requireRecord(request.output, "build output");
   if (
     output.format !== "esm" ||
@@ -145,6 +200,7 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     onDemandWrapping: request.onDemandWrapping,
     bundleDirectory,
     manualChunkGroups,
+    organicChunkGroups,
     output: {
       format: "esm",
       strictExecutionOrder: true,
@@ -306,7 +362,43 @@ function parseOutputFile(
   throw new TypeError(`build outputFiles[${index}].type is invalid`);
 }
 
-function createOutputOptions(request: BuildChildRequest): OutputOptions {
+/// Build rolldown output options, mapping the request's chunking config onto `codeSplitting`.
+/// Organic groups (size/share thresholds — rolldown decides composition) take precedence when
+/// present; otherwise manual groups (exact module lists) map to an exact-match `test`; otherwise the
+/// automatic default (`codeSplitting: true`). The three are the distinct chunking-config modes and
+/// never coexist in one request (validated model-side).
+export function createOutputOptions(request: BuildChildRequest): OutputOptions {
+  const codeSplitting = organicCodeSplitting(request) ?? manualCodeSplitting(request);
+  return {
+    dir: request.bundleDirectory,
+    ...request.output,
+    codeSplitting,
+  };
+}
+
+function organicCodeSplitting(request: BuildChildRequest): { groups: CodeSplittingGroup[] } | null {
+  if (request.organicChunkGroups.length === 0) {
+    return null;
+  }
+  const groups = request.organicChunkGroups.map(
+    (group): CodeSplittingGroup => ({
+      name: group.name,
+      // `test` is a regex SOURCE: reconstruct a RegExp so rolldown matches by regular expression
+      // (a plain string would be a substring match).
+      ...(group.test === undefined ? {} : { test: new RegExp(group.test) }),
+      ...(group.minSize === undefined ? {} : { minSize: group.minSize }),
+      ...(group.maxSize === undefined ? {} : { maxSize: group.maxSize }),
+      ...(group.minShareCount === undefined ? {} : { minShareCount: group.minShareCount }),
+      ...(group.priority === undefined ? {} : { priority: group.priority }),
+      ...(group.includeDependenciesRecursively === undefined
+        ? {}
+        : { includeDependenciesRecursively: group.includeDependenciesRecursively }),
+    }),
+  );
+  return { groups };
+}
+
+function manualCodeSplitting(request: BuildChildRequest): true | { groups: CodeSplittingGroup[] } {
   const groups = request.manualChunkGroups.map((group): CodeSplittingGroup => {
     const paths = new Set(group.modulePaths.map((path) => resolve(path)));
     return {
@@ -315,11 +407,7 @@ function createOutputOptions(request: BuildChildRequest): OutputOptions {
       includeDependenciesRecursively: false,
     };
   });
-  return {
-    dir: request.bundleDirectory,
-    ...request.output,
-    codeSplitting: groups.length === 0 ? true : { groups },
-  };
+  return groups.length === 0 ? true : { groups };
 }
 
 function pathIsInside(rootDirectory: string, candidate: string): boolean {
@@ -444,6 +532,29 @@ function requireString(value: unknown, label: string): string {
     throw new TypeError(`${label} must be a string`);
   }
   return value;
+}
+
+function requireBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== "boolean") {
+    throw new TypeError(`${label} must be a boolean`);
+  }
+  return value;
+}
+
+/// An optional finite non-negative numeric threshold, returned as a spreadable partial so an absent
+/// field stays absent (rolldown then applies its own default).
+function optionalNonNegativeNumber(
+  value: unknown,
+  label: string,
+  key: "minSize" | "maxSize" | "minShareCount" | "priority",
+): Partial<Record<"minSize" | "maxSize" | "minShareCount" | "priority", number>> {
+  if (value === undefined) {
+    return {};
+  }
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new TypeError(`${label} must be a finite non-negative number`);
+  }
+  return { [key]: value };
 }
 
 function requireNonEmptyString(value: unknown, label: string): string {

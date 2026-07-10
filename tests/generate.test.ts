@@ -3,10 +3,13 @@ import { describe, expect, test } from "vite-plus/test";
 import {
   deriveCoverageTags,
   generateCase,
+  MAX_CASE_SIZE,
   MIXED_TEMPLATE_NAMES,
+  sampleCaseSize,
   type MixedTemplateName,
 } from "../src/generate.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
+import { SeededRng } from "../src/rng.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 
 describe("generateCase", () => {
@@ -379,11 +382,24 @@ describe("generateCase", () => {
 
     expect(small.size).toBe(1);
     expect(large.size).toBe(8);
-    expect(large.program.modules.length).toBeLessThanOrEqual(16);
+    expect(large.program.modules.length).toBeLessThanOrEqual(48);
     expect(large.program.modules.length).toBeGreaterThanOrEqual(small.program.modules.length);
     expect(() => generateCase(-1, 4)).toThrowError("seed must be an unsigned 32-bit integer");
-    expect(() => generateCase(1, 0)).toThrowError("size must be an integer from 1 through 16");
-    expect(() => generateCase(1, 17)).toThrowError("size must be an integer from 1 through 16");
+    expect(() => generateCase(1, 0)).toThrowError("size must be an integer from 1 through 48");
+    expect(() => generateCase(1, 49)).toThrowError("size must be an integer from 1 through 48");
+  });
+
+  test("a large case scales the module graph up to the raised ceiling", () => {
+    // The scale axis: at size 48 the DAG really grows (up to MAX_RANDOM_MODULES = 48), stressing
+    // intra-chunk statement placement that tiny 16-module graphs could not reach.
+    let largest = 0;
+    for (let seed = 0; seed < 200; seed += 1) {
+      const generated = generateCase(seed, 48);
+      expect(generated.program.modules.length).toBeLessThanOrEqual(48);
+      largest = Math.max(largest, generated.program.modules.length);
+    }
+    // Some size-48 case must host well more than the old 16-module cap.
+    expect(largest).toBeGreaterThan(24);
   });
 });
 
@@ -574,5 +590,161 @@ describe("format regimes", () => {
     }
     expect(sawCjsDynamic).toBe(true);
     expect(sawPureCjsDynamic).toBe(true);
+  });
+});
+
+describe("organic chunking axis (wave 6)", () => {
+  test("rolls the chunking config deterministically from the seed", () => {
+    // Same seed + size must produce byte-identical chunking config (part of overall determinism).
+    for (let seed = 0; seed < 50; seed += 1) {
+      const first = generateCase(seed, 16);
+      const second = generateCase(seed, 16);
+      expect(JSON.stringify(second.program.organicChunkGroups)).toBe(
+        JSON.stringify(first.program.organicChunkGroups),
+      );
+      expect(JSON.stringify(second.program.manualChunkGroups)).toBe(
+        JSON.stringify(first.program.manualChunkGroups),
+      );
+    }
+  });
+
+  test("emits exactly one chunking:* tag per case, mutually exclusive group fields", () => {
+    for (let seed = 0; seed < 300; seed += 1) {
+      const generated = generateCase(seed, 16);
+      const chunkingTags = generated.coverageTags.filter((tag) => tag.startsWith("chunking:"));
+      expect(chunkingTags).toHaveLength(1);
+      // A program never carries both group fields (validated), and the tag matches the fields.
+      const hasOrganic = (generated.program.organicChunkGroups?.length ?? 0) > 0;
+      const hasManual = (generated.program.manualChunkGroups?.length ?? 0) > 0;
+      expect(hasOrganic && hasManual).toBe(false);
+      if (hasOrganic) {
+        expect(chunkingTags).toEqual(["chunking:organic"]);
+      } else if (hasManual) {
+        expect(chunkingTags).toEqual(["chunking:explicit"]);
+      } else {
+        expect(chunkingTags).toEqual(["chunking:default"]);
+      }
+    }
+  });
+
+  test("organic chunking covers at least ~40% of random-mixed cases and stays valid", () => {
+    let randomMixed = 0;
+    let organic = 0;
+    for (let seed = 0; seed < 600; seed += 1) {
+      const generated = generateCase(seed, 24);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      randomMixed += 1;
+      if (generated.coverageTags.includes("chunking:organic")) {
+        organic += 1;
+        // Every organic group has a name; the whole program validates.
+        for (const group of generated.program.organicChunkGroups ?? []) {
+          expect(group.name.length).toBeGreaterThan(0);
+        }
+        expect(validateProgramModel(generated.program)).toEqual([]);
+      }
+    }
+    expect(randomMixed).toBeGreaterThan(0);
+    expect(organic / randomMixed).toBeGreaterThanOrEqual(0.4);
+  });
+});
+
+describe("size mix (wave 6)", () => {
+  test("samples deterministically from the seed within the small/medium/large spread", () => {
+    for (let seed = 0; seed < 200; seed += 1) {
+      const first = sampleCaseSize(new SeededRng(seed));
+      const second = sampleCaseSize(new SeededRng(seed));
+      expect(second).toBe(first);
+      expect(first).toBeGreaterThanOrEqual(1);
+      expect(first).toBeLessThanOrEqual(MAX_CASE_SIZE);
+    }
+  });
+
+  test("covers small, medium, and large scales across seeds", () => {
+    let small = 0;
+    let medium = 0;
+    let large = 0;
+    for (let seed = 0; seed < 500; seed += 1) {
+      const size = sampleCaseSize(new SeededRng(seed));
+      if (size <= 12) {
+        small += 1;
+      } else if (size <= 24) {
+        medium += 1;
+      } else {
+        large += 1;
+      }
+    }
+    expect(small).toBeGreaterThan(0);
+    expect(medium).toBeGreaterThan(0);
+    expect(large).toBeGreaterThan(0);
+  });
+});
+
+describe("nested dynamic chains (wave 6)", () => {
+  test("tags a hand-built dynamic-import-inside-a-dynamic-module shape", () => {
+    // entry -> import("a"); a -> import("b"). b is reachable only via a's dynamic import, and a is
+    // reachable only via the entry's dynamic import: a nested dynamic chain.
+    const program: ProgramModel = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-dynamic-import", target: "a", registration: "reg-a" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [{ kind: "esm-dynamic-import", target: "b", registration: "reg-b" }],
+          events: [{ module: "a", phase: "evaluate", value: 2 }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 3 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+    expect(validateProgramModel(program)).toEqual([]);
+    expect(deriveCoverageTags(program)).toContain("mechanism:nested-dynamic");
+  });
+
+  test("does not tag a plain (eagerly-reached) dynamic import as nested", () => {
+    // entry statically imports a; a dynamically imports b. a is eagerly evaluated, so a's dynamic
+    // import is a normal (non-nested) dynamic import.
+    const program: ProgramModel = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "a" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [{ kind: "esm-dynamic-import", target: "b", registration: "reg-b" }],
+          events: [{ module: "a", phase: "evaluate", value: 2 }],
+        },
+        { id: "b", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+    expect(deriveCoverageTags(program)).not.toContain("mechanism:nested-dynamic");
+  });
+
+  test("the generator produces nested dynamic chains at scale", () => {
+    let saw = false;
+    for (let seed = 0; seed < 400 && !saw; seed += 1) {
+      if (generateCase(seed, 32).coverageTags.includes("mechanism:nested-dynamic")) {
+        saw = true;
+      }
+    }
+    expect(saw).toBe(true);
   });
 });
