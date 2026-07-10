@@ -1,5 +1,11 @@
 [
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -78,6 +84,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -163,6 +175,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -216,6 +234,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -413,6 +437,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -482,6 +512,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -546,6 +582,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -743,6 +785,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -780,6 +828,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -940,6 +994,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -1124,6 +1184,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1225,6 +1291,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1307,6 +1379,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -1420,6 +1498,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1462,6 +1546,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1527,6 +1617,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1615,6 +1711,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -1660,6 +1762,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -1720,6 +1828,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1778,6 +1892,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -1846,6 +1966,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -1879,6 +2005,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -1928,6 +2060,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -2033,6 +2171,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -2098,6 +2242,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -2216,6 +2366,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -2262,6 +2418,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -2346,6 +2508,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -2432,6 +2600,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -2484,6 +2658,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -2601,6 +2781,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -2802,6 +2988,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -2883,6 +3075,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -2988,6 +3186,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -3097,6 +3301,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -3195,6 +3405,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -3327,6 +3543,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -3383,6 +3605,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -3457,6 +3685,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -3522,6 +3756,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -3731,6 +3971,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -3924,6 +4170,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -4009,6 +4261,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -4098,6 +4356,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4136,6 +4400,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -4209,6 +4479,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -4269,6 +4545,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4323,6 +4605,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4397,6 +4685,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -4474,6 +4768,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -4535,6 +4835,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4621,6 +4927,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4735,6 +5047,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -4811,6 +5129,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4876,6 +5200,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -4941,6 +5271,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -5031,6 +5367,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -5179,6 +5521,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5240,6 +5588,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -5356,6 +5710,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5405,6 +5765,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5478,6 +5844,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5535,6 +5907,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -5584,6 +5962,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5657,6 +6041,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5758,6 +6148,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -5831,6 +6227,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -5919,6 +6321,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -5987,6 +6395,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -6103,6 +6517,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -6144,6 +6564,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -6274,6 +6700,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -6427,6 +6859,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -6512,6 +6950,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -6589,6 +7033,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -6614,6 +7064,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -6715,6 +7171,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -6781,6 +7243,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -6826,6 +7294,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -6896,6 +7370,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -7018,6 +7498,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -7054,6 +7540,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7127,6 +7619,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -7288,6 +7786,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -7412,6 +7916,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7457,6 +7967,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7514,6 +8030,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7579,6 +8101,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -7665,6 +8193,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -7734,6 +8268,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7783,6 +8323,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7852,6 +8398,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -7901,6 +8453,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8110,6 +8668,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8163,6 +8727,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -8224,6 +8794,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8302,6 +8878,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8368,6 +8950,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -8449,6 +9037,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8494,6 +9088,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8627,6 +9227,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8800,6 +9406,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -8881,6 +9493,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -8906,6 +9524,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9044,6 +9668,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9110,6 +9740,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9196,6 +9832,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -9321,6 +9963,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -9418,6 +10066,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9527,6 +10181,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9648,6 +10308,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -9705,6 +10371,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9895,6 +10567,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -9989,6 +10667,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -10066,6 +10750,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -10170,6 +10860,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -10247,6 +10943,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -10332,6 +11034,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -10490,6 +11198,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -10587,6 +11301,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -10783,6 +11503,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -10984,6 +11710,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11109,6 +11841,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11158,6 +11896,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11195,6 +11939,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -11264,6 +12014,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11361,6 +12117,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11414,6 +12176,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -11484,6 +12252,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -11521,6 +12295,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -11597,6 +12377,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11626,6 +12412,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -11794,6 +12586,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -11840,6 +12638,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -11921,6 +12725,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -11970,6 +12780,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -12039,6 +12855,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -12248,6 +13070,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -12273,6 +13101,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -12411,6 +13245,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -12588,6 +13428,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -12701,6 +13547,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -12794,6 +13646,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -12935,6 +13793,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13001,6 +13865,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -13130,6 +14000,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13195,6 +14071,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -13220,6 +14102,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13301,6 +14189,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13357,6 +14251,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13423,6 +14323,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13591,6 +14497,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13765,6 +14677,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -13979,6 +14897,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14028,6 +14952,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14169,6 +15099,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -14255,6 +15191,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14324,6 +15266,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14349,6 +15297,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -14434,6 +15388,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14487,6 +15447,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14580,6 +15546,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -14662,6 +15634,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -14704,6 +15682,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14729,6 +15713,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -14806,6 +15796,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -14887,6 +15883,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -14973,6 +15975,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -15054,6 +16062,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -15191,6 +16205,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -15315,6 +16335,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -15371,6 +16397,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -15447,6 +16479,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -15492,6 +16530,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -15553,6 +16597,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -15602,6 +16652,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -15643,6 +16699,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -15693,6 +16755,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -15818,6 +16886,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -15843,6 +16917,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -15952,6 +17032,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -16056,6 +17142,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -16178,6 +17270,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -16247,6 +17345,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -16336,6 +17440,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -16382,6 +17492,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -16475,6 +17591,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -16500,6 +17622,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -16592,6 +17720,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -16696,6 +17830,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -16754,6 +17894,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -16839,6 +17985,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17036,6 +18188,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -17116,6 +18274,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17177,6 +18341,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17234,6 +18404,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17327,6 +18503,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17524,6 +18706,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -17596,6 +18784,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17633,6 +18827,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17694,6 +18894,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -17728,6 +18934,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -17762,6 +18974,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -17828,6 +19046,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -17893,6 +19117,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18066,6 +19296,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -18146,6 +19382,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -18198,6 +19440,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -18239,6 +19487,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18301,6 +19555,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -18342,6 +19602,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18451,6 +19717,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18504,6 +19776,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -18533,6 +19811,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18663,6 +19947,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -18704,6 +19994,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18758,6 +20054,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -18812,6 +20114,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -18868,6 +20176,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -18989,6 +20303,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -19130,6 +20450,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19208,6 +20534,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19277,6 +20609,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19379,6 +20717,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19431,6 +20775,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -19504,6 +20854,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -19640,6 +20996,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -19681,6 +21043,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -19706,6 +21074,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -19735,6 +21109,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19808,6 +21188,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19890,6 +21276,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -19923,6 +21315,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -19976,6 +21374,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20017,6 +21421,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20042,6 +21452,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20067,6 +21483,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20156,6 +21578,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -20201,6 +21629,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20270,6 +21704,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20331,6 +21771,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -20423,6 +21869,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20576,6 +22028,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20665,6 +22123,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20694,6 +22158,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20763,6 +22233,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -20788,6 +22264,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -20848,6 +22330,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -20916,6 +22404,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21010,6 +22504,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -21043,6 +22543,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21120,6 +22626,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -21197,6 +22709,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21238,6 +22756,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -21275,6 +22799,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -21327,6 +22857,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21540,6 +23076,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21586,6 +23128,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -21647,6 +23195,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21680,6 +23234,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21745,6 +23305,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -21794,6 +23360,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -21867,6 +23439,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -22064,6 +23642,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -22117,6 +23701,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -22199,6 +23789,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -22248,6 +23844,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -22297,6 +23899,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -22350,6 +23958,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -22415,6 +24029,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -22463,6 +24083,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -22577,6 +24203,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -22610,6 +24242,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -22651,6 +24289,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -22715,6 +24359,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -22775,6 +24425,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -22831,6 +24487,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -22903,6 +24565,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23013,6 +24681,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23067,6 +24741,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -23147,6 +24827,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23225,6 +24911,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23270,6 +24962,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -23342,6 +25040,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -23367,6 +25071,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23413,6 +25123,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -23462,6 +25178,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -23515,6 +25237,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23548,6 +25276,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23641,6 +25375,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -23741,6 +25481,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23794,6 +25540,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -23859,6 +25611,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -23932,6 +25690,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -23977,6 +25741,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -24041,6 +25811,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -24082,6 +25858,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -24283,6 +26065,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24316,6 +26104,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -24442,6 +26236,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -24480,6 +26280,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24513,6 +26319,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24546,6 +26358,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24579,6 +26397,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24612,6 +26436,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24645,6 +26475,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24678,6 +26514,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24711,6 +26553,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24744,6 +26592,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24777,6 +26631,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24810,6 +26670,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24843,6 +26709,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24876,6 +26748,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24909,6 +26787,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24942,6 +26826,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -24975,6 +26865,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25008,6 +26904,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25041,6 +26943,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25074,6 +26982,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25107,6 +27021,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25140,6 +27060,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25173,6 +27099,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25206,6 +27138,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25239,6 +27177,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25272,6 +27216,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25305,6 +27255,12 @@
     "template": "esm-imports-cjs"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25346,6 +27302,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25387,6 +27349,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25428,6 +27396,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25469,6 +27443,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25510,6 +27490,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25551,6 +27537,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25592,6 +27584,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25633,6 +27631,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25674,6 +27678,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25715,6 +27725,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25756,6 +27772,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25797,6 +27819,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25838,6 +27866,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25879,6 +27913,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25920,6 +27960,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -25961,6 +28007,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26002,6 +28054,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26043,6 +28101,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26084,6 +28148,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26125,6 +28195,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26166,6 +28242,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26207,6 +28289,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26248,6 +28336,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26289,6 +28383,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26330,6 +28430,12 @@
     "template": "shared-cjs-carriers"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26367,6 +28473,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26404,6 +28516,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26441,6 +28559,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26478,6 +28602,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26515,6 +28645,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26552,6 +28688,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26589,6 +28731,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26626,6 +28774,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26663,6 +28817,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26700,6 +28860,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26737,6 +28903,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26774,6 +28946,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26811,6 +28989,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26848,6 +29032,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26885,6 +29075,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26922,6 +29118,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26959,6 +29161,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -26996,6 +29204,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27033,6 +29247,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27070,6 +29290,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27107,6 +29333,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27144,6 +29376,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27181,6 +29419,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27218,6 +29462,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27255,6 +29505,12 @@
     "template": "cjs-requires-esm"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27304,6 +29560,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27353,6 +29615,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27402,6 +29670,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27451,6 +29725,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27500,6 +29780,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27549,6 +29835,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27598,6 +29890,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27647,6 +29945,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27696,6 +30000,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27745,6 +30055,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27794,6 +30110,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27843,6 +30165,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27892,6 +30220,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27941,6 +30275,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -27990,6 +30330,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28039,6 +30385,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28088,6 +30440,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28137,6 +30495,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28186,6 +30550,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28235,6 +30605,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28284,6 +30660,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28333,6 +30715,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28382,6 +30770,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28431,6 +30825,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -28480,6 +30880,12 @@
     "template": "overlapping-entries"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28532,6 +30938,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28584,6 +30996,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28636,6 +31054,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28688,6 +31112,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28740,6 +31170,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28792,6 +31228,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28844,6 +31286,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28896,6 +31344,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -28948,6 +31402,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29000,6 +31460,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29052,6 +31518,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29104,6 +31576,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29156,6 +31634,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29208,6 +31692,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29260,6 +31750,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29312,6 +31808,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29364,6 +31866,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29416,6 +31924,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29468,6 +31982,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29520,6 +32040,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29572,6 +32098,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29624,6 +32156,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29676,6 +32214,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29728,6 +32272,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -29780,6 +32330,12 @@
     "template": "manual-chunk-separation"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -29889,6 +32445,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -29962,6 +32524,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -30050,6 +32618,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -30095,6 +32669,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30160,6 +32740,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30285,6 +32871,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30337,6 +32929,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30411,6 +33009,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30453,6 +33057,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30526,6 +33136,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -30707,6 +33323,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -30753,6 +33375,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -30894,6 +33522,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -30934,6 +33568,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31015,6 +33655,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31040,6 +33686,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -31101,6 +33753,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31190,6 +33848,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -31275,6 +33939,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "organicGroups": [
         {
@@ -31332,6 +34002,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31421,6 +34097,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31482,6 +34164,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -31610,6 +34298,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31671,6 +34365,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": {
       "groups": [
         {
@@ -31747,6 +34447,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31800,6 +34506,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31853,6 +34565,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31926,6 +34644,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -31999,6 +34723,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -32080,6 +34810,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": true,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -32161,6 +34897,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {
@@ -32242,6 +34984,12 @@
     "template": "random-mixed"
   },
   {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
     "codeSplitting": true,
     "files": [
       {

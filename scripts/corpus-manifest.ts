@@ -7,8 +7,10 @@
 /// PROVEN byte-identical: `check` regenerates the set and diffs it against a committed golden manifest.
 /// Coverage tags and artifact identity are deliberately EXCLUDED — they legitimately change when a
 /// predicate is corrected — so the manifest pins only what a build consumes: the emitted
-/// `.mjs`/`.cjs`/`package.json`/`schedule.json` bytes and the `codeSplitting` option the child derives
-/// from the model.
+/// `.mjs`/`.cjs`/`package.json`/`schedule.json` bytes, the `codeSplitting` option the child derives from
+/// the model, and (since W14a — `golden: W14a structural axes`) the persisted BuildConfig scalar axes
+/// (`buildAxes`: includeDependenciesRecursively / lazyBarrel / preserveEntrySignatures /
+/// strictExecutionOrder), so a change to how a case builds is caught here too.
 ///
 /// Three sections, so the golden covers the whole generator surface (not only forced-regime
 /// random-mixed):
@@ -76,6 +78,16 @@ interface CaseManifest {
   readonly template: MixedTemplateName;
   readonly files: readonly { readonly path: string; readonly sha256: string }[];
   readonly codeSplitting: unknown;
+  /// The persisted BuildConfig scalar axes a case builds with (W14a). Chunking is `codeSplitting`;
+  /// these are the rest — the rolled `includeDependenciesRecursively` / `lazyBarrel` plus the fixed
+  /// `preserveEntrySignatures` / `strictExecutionOrder` — so the golden now guards the structural axes
+  /// (they are effective build options, so a change to how a case builds is caught here).
+  readonly buildAxes?: {
+    readonly includeDependenciesRecursively: boolean;
+    readonly lazyBarrel: boolean;
+    readonly preserveEntrySignatures: unknown;
+    readonly strictExecutionOrder: boolean;
+  };
   readonly error?: string;
 }
 
@@ -112,7 +124,21 @@ function renderCase(
     const files = [...rendered.files]
       .map((file) => ({ path: file.path, sha256: sha256(file.contents) }))
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
-    return { group, seed, size, template, files, codeSplitting: effectiveCodeSplitting(program) };
+    const build = buildConfigOf(program);
+    return {
+      group,
+      seed,
+      size,
+      template,
+      files,
+      codeSplitting: effectiveCodeSplitting(program),
+      buildAxes: {
+        includeDependenciesRecursively: build.includeDependenciesRecursively,
+        lazyBarrel: build.lazyBarrel,
+        preserveEntrySignatures: build.preserveEntrySignatures,
+        strictExecutionOrder: build.strictExecutionOrder,
+      },
+    };
   } catch (error) {
     return {
       group,
