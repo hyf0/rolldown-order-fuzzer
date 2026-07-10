@@ -1491,6 +1491,259 @@ describe("validateProgramModel", () => {
     );
   });
 
+  // Program-level export-demand rules (finding 2), read from the canonical ExportDemandPlan. Each
+  // rejects a hand-crafted model the direct-target capability walk cannot see; the generator produces
+  // none of them (proven by the 6000-case validate sweep).
+  describe("program-level export demand", () => {
+    const leaf = (id: string): ModuleModel => ({
+      id,
+      format: "esm",
+      dependencies: [],
+      events: [{ module: id, phase: "evaluate", value: 5 }],
+    });
+
+    test("rejects a default import through a star-only barrel (unsupplied — star never forwards default)", () => {
+      const program = {
+        modules: [
+          {
+            id: "consumer",
+            format: "esm",
+            dependencies: [
+              {
+                kind: "esm-value-import",
+                target: "barrel",
+                importedName: "default",
+                localName: "d",
+              },
+            ],
+            events: [],
+          },
+          {
+            id: "barrel",
+            format: "esm",
+            dependencies: [{ kind: "esm-reexport-star", target: "def" }],
+            events: [],
+          },
+          leaf("def"),
+        ],
+        entries: [{ name: "main", moduleId: "consumer" }],
+        schedule: [{ kind: "import-entry", entry: "main" }],
+      } satisfies ProgramModel;
+      expect(validateProgramModel(program).some((error) => error.includes("unsupplied"))).toBe(
+        true,
+      );
+    });
+
+    test("rejects a name provided by two star re-exports (ambiguous)", () => {
+      const program = {
+        modules: [
+          {
+            id: "consumer",
+            format: "esm",
+            dependencies: [
+              { kind: "esm-value-import", target: "barrel", importedName: "vx", localName: "x" },
+            ],
+            events: [],
+          },
+          {
+            id: "barrel",
+            format: "esm",
+            dependencies: [
+              { kind: "esm-reexport-star", target: "A" },
+              { kind: "esm-reexport-star", target: "B" },
+            ],
+            events: [],
+          },
+          leaf("A"),
+          leaf("B"),
+        ],
+        entries: [{ name: "main", moduleId: "consumer" }],
+        schedule: [{ kind: "import-entry", entry: "main" }],
+      } satisfies ProgramModel;
+      expect(validateProgramModel(program).some((error) => error.includes("ambiguous"))).toBe(true);
+    });
+
+    test("rejects one numeric export consumed as BOTH a call and a plain fold (incompatible shapes)", () => {
+      const program = {
+        modules: [
+          {
+            id: "caller",
+            format: "esm",
+            dependencies: [
+              {
+                kind: "esm-value-import",
+                target: "def",
+                importedName: "vx",
+                localName: "c",
+                call: true,
+              },
+            ],
+            events: [
+              {
+                module: "caller",
+                phase: "evaluate",
+                value: 1,
+                reads: [{ binding: "c", call: true }],
+              },
+            ],
+          },
+          {
+            id: "folder",
+            format: "esm",
+            dependencies: [
+              { kind: "esm-value-import", target: "def", importedName: "vx", localName: "f" },
+            ],
+            events: [{ module: "folder", phase: "evaluate", value: 2, reads: [{ binding: "f" }] }],
+          },
+          leaf("def"),
+        ],
+        entries: [
+          { name: "c", moduleId: "caller" },
+          { name: "f", moduleId: "folder" },
+        ],
+        schedule: [
+          { kind: "import-entry", entry: "c" },
+          { kind: "import-entry", entry: "f" },
+        ],
+      } satisfies ProgramModel;
+      // The direct-target capability walk sees a plain numeric definer for BOTH consumers and passes;
+      // only the whole-program aggregation catches the conflict.
+      expect(
+        validateProgramModel(program).some((error) => error.includes("incompatible consumption")),
+      ).toBe(true);
+    });
+
+    test("rejects a call routed through a barrel to a numeric definer (callability not forwarded)", () => {
+      const program = {
+        modules: [
+          {
+            id: "consumer",
+            format: "esm",
+            dependencies: [
+              {
+                kind: "esm-namespace-import",
+                target: "barrel",
+                localName: "ns",
+                readMembers: ["vx"],
+                callMembers: ["vx"],
+              },
+            ],
+            events: [
+              {
+                module: "consumer",
+                phase: "evaluate",
+                value: 1,
+                reads: [{ binding: "ns", member: "vx", call: true }],
+              },
+            ],
+          },
+          {
+            id: "barrel",
+            format: "esm",
+            dependencies: [{ kind: "esm-reexport-star", target: "def" }],
+            events: [],
+          },
+          leaf("def"),
+        ],
+        entries: [{ name: "main", moduleId: "consumer" }],
+        schedule: [{ kind: "import-entry", entry: "main" }],
+      } satisfies ProgramModel;
+      expect(
+        validateProgramModel(program).some((error) =>
+          error.includes("callability is not forwarded through a barrel"),
+        ),
+      ).toBe(true);
+    });
+
+    // A compact table over origin profile x consumption shape on a DIRECT edge: the plan's rendered-form
+    // must agree with each consumer's shape. Sound rows validate; unsound rows are rejected (by the
+    // capability walk or the plan). The route axis is covered by the crafted tests above.
+    const definerOf = (kind: "numeric" | "callable" | "object"): ModuleModel =>
+      kind === "callable"
+        ? {
+            id: "def",
+            format: "esm",
+            dependencies: [],
+            events: [{ module: "def", phase: "evaluate", value: 4 }],
+            callableOwnState: true,
+          }
+        : kind === "object"
+          ? { id: "def", format: "esm", dependencies: [], events: [], objectExport: true }
+          : {
+              id: "def",
+              format: "esm",
+              dependencies: [],
+              events: [{ module: "def", phase: "evaluate", value: 4 }],
+            };
+
+    const rows: {
+      readonly origin: "numeric" | "callable" | "object";
+      readonly shape: "fold" | "call" | "objectRef";
+      readonly sound: boolean;
+    }[] = [
+      { origin: "numeric", shape: "fold", sound: true },
+      { origin: "numeric", shape: "call", sound: true },
+      { origin: "callable", shape: "call", sound: true },
+      { origin: "object", shape: "objectRef", sound: true },
+      { origin: "callable", shape: "fold", sound: false },
+      { origin: "object", shape: "fold", sound: false },
+      { origin: "object", shape: "call", sound: false },
+    ];
+
+    for (const { origin, shape, sound } of rows) {
+      test(`${origin} definer consumed by ${shape} is ${sound ? "accepted" : "rejected"}`, () => {
+        const dep =
+          shape === "call"
+            ? {
+                kind: "esm-value-import" as const,
+                target: "def",
+                importedName: "vx",
+                localName: "l",
+                call: true as const,
+              }
+            : shape === "objectRef"
+              ? {
+                  kind: "esm-value-import" as const,
+                  target: "def",
+                  importedName: "vx",
+                  localName: "l",
+                  objectRef: true as const,
+                }
+              : {
+                  kind: "esm-value-import" as const,
+                  target: "def",
+                  importedName: "vx",
+                  localName: "l",
+                };
+        const event =
+          shape === "objectRef"
+            ? {
+                module: "consumer",
+                phase: "evaluate",
+                value: 1,
+                identityCheck: { leftBinding: "l", rightBinding: "l" },
+              }
+            : {
+                module: "consumer",
+                phase: "evaluate",
+                value: 1,
+                reads: [
+                  shape === "call" ? { binding: "l", call: true as const } : { binding: "l" },
+                ],
+              };
+        const program = {
+          modules: [
+            { id: "consumer", format: "esm", dependencies: [dep], events: [event] },
+            definerOf(origin),
+          ],
+          entries: [{ name: "main", moduleId: "consumer" }],
+          schedule: [{ kind: "import-entry", entry: "main" }],
+        } satisfies ProgramModel;
+        expect(validateProgramModel(program).length === 0).toBe(sound);
+      });
+    }
+  });
+
   test("rejects an object-identity check comparing captures of DIFFERENT objects", () => {
     const program = {
       modules: [

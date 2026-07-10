@@ -1,3 +1,4 @@
+import { analyzeProgram, type ExportDemandPlan } from "./analyzed-program.ts";
 import {
   canonicalReadFlags,
   describeCaptures,
@@ -14,7 +15,7 @@ import type {
   ValueRead,
 } from "./model.ts";
 import { moduleProfile } from "./model.ts";
-import { ProgramFacts } from "./program-facts.ts";
+import type { ProgramFacts } from "./program-facts.ts";
 
 const JAVASCRIPT_IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
 
@@ -85,7 +86,9 @@ type ReadableBinding =
 export function validateProgramModel(program: ProgramModel): readonly string[] {
   const errors: string[] = [];
   const modulesById = collectModules(program.modules, errors);
-  const facts = ProgramFacts.from(program.modules);
+  // The ONE analyzed view: graph facts plus the canonical export-demand plan the program-level
+  // export soundness reads (supply status, consumption-shape aggregation, forwarded capability).
+  const { facts, plan } = analyzeProgram(program);
   const dynamicRegistrationOwners = new Map<string, string>();
   const modulesReachingTopLevelAwait = facts.topLevelAwaitReachers();
 
@@ -100,6 +103,7 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
 
   validateCycleValueFlow(program.modules, facts, errors);
   validateSynchronousCycleFormats(facts, errors);
+  validateExportDemand(plan, errors);
 
   const entriesByName = collectEntries(program.entries, modulesById, errors);
   validateSchedule(program, entriesByName, modulesById, facts, dynamicRegistrationOwners, errors);
@@ -107,6 +111,62 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
   validateOrganicChunkGroups(program, errors);
 
   return errors;
+}
+
+/// Program-level export-demand soundness, read from the ONE canonical plan. Every readable consumer's
+/// demand must resolve to a UNIQUE provider — not `unsupplied` (a `default` import through a star-only
+/// barrel, or any name a star-only barrel cannot forward, renders as an undefined import), and not
+/// `ambiguous` (duplicate named exports, or two star re-exports both providing the name, which the
+/// renderer would resolve arbitrarily). And the aggregated consumption of each resolved export must
+/// match the SINGLE form its definer renders: a callable-demand must reach a function (callability is
+/// marked only on a DIRECT call edge, never forwarded through a barrel — the ONE source of truth the
+/// renderer and this check share), an identity capture must reach an object, and one export cannot be
+/// both called and folded. The generator never produces any of these, so this only rejects hand-crafted
+/// or shrunk-invalid models.
+function validateExportDemand(plan: ExportDemandPlan, errors: string[]): void {
+  for (const consumption of plan.consumptions) {
+    const where = `module ${quote(consumption.consumerModuleId)} demand ${quote(consumption.demandedName)} on ${quote(consumption.target)}`;
+    if (consumption.supply.status === "unsupplied") {
+      errors.push(
+        `${where}: the export is unsupplied — no provider (a star re-export never forwards \`default\`, and a barrel carrying a star synthesizes nothing locally)`,
+      );
+    } else if (consumption.supply.status === "ambiguous") {
+      const origins = consumption.supply.origins
+        .map((origin) => quote(origin.moduleId))
+        .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
+        .join(", ");
+      errors.push(
+        `${where}: the export is ambiguous — it resolves to more than one definer (${origins}); duplicate named exports or two conflicting star re-exports`,
+      );
+    }
+  }
+
+  for (const demand of plan.resolvedDemands.values()) {
+    const at = `export ${quote(demand.origin.exportName)} on ${quote(demand.origin.moduleId)}`;
+    // Consumed as more than one shape: the definer renders ONE form, so a numeric fold and a call (or an
+    // identity capture) of the SAME export cannot both be sound. The per-shape numeric/object soundness
+    // stays the direct-target capability check's job (`validateCaptureCapability`); only the CROSS-CONSUMER
+    // conflict and the not-forwarded callability below need the whole-program plan.
+    if (demand.shapes.size > 1) {
+      const shapes = [...demand.shapes].sort((left, right) =>
+        left < right ? -1 : left > right ? 1 : 0,
+      );
+      errors.push(
+        `${at}: incompatible consumption — consumed as more than one shape (${shapes.join(", ")}); a definer renders ONE form, so mixing call / numeric fold / identity of one export misreads it`,
+      );
+      continue;
+    }
+    // A call demand must reach an export the definer renders as a FUNCTION. Callability is marked only on
+    // a DIRECT call edge (never forwarded through a barrel), so a call routed through a barrel to a
+    // numeric-fold definer renders a plain value and the call is a runtime TypeError — the gap the
+    // direct-target capability check cannot see. The plan's renderedForm is the single source of truth the
+    // renderer and this check share.
+    if (demand.shapes.has("callable") && demand.renderedForm !== "function") {
+      errors.push(
+        `${at}: called but not rendered as a function (renders a ${demand.renderedForm}); callability is not forwarded through a barrel — a call must reach a callable-own-state definer or a directly call-marked export`,
+      );
+    }
+  }
 }
 
 /// Cycle value-flow soundness (Node-legal, TDZ-free, NaN-free). A read across a cycle-closing edge
