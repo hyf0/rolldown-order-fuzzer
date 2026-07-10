@@ -1,5 +1,6 @@
 import {
   formConsumptionShape,
+  namespaceReexportTarget,
   renderedFormNoun,
   resolvedExportKey,
   type AnalyzedProgram,
@@ -163,8 +164,51 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
   validateManualChunkGroups(program, modulesById, errors);
   validateOrganicChunkGroups(program, errors);
   validateDeadHopContract(program, modulesById, plan, errors);
+  validateNamespaceReadPaths(program, modulesById, errors);
 
   return errors;
+}
+
+/// A NESTED namespace read (`outer.ns.member`, W14c) demands its DEEPER components through a chain of
+/// namespace re-exports (`export * as ns from …`): each INTERMEDIATE path component (every component but
+/// the last) must resolve to a namespace re-export on the module its prefix routed to, so the deepest
+/// member lands on a real origin. Without this, a malformed nested read (`outer.X.member` where `X` is a
+/// plain numeric export, not a namespace) would render `outer.X.member` against a number and fold NaN —
+/// a wasted both-sides harness crash. This makes the shape UNREPRESENTABLE rather than merely relying on
+/// the generator never building it, using the ONE `namespaceReexportTarget` resolver (no parallel walk).
+function validateNamespaceReadPaths(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  errors: string[],
+): void {
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
+      if (dependency.kind !== "esm-namespace-import") {
+        continue;
+      }
+      for (const [memberIndex, memberPath] of dependency.readMembers.entries()) {
+        // Only nested paths (depth ≥ 2) route through namespace re-exports; a length-1 read is a plain
+        // member the supply route already checks.
+        let currentTarget = dependency.target;
+        for (let component = 0; component < memberPath.length - 1; component += 1) {
+          const name = memberPath[component];
+          const inner =
+            name === undefined
+              ? undefined
+              : namespaceReexportTarget(modulesById, currentTarget, name);
+          if (inner === undefined) {
+            errors.push(
+              `modules[${moduleIndex}].dependencies[${dependencyIndex}].readMembers[${memberIndex}][${component}]: ` +
+                `${quote(String(name))} is not a namespace re-export on ${quote(currentTarget)}; a nested ` +
+                `namespace read must route each intermediate component through an \`export * as ns from\``,
+            );
+            break;
+          }
+          currentTarget = inner;
+        }
+      }
+    }
+  }
 }
 
 /// The DEAD-barrel-hop LEGALITY CONTRACT (M5, W14c). A MIXED barrel — a module with a DECLARED local

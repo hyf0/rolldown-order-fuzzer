@@ -227,9 +227,11 @@ function directDemandOf(
 /// Follow the module that a re-exported NAMESPACE name resolves to: `export * as name from inner` on
 /// `moduleId` routes to `inner`; a named re-export forwarding `name` (`export { s as name } from mid`)
 /// is followed to `mid`'s `s`. Returns the target module whose namespace `name` denotes, or `undefined`
-/// when `name` is not a namespace re-export here (a malformed nested read the validator rejects). The
-/// visited guard tolerates a pathological re-export cycle in a hand-crafted model.
-function namespaceReexportTarget(
+/// when `name` is not a namespace re-export here — a malformed intermediate the VALIDATOR REJECTS
+/// (`validateNamespaceReadPaths`), so a nested read can never reach here unresolved. Exported for that
+/// check so the resolution rule has ONE owner. The visited guard tolerates a pathological re-export
+/// cycle in a hand-crafted model.
+export function namespaceReexportTarget(
   modulesById: ReadonlyMap<string, ModuleModel>,
   moduleId: string,
   name: string,
