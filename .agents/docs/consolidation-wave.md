@@ -61,10 +61,39 @@ removal drops from `callMembers`; barrel rewiring renames the event member; any/
 organic config shrinks field-by-field; `withoutReads` preserves unknown fields). The candidate engine
 (`candidates`) and `sameFailure` are exported and unit-tested (`tests/shrink.test.ts`).
 
+## Round 2 — the AnalyzedProgram boundary (shared services, second pass)
+
+A codex re-review named the missing canonical program finalization / export-demand plan as THE blocker
+before feature waves. Round 2 built it, still byte-identity-preserving on the generated corpus (the
+golden harness below now covers all regimes, all fixed templates, and empty-chunking boundaries, pinned
+by `corpus-manifest.golden.json` and `npm run corpus:check`). The boundary contract lives in
+[analyzed-program-boundary](./analyzed-program-boundary.md); in short:
+
+- **`finalizeProgram` + `GenerationContext` (`generate.ts`)** — one finalization point that freezes the
+  generation state into a `ProgramModel` and returns its `AnalyzedProgram`. The dynamic-import
+  registrations stay a creation-ordered side list so the seeded schedule is byte-identical.
+- **`analyzeProgram` + `ExportDemandPlan` (`analyzed-program.ts`)** — the ONE plan keyed by resolved
+  `(moduleId, exportName)`: supply status (`supplied | ambiguous | unsupplied`), route provenance,
+  consumption-shape aggregation across all consumers, and the rendered form. Renderer, validator, tags,
+  and shrink read it; the renderer's own demand fixpoint is gone.
+- **`ProgramFacts` supply-aware primitives** — `resolveExportRoute` (never a fabricated origin),
+  `wouldCloseSynchronousEdge` (the forward mutator predicate), `sccFormats` (per-SCC cycle formats).
+- **Validator export-demand rules** — reject unsupplied (default through a star-only barrel), ambiguous
+  (duplicate named / two-star), incompatible consumption (one export both called and folded), and a call
+  whose definer renders a value (callability not forwarded through a barrel). Proven by a 6000-case
+  validate sweep (0 rejects).
+- **Enumerated defect fixes** — the multi-edge cycle predicate (A), per-SCC format tags (B), the family-A
+  route tag (C), the shrink normalizer restricted to numeric-generated forms (D), two shrink candidate
+  fixes (E, including the sole-manual-group non-termination), the execution/verdict layer moved below
+  `main.ts` into `program-run.ts` (F), NUL-byte escapes (G), `moduleProfile` as the single flag
+  interpreter with a grep guard (I), discriminated finalization asserts (J), the chunking union through
+  the adapter (K), and reserved-word (`default`) export declarations via `export { local as name }`.
+
 ## Deferred (corpus-semantic — needs its own re-acceptance wave)
 
 The renderer's category-ordered dependency emission (see
 [renderer-dependency-order](./renderer-dependency-order.md)); domain-separated RNGs, feature-budget
 reservation, and pass reordering; deriving dynamic registrations from the final graph (changes schedule
-RNG); persisted capture/profile/chunking schema migration. Each changes emitted source or RNG and is
-out of scope for a byte-identity-preserving consolidation.
+RNG — round 2 kept the creation-ordered side list on purpose); persisted capture/profile/chunking schema
+migration. Each changes emitted source or RNG and is out of scope for a byte-identity-preserving
+consolidation.
