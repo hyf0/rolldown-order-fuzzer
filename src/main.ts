@@ -2,11 +2,9 @@
 
 import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
-import { executeManifest } from "./execute.ts";
 import {
   FORMAT_REGIMES,
   generateCase,
@@ -16,28 +14,38 @@ import {
   type GeneratedCase,
 } from "./generate.ts";
 import { programChunking } from "./model.ts";
-import { SeededRng } from "./rng.ts";
+import {
+  DEFAULT_CASE_SIZE,
+  executeGeneratedCase,
+  normalizeBuildFailureMessage,
+  pathExists,
+  type CampaignBundleOutcome,
+  type CampaignCaseResult,
+  type CampaignOptions,
+  type CampaignVerdict,
+  type CapturedFile,
+} from "./program-run.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
   type ExecutionOutcome,
 } from "./protocol.ts";
-import { renderProgram, type RenderedProgram } from "./render.ts";
-import {
-  inspectRolldownRuntimeIdentity,
-  ROLLDOWN_BUILD_OPTIONS,
-  withRolldownBuild,
-  type FailedRolldownAdapterResult,
-  type ObservedRuntimeIdentity,
-} from "./rolldown-adapter.ts";
-import { classifyVerdict, type Verdict } from "./verdict.ts";
+import { ROLLDOWN_BUILD_OPTIONS, type ObservedRuntimeIdentity } from "./rolldown-adapter.ts";
+import { SeededRng } from "./rng.ts";
+
+// The one-program execution + verdict layer lives in program-run.ts; re-exported here so existing
+// importers (the CLI test) keep a stable surface while the definitions sit below this campaign/CLI layer.
+export {
+  classifyCampaignVerdict,
+  DEFAULT_CASE_SIZE,
+  executeGeneratedCase,
+  type BundleNotRunOutcome,
+  type CampaignCaseResult,
+  type CampaignOptions,
+} from "./program-run.ts";
 
 const UINT32_RANGE = 0x1_0000_0000;
-const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
-  /(?:file:\/\/\/|(?:[A-Za-z]:)?[\\/])(?:[^\s"'`]*[\\/])?rolldown-order-fuzzer-[A-Za-z0-9]{6}/g;
-const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
-export const DEFAULT_CASE_SIZE = 4;
 // 16: wave 7 — inferred-pure definers, function-hidden and computed-member reads in the model (the
 // two real-app bug families A/B), and the shrinker's failing wrap-mode carried in the artifact.
 // 15: wave 6 — organic (size/share-driven) chunk groups in the model, the raised size ceiling with a
@@ -45,80 +53,6 @@ export const DEFAULT_CASE_SIZE = 4;
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
 export const FAILURE_ARTIFACT_SCHEMA_VERSION = 16 as const;
-
-export interface CampaignOptions {
-  readonly seed: number;
-  readonly cases: number;
-  readonly caseSize: number;
-  /// When true (the default, i.e. `--case-size` was NOT given), each case draws its size from the
-  /// weighted small/medium/large spread (`sampleCaseSize`), so one campaign covers every scale;
-  /// `caseSize` is then only the fallback. When false, every case uses the fixed `caseSize`.
-  readonly sizeMix: boolean;
-  readonly onDemandWrapping: boolean;
-  /// Forces every case onto the random generator with a fixed format regime; absent means the
-  /// generator's own weighted mix of regimes and fixed templates.
-  readonly formatRegime?: FormatRegime;
-  readonly rolldownPackage: string;
-  readonly outDir: string;
-  readonly continueOnFail: boolean;
-}
-
-export interface SourceInvalidBundleOutcome {
-  readonly status: "not-run";
-  readonly reason: "source-invalid";
-}
-
-export interface AdapterFailureBundleOutcome {
-  readonly status: "not-run";
-  readonly reason: "adapter-failure";
-  readonly adapterFailure: FailedRolldownAdapterResult;
-}
-
-export type BundleNotRunOutcome = SourceInvalidBundleOutcome | AdapterFailureBundleOutcome;
-
-export type CampaignBundleOutcome = ExecutionOutcome | BundleNotRunOutcome;
-
-export interface BuildFailureVerdict {
-  readonly kind: "build-failure";
-  readonly reason: FailedRolldownAdapterResult["stage"] | "panic";
-  readonly signature: string;
-}
-
-export type CampaignVerdict = Verdict | BuildFailureVerdict;
-
-export interface CapturedFile {
-  readonly path: string;
-  readonly contents: Uint8Array;
-}
-
-export interface BundleExecutionArtifacts {
-  readonly bundleOutcome: ExecutionOutcome;
-  readonly bundleManifest: ExecutionManifest;
-  readonly bundleFiles: readonly CapturedFile[];
-  readonly runtimeIdentity?: ObservedRuntimeIdentity;
-}
-
-export type BundleBuildResult =
-  | { readonly status: "ok"; readonly value: BundleExecutionArtifacts }
-  | {
-      readonly status: "failed";
-      readonly failure: FailedRolldownAdapterResult;
-      readonly bundleManifest: ExecutionManifest | null;
-      readonly bundleFiles: readonly CapturedFile[];
-      readonly runtimeIdentity?: ObservedRuntimeIdentity;
-    };
-
-export interface CampaignCaseResult {
-  readonly generated: GeneratedCase;
-  readonly options: CampaignOptions;
-  readonly rendered: RenderedProgram;
-  readonly sourceOutcome: ExecutionOutcome;
-  readonly bundleOutcome: CampaignBundleOutcome;
-  readonly bundleManifest: ExecutionManifest | null;
-  readonly bundleFiles: readonly CapturedFile[];
-  readonly runtimeIdentity: ObservedRuntimeIdentity;
-  readonly verdict: CampaignVerdict;
-}
 
 export interface CampaignSummary {
   readonly casesRun: number;
@@ -139,16 +73,6 @@ export interface CampaignDependencies {
     caseIndex: number,
   ) => Promise<string>;
   readonly writeLine: (line: string) => void;
-}
-
-export interface ExecuteGeneratedCaseDependencies {
-  readonly executeSource: (rendered: RenderedProgram) => Promise<ExecutionOutcome>;
-  readonly inspectRuntimeIdentity: typeof inspectRolldownRuntimeIdentity;
-  readonly buildBundle: (
-    generated: GeneratedCase,
-    rendered: RenderedProgram,
-    options: CampaignOptions,
-  ) => Promise<BundleBuildResult>;
 }
 
 const DEFAULT_OPTIONS: CampaignOptions = {
@@ -300,97 +224,6 @@ async function runCampaignCases(
     failed,
     exitCode: failed === 0 ? 0 : sawHarnessFailure ? 2 : 1,
   };
-}
-
-export async function executeGeneratedCase(
-  generated: GeneratedCase,
-  options: CampaignOptions,
-  overrides: Partial<ExecuteGeneratedCaseDependencies> = {},
-): Promise<CampaignCaseResult> {
-  const dependencies: ExecuteGeneratedCaseDependencies = {
-    executeSource: executeRenderedSource,
-    inspectRuntimeIdentity: inspectRolldownRuntimeIdentity,
-    buildBundle: buildAndExecuteBundle,
-    ...overrides,
-  };
-  const rendered = renderProgram(generated.program);
-  const sourceOutcome = await dependencies.executeSource(rendered);
-  if (sourceOutcome.status === "timeout" || sourceOutcome.status === "harness-error") {
-    const runtimeIdentity = await dependencies.inspectRuntimeIdentity(options.rolldownPackage);
-    const bundleOutcome = {
-      status: "not-run",
-      reason: "source-invalid",
-    } as const satisfies SourceInvalidBundleOutcome;
-    return {
-      generated,
-      options,
-      rendered,
-      sourceOutcome,
-      bundleOutcome,
-      bundleManifest: null,
-      bundleFiles: [],
-      runtimeIdentity,
-      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
-    };
-  }
-
-  const built = await dependencies.buildBundle(generated, rendered, options);
-
-  if (built.status === "failed") {
-    const runtimeIdentity =
-      built.runtimeIdentity ?? (await dependencies.inspectRuntimeIdentity(options.rolldownPackage));
-    const bundleOutcome = {
-      status: "not-run",
-      reason: "adapter-failure",
-      adapterFailure: built.failure,
-    } as const satisfies AdapterFailureBundleOutcome;
-    return {
-      generated,
-      options,
-      rendered,
-      sourceOutcome,
-      bundleOutcome,
-      bundleManifest: built.bundleManifest,
-      bundleFiles: built.bundleFiles,
-      runtimeIdentity,
-      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
-    };
-  }
-
-  const runtimeIdentity =
-    built.value.runtimeIdentity ??
-    (await dependencies.inspectRuntimeIdentity(options.rolldownPackage));
-  return {
-    generated,
-    options,
-    rendered,
-    sourceOutcome,
-    bundleOutcome: built.value.bundleOutcome,
-    bundleManifest: built.value.bundleManifest,
-    bundleFiles: built.value.bundleFiles,
-    runtimeIdentity,
-    verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome),
-  };
-}
-
-export function classifyCampaignVerdict(
-  sourceOutcome: ExecutionOutcome,
-  bundleOutcome: CampaignBundleOutcome,
-): CampaignVerdict {
-  if (sourceOutcome.status === "harness-error" || sourceOutcome.status === "timeout") {
-    return classifyVerdict(sourceOutcome, {
-      version: EXECUTION_PROTOCOL_VERSION,
-      status: "timeout",
-      events: [],
-    });
-  }
-  if (bundleOutcome.status !== "not-run") {
-    return classifyVerdict(sourceOutcome, bundleOutcome);
-  }
-  if (bundleOutcome.reason === "adapter-failure") {
-    return buildFailureVerdict(bundleOutcome.adapterFailure);
-  }
-  throw new Error("A valid source outcome cannot have a source-invalid bundle outcome");
 }
 
 export async function writeFailureArtifacts(
@@ -761,18 +594,6 @@ function createArtifactFiles(
   ];
 }
 
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   let options: CampaignOptions;
   try {
@@ -791,125 +612,6 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
   }
 }
 
-async function executeRenderedSource(rendered: RenderedProgram): Promise<ExecutionOutcome> {
-  const sourceDirectory = await mkdtemp(join(tmpdir(), "rolldown-order-source-"));
-  try {
-    for (const file of rendered.files) {
-      const path = join(sourceDirectory, file.path);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, file.contents);
-    }
-    return await executeManifest(join(sourceDirectory, rendered.schedulePath));
-  } finally {
-    await rm(sourceDirectory, { recursive: true, force: true });
-  }
-}
-
-async function buildAndExecuteBundle(
-  generated: GeneratedCase,
-  rendered: RenderedProgram,
-  options: CampaignOptions,
-): Promise<BundleBuildResult> {
-  let failureArtifacts: Pick<CampaignCaseResult, "bundleManifest" | "bundleFiles"> & {
-    readonly runtimeIdentity?: ObservedRuntimeIdentity;
-  } = {
-    bundleManifest: null,
-    bundleFiles: [],
-  };
-  const built = await withRolldownBuild(
-    generated.program,
-    rendered,
-    async (artifacts) => ({
-      bundleOutcome: await executeManifest(artifacts.bundleManifestPath),
-      bundleManifest: artifacts.manifest,
-      bundleFiles: await Promise.all(
-        artifacts.outputFiles.map(async (fileName) => ({
-          path: fileName,
-          contents: await readFile(join(artifacts.bundleDirectory, fileName)),
-        })),
-      ),
-      runtimeIdentity: artifacts.runtimeIdentity,
-    }),
-    {
-      packageSpecifier: options.rolldownPackage,
-      onDemandWrapping: options.onDemandWrapping,
-      onFailureArtifacts: async (_failure, artifacts) => {
-        failureArtifacts = {
-          bundleManifest: artifacts.manifest ?? null,
-          bundleFiles: await captureBundleFiles(
-            artifacts.bundleDirectory,
-            new Set(["package.json", rendered.schedulePath]),
-          ),
-          runtimeIdentity: artifacts.runtimeIdentity,
-        };
-      },
-    },
-  );
-  if (built.status === "ok") {
-    return built;
-  }
-  return {
-    status: "failed",
-    failure: built,
-    ...failureArtifacts,
-  };
-}
-
-async function captureBundleFiles(
-  directory: string,
-  excludedPaths: ReadonlySet<string>,
-): Promise<readonly CapturedFile[]> {
-  if (!(await pathExists(directory))) {
-    return [];
-  }
-
-  const files: CapturedFile[] = [];
-  const pending: { readonly directory: string; readonly relativePath: string }[] = [
-    { directory, relativePath: "" },
-  ];
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) {
-      continue;
-    }
-    const entries = await readdir(current.directory, { withFileTypes: true });
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      const relativePath =
-        current.relativePath.length === 0 ? entry.name : `${current.relativePath}/${entry.name}`;
-      const path = join(current.directory, entry.name);
-      if (entry.isDirectory()) {
-        pending.push({ directory: path, relativePath });
-      } else if (entry.isFile() && !excludedPaths.has(relativePath)) {
-        files.push({ path: relativePath, contents: await readFile(path) });
-      }
-    }
-  }
-  return files.sort((left, right) => left.path.localeCompare(right.path));
-}
-
-function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailureVerdict {
-  if (failure.panic === true) {
-    // A genuine Rolldown build panic: a distinct failing verdict (never a harness discard) with a
-    // normalized message identity, deduplicated across runs, producing artifacts like any failure.
-    return {
-      kind: "build-failure",
-      reason: "panic",
-      signature: `build-failure:panic:${JSON.stringify([
-        failure.error.name,
-        normalizeBuildFailureMessage(failure.error.message),
-      ])}`,
-    };
-  }
-  return {
-    kind: "build-failure",
-    reason: failure.stage,
-    signature: `build-failure:${failure.status}:${failure.stage}:${JSON.stringify([
-      failure.error.name,
-      normalizeBuildFailureMessage(failure.error.message),
-    ])}`,
-  };
-}
-
 function normalizeBundleOutcomeForIdentity(outcome: CampaignBundleOutcome): CampaignBundleOutcome {
   if (outcome.status !== "not-run" || outcome.reason !== "adapter-failure") {
     return outcome;
@@ -924,21 +626,6 @@ function normalizeBundleOutcomeForIdentity(outcome: CampaignBundleOutcome): Camp
       },
     },
   };
-}
-
-function normalizeBuildFailureMessage(message: string): string {
-  let normalized = message.replaceAll(ROLLDOWN_TEMPORARY_ROOT_PATTERN, "<rolldown-root>");
-  normalized = normalized.replaceAll(`${pathToFileURL(FUZZER_ROOT).href}/`, "<fuzzer-root>/");
-  for (const root of new Set([
-    FUZZER_ROOT,
-    FUZZER_ROOT.replaceAll("\\", "/"),
-    FUZZER_ROOT.replaceAll("/", "\\"),
-  ])) {
-    normalized = normalized
-      .replaceAll(`${root}/`, "<fuzzer-root>/")
-      .replaceAll(`${root}\\`, "<fuzzer-root>/");
-  }
-  return normalized;
 }
 
 function isHarnessFailure(result: CampaignCaseResult): boolean {
@@ -1070,10 +757,6 @@ function validateSeedRange(seed: number, cases: number): void {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

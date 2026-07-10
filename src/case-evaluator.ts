@@ -5,7 +5,7 @@ import {
   executeGeneratedCase,
   type CampaignOptions,
   type CampaignVerdict,
-} from "./main.ts";
+} from "./program-run.ts";
 
 /// The minimal build inputs needed to evaluate ONE program: which Rolldown to build with and the wrap
 /// mode. Everything else the campaign runner threads (seed, template, coverage, case count, output
@@ -18,9 +18,9 @@ export interface CaseEvaluationOptions {
 /// Evaluate one program end-to-end — render, run the source under Node, build it with Rolldown, run the
 /// bundle, and classify the differential verdict — returning the structured verdict. This is the seam
 /// BELOW the campaign/CLI layer: the shrinker calls it to replay a loaded model instead of fabricating
-/// a `GeneratedCase` and a full `CampaignOptions` merely to reach the evaluator. (The execution
-/// primitives themselves still live in `main.ts`; relocating them fully below this seam is a mechanical
-/// follow-up that does not change behavior.)
+/// a `GeneratedCase` and a full `CampaignOptions` merely to reach the evaluator. The execution
+/// primitives now live in `program-run.ts` (below `main.ts`), so this seam no longer imports the
+/// campaign/CLI layer at all.
 export async function evaluateProgram(
   program: ProgramModel,
   options: CaseEvaluationOptions,
