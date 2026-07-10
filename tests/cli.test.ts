@@ -20,6 +20,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, test } from "vite-plus/test";
 
 import { generateCase, type GeneratedCase } from "../src/generate.ts";
+import { packagesOf } from "../src/model.ts";
 import {
   classifyCampaignVerdict,
   DEFAULT_CASE_SIZE,
@@ -1102,15 +1103,10 @@ describe("writeFailureArtifacts", () => {
         expectedRenderedSourcePaths,
       );
       expect(expectedRenderedSourcePaths).not.toContain("runtime.cjs");
-      // One rendered file per module plus schedule.json, and a synthetic package.json when the case
-      // carries any side-effect-free module.
-      const sideEffectFreePackages = generated.program.modules.some(
-        (module) => module.sideEffectFree === true,
-      )
-        ? 1
-        : 0;
+      // One rendered file per module plus schedule.json, and one generated package.json per
+      // resolved package (W14b: the packages view, through the one packagesOf seam).
       expect(expectedRenderedSourcePaths).toHaveLength(
-        generated.program.modules.length + 1 + sideEffectFreePackages,
+        generated.program.modules.length + 1 + packagesOf(generated.program).length,
       );
       await expect(readJson(join(artifactDirectory, "model.json"))).resolves.toEqual(
         generated.program,

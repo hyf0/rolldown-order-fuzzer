@@ -440,13 +440,17 @@ describe("family-A/B generation", () => {
         expect(typeof definer.pureBase).toBe("number");
         expect(definer.sideEffectFree).toBeUndefined();
         // Always read by someone (else legally droppable -> dead coverage): its export name is
-        // demanded through the barrel by a namespace read.
+        // demanded through the barrel by a namespace read (family A), or imported directly as a
+        // value (the W14b retained-reference member reading its pure definer).
         const exportName = `v${definer.id}`;
         const read = program.modules.some((module) =>
           module.dependencies.some(
             (dependency) =>
-              dependency.kind === "esm-namespace-import" &&
-              dependency.readMembers.includes(exportName),
+              (dependency.kind === "esm-namespace-import" &&
+                dependency.readMembers.includes(exportName)) ||
+              (dependency.kind === "esm-value-import" &&
+                dependency.target === definer.id &&
+                dependency.importedName === exportName),
           ),
         );
         expect(read).toBe(true);
@@ -487,7 +491,7 @@ describe("family-A/B generation", () => {
 });
 
 describe("model validation of the wave-7 shapes", () => {
-  test("an inferred-pure module rejects events, non-ESM, missing pureBase, and double flags", () => {
+  test("an inferred-pure module rejects events, non-ESM, and a missing pureBase", () => {
     const invalid = {
       modules: [
         // events on a pure module, and no pureBase.
@@ -498,7 +502,9 @@ describe("model validation of the wave-7 shapes", () => {
           events: [{ module: "a", phase: "evaluate", value: 1 }],
           dependencies: [],
         },
-        // both flags at once.
+        // inferred purity UNDER metadata purity (the legacy flag normalizes to a sideEffects:false
+        // package): deliberately ACCEPTED since W14b — both mechanisms assert "no side effects" and
+        // the real vben packages carry exactly this combination.
         {
           id: "b",
           format: "esm",
@@ -521,7 +527,7 @@ describe("model validation of the wave-7 shapes", () => {
     expect(errors).toContain(
       "modules[0].pureBase: an inferred-pure module requires a finite numeric pureBase",
     );
-    expect(errors).toContain("modules[1]: a module cannot be both inferredPure and sideEffectFree");
+    expect(errors.some((error) => error.includes("modules[1]"))).toBe(false);
     expect(errors).toContain("modules[2]: an inferred-pure module must be ESM, received cjs");
   });
 

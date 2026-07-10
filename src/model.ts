@@ -207,15 +207,14 @@ export type DependencyOperation = EsmDependencyOperation | CjsRequireOperation;
 interface ModuleModelBase {
   readonly id: string;
   readonly events: readonly EventRecord[];
-  /// When `true`, the module is rendered inside a synthetic package whose `package.json` asserts
-  /// `"sideEffects": false`, a user promise the bundler consumes (Node ignores it). Because the
-  /// bundler may then LEGALLY drop the module or its initializer, a flagged module must contribute
-  /// ONLY values — a demanded export folded downstream — and MUST NOT emit `__orderEvent` records:
-  /// an emitted event could be dropped in the bundle while the source still emits it, a false
-  /// differential failure. With no events, however the bundler DCEs the module the observed event
-  /// stream is unchanged, so any divergence (a dropped-but-referenced binding, a wrong folded value,
-  /// a reordering) is a real bug. `validate-model.ts` enforces the no-events invariant; the flag is
-  /// only valid on ESM modules whose dependencies are all value edges (see validate-model.ts).
+  /// LEGACY (schema ≤17): the module-level form of `sideEffects: false` package metadata, which the
+  /// package/layout model (W14b, schema 18) SUPERSEDES. `packagesOf` is the one normalization seam:
+  /// a flagged module resolves to a single-member `sideEffects: false` package, so every consumer
+  /// (renderer layout, the metadata-purity contract, tags, shrink) reads the SAME package view for
+  /// old and new models alike. The generator no longer sets this flag — it persists `packages`
+  /// directly — and a program carrying BOTH forms is rejected at validation. The semantic contract
+  /// (the bundler may legally drop the member, so it must contribute ONLY values and emit NO events)
+  /// lives with the package model; see `PackageModel` and `metadataPureModuleIds`.
   readonly sideEffectFree?: true;
   /// When `true`, the module is an INFERRED-pure definer: its top level is only statements the
   /// bundler's side-effect analysis judges pure by INFERENCE (local function declarations, a
@@ -290,19 +289,19 @@ export interface CjsModuleModel extends ModuleModelBase {
 
 export type ModuleModel = EsmModuleModel | CjsModuleModel;
 
-/// The two INDEPENDENT behavioral axes a module's five correlated boolean flags encode, as one
+/// The two INDEPENDENT behavioral axes a module's correlated boolean flags encode, as one
 /// discriminated `ModuleProfile` shared by generation, validation, rendering, tags, and shrinking
-/// instead of each re-deriving the combination. The two purity mechanisms stay SEMANTICALLY DISTINCT
-/// (metadata purity emits a `package.json`; inferred purity rewrites the initializer to a
-/// non-inlinable PURE call) — this only normalizes their REPRESENTATION.
+/// instead of each re-deriving the combination.
 ///
-/// - purity: `normal` (nothing dropped), `metadata` (`sideEffects: false` package flag), or
-///   `inferred` (side-effect-free by statement inference, carrying the fold base).
+/// - purity: `normal` (nothing dropped) or `inferred` (side-effect-free by STATEMENT inference,
+///   carrying the fold base). METADATA purity (`sideEffects` package metadata) is deliberately NOT a
+///   per-module profile axis any more: it is a PACKAGE-level fact the W14b package model owns, read
+///   through `metadataPureModuleIds` over the one `packagesOf` view (the legacy `sideEffectFree`
+///   flag normalizes there) — keeping it here too would be a second live representation.
 /// - exportShape: `numeric-fold` (folded numbers), `callable-own-state` (state-reading function
 ///   exports), or `fresh-object` (a fresh object literal per export — the double-init witness).
 export type ModulePurity =
   | { readonly kind: "normal" }
-  | { readonly kind: "metadata" }
   | { readonly kind: "inferred"; readonly base: number };
 
 export type ModuleExportShape =
@@ -317,13 +316,13 @@ export interface ModuleProfile {
 
 /// Project a module's flags onto the canonical `ModuleProfile`. The legal combinations and precedence
 /// (the flags are mutually exclusive where they conflict, enforced by the validator) live HERE, once.
+/// The legacy `sideEffectFree` flag is NOT consulted: metadata purity is a package-level fact
+/// resolved through `packagesOf`/`metadataPureModuleIds`, never a per-module profile axis.
 export function moduleProfile(module: ModuleModel): ModuleProfile {
   const purity: ModulePurity =
-    module.sideEffectFree === true
-      ? { kind: "metadata" }
-      : module.inferredPure === true
-        ? { kind: "inferred", base: module.pureBase ?? 0 }
-        : { kind: "normal" };
+    module.inferredPure === true
+      ? { kind: "inferred", base: module.pureBase ?? 0 }
+      : { kind: "normal" };
   const exportShape: ModuleExportShape =
     module.objectExport === true
       ? { kind: "fresh-object" }
@@ -538,12 +537,36 @@ export function programChunking(program: ProgramModel): Chunking {
   return chunking;
 }
 
-/// The resolved packages of a program — the ONE place the package/layout representation is read, so
-/// every consumer (renderer layout, validator contract, tags, shrink) sees the same view. Persisted
-/// `packages` (schema 18) win; the legacy module-level `sideEffectFree` normalization (a flag becomes
-/// a single-member `sideEffects: false` package) lands with the W14b migration flip.
+/// The resolved packages of a program — the ONE legacy-normalization seam through which every
+/// consumer (renderer layout, validator contract, tags, shrink) reads the package/layout
+/// representation, following the `buildConfigOf` fallback pattern. Persisted `packages` (schema 18)
+/// win; a LEGACY (schema ≤17) model instead normalizes each module-level `sideEffectFree` flag to a
+/// single-member `sideEffects: false` package named `sef-<id>` — semantically identical metadata
+/// (the bundler may drop the member; the value-only contract holds), so an old artifact still
+/// validates and replays, though its rendered layout moves from the shared `side-effect-free/`
+/// directory to per-package `node_modules/`. The generator emits the SAME `sef-<id>` shape for the
+/// modules it flags, so a legacy artifact and its regenerated equivalent render identically. A
+/// program carrying BOTH forms is rejected at validation, so there is never a second live
+/// representation.
 export function packagesOf(program: ProgramModel): readonly PackageModel[] {
-  return program.packages ?? [];
+  if (program.packages !== undefined) {
+    return program.packages;
+  }
+  return program.modules.flatMap((module) =>
+    module.sideEffectFree === true ? [legacySideEffectFreePackage(module.id)] : [],
+  );
+}
+
+/// The single-member `sideEffects: false` package a module-level `sideEffectFree` flag normalizes to
+/// — shared by the legacy seam above and the generator's flagger, so both forms are ONE shape. The
+/// name lowercases the id (generated ids are already lowercase; a pathological handwritten collision
+/// surfaces as a duplicate-name validation error, never a silent merge).
+export function legacySideEffectFreePackage(moduleId: string): PackageModel {
+  return {
+    name: `sef-${moduleId.toLowerCase()}`,
+    sideEffects: false,
+    moduleIds: [moduleId],
+  };
 }
 
 /// One module's package membership: the package it belongs to and whether it is the package MAIN

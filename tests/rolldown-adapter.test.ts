@@ -461,7 +461,7 @@ describe("withRolldownBuild", () => {
       const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
         executeManifest(artifacts.sourceManifestPath),
         executeManifest(artifacts.bundleManifestPath),
-        readFile(join(artifacts.sourceDirectory, "side-effect-free/package.json"), "utf8"),
+        readFile(join(artifacts.sourceDirectory, "node_modules/sef-flagged/package.json"), "utf8"),
       ]);
       return {
         verdict: classifyVerdict(sourceOutcome, bundleOutcome),
@@ -476,7 +476,8 @@ describe("withRolldownBuild", () => {
         ["source", 7],
         ["entry", 8],
       ],
-      packageJson: '{\n  "sideEffects": false\n}\n',
+      packageJson:
+        '{\n  "name": "sef-flagged",\n  "main": "./flagged.mjs",\n  "sideEffects": false\n}\n',
     });
   });
 
@@ -921,7 +922,7 @@ describe("withRolldownBuild", () => {
         const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
           executeManifest(artifacts.sourceManifestPath),
           executeManifest(artifacts.bundleManifestPath),
-          readFile(join(artifacts.sourceDirectory, "side-effect-free/package.json"), "utf8"),
+          readFile(join(artifacts.sourceDirectory, "node_modules/sef-barrel/package.json"), "utf8"),
         ]);
         return {
           verdict: classifyVerdict(sourceOutcome, bundleOutcome),
@@ -934,7 +935,8 @@ describe("withRolldownBuild", () => {
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
       events: [["entry", 1]],
-      packageJson: '{\n  "sideEffects": false\n}\n',
+      packageJson:
+        '{\n  "name": "sef-barrel",\n  "main": "./barrel.mjs",\n  "sideEffects": false\n}\n',
     });
   });
 

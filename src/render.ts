@@ -43,14 +43,6 @@ export interface RenderedProgram {
 
 const SCHEDULE_PATH = "schedule.json";
 
-/// Flagged (`sideEffectFree`) modules render under this directory, which carries a `package.json`
-/// asserting `"sideEffects": false`. Rolldown resolves the nearest `package.json` per module and
-/// honors the flag for files below this root (verified empirically), while the source tree stays
-/// executable because `.mjs`/`.cjs` files ignore `package.json`. Root modules have no such
-/// `package.json`, so the bundler keeps their side effects by default.
-const SIDE_EFFECT_FREE_DIRECTORY = "side-effect-free";
-const SIDE_EFFECT_FREE_PACKAGE_JSON = '{\n  "sideEffects": false\n}\n';
-
 export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
   // The consumer takes ONLY the AnalyzedProgram and reads the program from it, so the program can never
   // disagree with the analysis it is rendered against (the mismatch is unrepresentable). A standalone
@@ -69,10 +61,12 @@ export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
   // expose) and the analyzer's `renderedFormOf` classification (its SINGLE export-form dispatch), instead
   // of re-running its own `collectRequestedExports` fixpoint or re-classifying export shape from the module
   // profile. Threaded in along the case path so demand analysis runs ONCE.
-  const isMetadataPure = (module: ModuleModel): boolean =>
-    moduleProfile(module).purity.kind === "metadata";
+  //
   // Package members live under fixture-local `node_modules/<name>/<id>.<ext>`; everything else keeps
-  // the historical index-named root path, so a package-free program renders byte-identically.
+  // the historical index-named root path, so a package-free program renders byte-identically. The
+  // membership comes from the ONE `packagesOf` seam, so a LEGACY model's `sideEffectFree` flags land
+  // here as single-member `sideEffects: false` packages — the old shared `side-effect-free/`
+  // directory is gone as a separate mechanism.
   const membership = packageMembershipOf(program);
   const modulePaths = new Map(
     program.modules.map((module, index) => {
@@ -80,7 +74,7 @@ export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
       return [
         module.id,
         member === undefined
-          ? modulePath(index, module.format, isMetadataPure(module))
+          ? modulePath(index, module.format)
           : `node_modules/${member.package.name}/${packageMemberFileName(module)}`,
       ];
     }),
@@ -120,14 +114,6 @@ export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
     });
   }
 
-  // A single synthetic package.json marks every flagged module's directory as side-effect-free.
-  if (program.modules.some(isMetadataPure)) {
-    files.push({
-      path: `${SIDE_EFFECT_FREE_DIRECTORY}/package.json`,
-      contents: SIDE_EFFECT_FREE_PACKAGE_JSON,
-    });
-  }
-
   const entryPaths = new Map(
     program.entries.map((entry) => [entry.name, getRequiredPath(modulePaths, entry.moduleId)]),
   );
@@ -150,10 +136,9 @@ export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
   };
 }
 
-function modulePath(index: number, format: ModuleFormat, sideEffectFree: boolean): string {
+function modulePath(index: number, format: ModuleFormat): string {
   const extension = format === "esm" ? "mjs" : "cjs";
-  const base = `module-${String(index).padStart(4, "0")}.${extension}`;
-  return sideEffectFree ? `${SIDE_EFFECT_FREE_DIRECTORY}/${base}` : base;
+  return `module-${String(index).padStart(4, "0")}.${extension}`;
 }
 
 /// The import specifier from one rendered module to another. A target INSIDE a package that the

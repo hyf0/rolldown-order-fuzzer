@@ -4,7 +4,13 @@ import { fileURLToPath } from "node:url";
 
 import { analyzeProgram } from "./analyzed-program.ts";
 import { failureSignatureOf } from "./case-evaluator.ts";
-import type { Chunking, DependencyOperation, EventRecord, ProgramModel } from "./model.ts";
+import type {
+  Chunking,
+  DependencyOperation,
+  EventRecord,
+  PackageModel,
+  ProgramModel,
+} from "./model.ts";
 import { buildConfigOf, programChunking } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { validateProgramModel } from "./validate-model.ts";
@@ -94,6 +100,16 @@ const ORGANIC_OPTIONAL_FIELDS = [
   "priority",
   "includeDependenciesRecursively",
 ] as const;
+
+/// Replace a program's packages, dropping the field entirely when none remain (the persisted shape
+/// the generator emits — `packages: []` and absence resolve identically through `packagesOf`).
+function withPackages(program: ProgramModel, packages: readonly PackageModel[]): ProgramModel {
+  const next: ProgramModel = { ...program, packages };
+  if (packages.length === 0) {
+    delete (next as { packages?: unknown }).packages;
+  }
+  return next;
+}
 
 /// Re-canonicalize a program onto a `build.chunking` union, preserving the other BuildConfig axes and
 /// clearing any legacy top-level chunk arrays so `build.chunking` is the single source of truth.
@@ -357,8 +373,9 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
       yield editModule(program, moduleIndex, { ...module, dependencies, events } as typeof module);
     }
   }
-  // Unflag a side-effect-free module (drop its `sideEffects: false` metadata). When the failure does
-  // not depend on the flag this simplifies the case; the greedy pass keeps it only if the failure
+  // Unflag a side-effect-free module (drop its legacy `sideEffectFree` flag — a schema ≤17 model;
+  // new models carry `packages` and get the package candidates below). When the failure does not
+  // depend on the metadata this simplifies the case; the greedy pass keeps it only if the failure
   // kind is preserved, which also tells whether the metadata is load-bearing for the bug.
   for (const [moduleIndex, module] of program.modules.entries()) {
     if (module.sideEffectFree !== true) {
@@ -367,6 +384,58 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
     const unflagged = { ...module };
     delete (unflagged as { sideEffectFree?: true }).sideEffectFree;
     yield editModule(program, moduleIndex, unflagged);
+  }
+  // Package/layout candidates (W14b), coarsest first. Each reveals a distinct load-bearing question:
+  // dropping a whole package (members return to root paths, relative specifiers) asks whether the
+  // node_modules boundary matters at all; `sideEffects -> true` keeps the layout but withdraws the
+  // purity assertion (the family-B metadata ingredient); dropping ONE member or ONE array entry
+  // narrows which member/pattern carries the bug. Candidates that break the metadata-purity contract
+  // (e.g. an array entry removal exposing an event-carrying member as pure) fail validation and are
+  // skipped by the greedy loop like any other invalid candidate.
+  if (program.packages !== undefined) {
+    for (const [packageIndex, pkg] of program.packages.entries()) {
+      yield withPackages(
+        program,
+        program.packages.filter((_, index) => index !== packageIndex),
+      );
+      if (pkg.sideEffects !== true) {
+        yield withPackages(
+          program,
+          program.packages.map((candidate, index) =>
+            index === packageIndex ? { ...candidate, sideEffects: true } : candidate,
+          ),
+        );
+      }
+      for (const [memberIndex] of pkg.moduleIds.entries()) {
+        if (pkg.moduleIds.length <= 1) {
+          continue;
+        }
+        yield withPackages(
+          program,
+          program.packages.map((candidate, index) =>
+            index === packageIndex
+              ? {
+                  ...candidate,
+                  moduleIds: candidate.moduleIds.filter((_, i) => i !== memberIndex),
+                }
+              : candidate,
+          ),
+        );
+      }
+      if (typeof pkg.sideEffects !== "boolean") {
+        for (const [entryIndex] of pkg.sideEffects.entries()) {
+          const remaining = pkg.sideEffects.filter((_, i) => i !== entryIndex);
+          yield withPackages(
+            program,
+            program.packages.map((candidate, index) =>
+              index === packageIndex
+                ? { ...candidate, sideEffects: remaining.length > 0 ? remaining : false }
+                : candidate,
+            ),
+          );
+        }
+      }
+    }
   }
   // Drop the inferred-pure flag from a definer (family A). Without it the value renders as a plain
   // (inlinable) export, so if inference-based purity is load-bearing the failure vanishes and the
@@ -647,7 +716,12 @@ function dropModule(program: ProgramModel, moduleId: string): ProgramModel {
       .filter((group) => group.moduleIds.length > 0);
     nextChunking = groups.length > 0 ? { kind: "manual", groups } : { kind: "automatic" };
   }
-  return {
+  // Drop the module from any package membership too (an empty package disappears), so a module drop
+  // is valid on its own instead of leaving a dangling member id.
+  const packages = (program.packages ?? [])
+    .map((pkg) => ({ ...pkg, moduleIds: pkg.moduleIds.filter((id) => id !== moduleId) }))
+    .filter((pkg) => pkg.moduleIds.length > 0);
+  const dropped: ProgramModel = {
     modules,
     entries,
     schedule: program.schedule.filter((op) =>
@@ -657,6 +731,7 @@ function dropModule(program: ProgramModel, moduleId: string): ProgramModel {
     ),
     build: { ...buildConfigOf(program), chunking: nextChunking },
   };
+  return program.packages === undefined ? dropped : withPackages(dropped, packages);
 }
 
 function editModule(

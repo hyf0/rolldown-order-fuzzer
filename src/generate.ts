@@ -11,6 +11,7 @@ import type {
   ModuleFormat,
   ModuleModel,
   OrganicChunkGroupConfig,
+  PackageModel,
   ProgramModel,
   ScheduleOperation,
   ValueRead,
@@ -19,7 +20,12 @@ import { analyzeProgram, type AnalyzedProgram, type ExportDemandPlan } from "./a
 import {
   buildConfigOf,
   DEFAULT_BUILD_CONFIG,
+  legacySideEffectFreePackage,
+  metadataPureModuleIds,
   moduleProfile,
+  packageMemberFileName,
+  packageMembershipOf,
+  packagesOf,
   programChunking,
   readableBindingsOf,
 } from "./model.ts";
@@ -676,11 +682,13 @@ function buildRandomMixed(
 
   // Inject complete family-A conjunctions (inferred-pure definer star-re-exported through a shared
   // barrel, split reads) — biased HARD so a double-digit fraction of random-mixed cases carry the
-  // real-app shape a green 25,000-case corpus missed. Self-contained clusters, appended last.
-  const conjunctionDrafts = injectPureDefinerConjunctions(rng, drafts, regime);
-  drafts.push(...conjunctionDrafts);
+  // real-app shape a green 25,000-case corpus missed. Self-contained clusters, appended last. The
+  // injector reports its member roles so the W14b end-stage packaging variant can wrap exactly this
+  // cluster without re-deriving them from flags.
+  const conjunction = injectPureDefinerConjunctions(rng, drafts, regime);
+  drafts.push(...conjunction.drafts);
   const conjunctionConsumerIds = new Set(
-    conjunctionDrafts.filter((draft) => draft.forceEntry === true).map((draft) => draft.id),
+    conjunction.drafts.filter((draft) => draft.forceEntry === true).map((draft) => draft.id),
   );
 
   // Witness-enrichment clusters (wave 8), appended after the conjunctions so the conjunction density is
@@ -694,10 +702,29 @@ function buildRandomMixed(
   // finalizeProgram is the SINGLE finalization point: it freezes the generation state into a
   // ProgramModel and returns its one AnalyzedProgram, carried out of here so nothing downstream re-derives.
   const analyzed = finalizeProgram(
-    { drafts, cycleMemberIds, registrations, conjunctionConsumerIds },
+    {
+      drafts,
+      cycleMemberIds,
+      registrations,
+      conjunctionConsumerIds,
+      regime,
+      ...(conjunction.cluster === undefined ? {} : { conjunctionCluster: conjunction.cluster }),
+    },
     rng,
   );
   return { program: analyzed.program, analyzed };
+}
+
+/// The member roles of an injected family-A conjunction cluster, reported by the injector itself
+/// (its recipe knows which draft is which), for the W14b packaging variant.
+interface ConjunctionClusterInfo {
+  readonly definerId: string;
+  readonly siblingId: string;
+  /// Every barrel in the chain; `outerBarrelId` is the one the consumers namespace-import (the
+  /// package MAIN when the cluster is packaged).
+  readonly barrelIds: readonly string[];
+  readonly outerBarrelId: string;
+  readonly consumerIds: readonly string[];
 }
 
 /// The barrel/CJS cross-chunk `init_*` cycle shape (rolldown #9887, ingredient D4) — the W14a live catch.
@@ -829,6 +856,148 @@ export function generateCrossChunkInitCycleCase(seed: number): GeneratedCase {
   };
 }
 
+/// The family-B eager-barrel shape (the vben `initPreferences is not a function` breakage) as a
+/// DIRECTED fixed program — the fuzzer-model translation of the real fix's regression fixture
+/// (`entry_fn_captures_wrapped_value`), assembled through the same configuration/freeze/analyze seam
+/// as every fixed builder (a persisted BuildConfig, deep-frozen, analyzed once):
+///
+/// - package `fbpkg` with `sideEffects: ["./fb-sib.mjs"]` — the barrel and facade are metadata-pure,
+///   the sibling (manager) is the one listed side-effectful member;
+/// - `fb-bar` (package main): `export * from fb-def` + a DECLARED call-marked helper (the included
+///   own statement — vben's `tag`);
+/// - `fb-def` (facade): `const v = 0 + makePref()` — assigned at init from the sibling's function,
+///   non-inlinable;
+/// - `fb-sib` (manager): side-effectful, exports the hoisted function the facade calls;
+/// - `fb-first`: a side-effectful ROOT module the entry imports FIRST (the predicted-order deviation
+///   seed: source order runs it before the manager, chunk order runs the manager's chunk first);
+/// - `fb-ent` (entry): `import "./fb-first"; import { vFacade, helper } from "fbpkg"` — calls the
+///   helper at top level and reads the facade value INSIDE a hiddenReadFn-invoked function;
+/// - a manual chunk group splitting {facade, sibling} from the entry chunk, with the fixture's
+///   `includeDependenciesRecursively: false` (probed NOT load-bearing — idr:true stays red — but
+///   kept fixture-faithful) and `lazyBarrel: false` (the lazyBarrel:true variant is probed red too;
+///   the campaign script reports both).
+///
+/// Against the frozen PR-10104 snapshot this is od-RED (the entry's hidden read folds `undefined`
+/// into NaN — `bundle-only-crash`) and wa-GREEN on the SAME seed — the family-B fingerprint the
+/// directed campaign (`scripts/family-b-catch.ts`) accepts on, with the wrap-all cell as the internal
+/// control (no second build needed).
+export function buildFamilyBEagerBarrel(
+  rng: SeededRng,
+  options: { readonly lazyBarrel?: boolean } = {},
+): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const firstBase = 1 + rng.integer(900_000);
+  const siblingBase = 1 + rng.integer(900_000);
+  const entryBase = 1 + rng.integer(900_000);
+  const hiddenBase = 1 + rng.integer(900_000);
+  const modules: readonly ModuleModel[] = [
+    {
+      id: "fb-ent",
+      format: "esm",
+      dependencies: [
+        { kind: "esm-side-effect-import", target: "fb-first" },
+        { kind: "esm-value-import", target: "fb-bar", importedName: "vFacade", localName: "vf" },
+        {
+          kind: "esm-value-import",
+          target: "fb-bar",
+          importedName: "helper",
+          localName: "vb",
+          call: true,
+        },
+      ],
+      events: [
+        {
+          module: "fb-ent",
+          phase: "evaluate",
+          value: entryBase,
+          reads: [{ binding: "vb", call: true }],
+        },
+        {
+          module: "fb-ent",
+          phase: "evaluate-1",
+          value: hiddenBase,
+          reads: [{ binding: "vf" }],
+          hiddenReadFn: true,
+        },
+      ],
+    },
+    {
+      id: "fb-first",
+      format: "esm",
+      dependencies: [],
+      events: [{ module: "fb-first", phase: "evaluate", value: firstBase }],
+    },
+    {
+      id: "fb-bar",
+      format: "esm",
+      localExports: ["helper"],
+      dependencies: [{ kind: "esm-reexport-star", target: "fb-def" }],
+      events: [],
+    },
+    {
+      id: "fb-def",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "fb-sib",
+          importedName: "makePref",
+          localName: "mk",
+          call: true,
+        },
+      ],
+      events: [],
+    },
+    {
+      id: "fb-sib",
+      format: "esm",
+      dependencies: [],
+      events: [{ module: "fb-sib", phase: "evaluate", value: siblingBase }],
+    },
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [{ name: "entry-fb-ent", moduleId: "fb-ent" }],
+    schedule: [{ kind: "import-entry", entry: "entry-fb-ent" }],
+    packages: [
+      { name: "fbpkg", sideEffects: ["./fb-sib.mjs"], moduleIds: ["fb-bar", "fb-def", "fb-sib"] },
+    ],
+    build: {
+      chunking: {
+        kind: "manual",
+        groups: [{ name: "fb-pref", moduleIds: ["fb-def", "fb-sib"] }],
+      },
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: options.lazyBarrel ?? false,
+      strictExecutionOrder: true,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the directed family-B campaign. The seed only varies the cosmetic fold
+/// values, so the structural shape — and its od-red/wa-green verdict split — is identical across
+/// seeds. Tagged `mechanism:family-b-eager-barrel` (asserted by the campaign script).
+export function generateFamilyBEagerBarrelCase(
+  seed: number,
+  options: { readonly lazyBarrel?: boolean } = {},
+): GeneratedCase {
+  const { program, analyzed } = buildFamilyBEagerBarrel(new SeededRng(seed), options);
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
 /// has been wired — the mutable graph the random generator built, ready to be FROZEN. `finalizeProgram`
 /// is the single point that consumes it.
@@ -844,6 +1013,11 @@ interface GenerationContext {
   readonly registrations: readonly { readonly owner: string; readonly registration: string }[];
   /// The family-A conjunction consumers, left untouched by the statically-invisible-read rewrite.
   readonly conjunctionConsumerIds: ReadonlySet<string>;
+  /// The case's format regime — the W14b end-stage enrichment is ESM-only, so pure-cjs skips it.
+  readonly regime: FormatRegime;
+  /// The injected family-A conjunction cluster's member roles, when the case rolled one — the W14b
+  /// packaging variant wraps exactly this cluster.
+  readonly conjunctionCluster?: ConjunctionClusterInfo;
 }
 
 /// Freeze a generation context into a finalized, ANALYZED program: turn each draft into a module
@@ -853,7 +1027,7 @@ interface GenerationContext {
 /// the frozen graph. This is the single finalization point; it consumes the SAME generation RNG in the
 /// SAME order the inline tail did, so the corpus is byte-identical, and analysis is pure (no RNG).
 function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedProgram {
-  const { drafts, cycleMemberIds, registrations, conjunctionConsumerIds } = context;
+  const { drafts, cycleMemberIds, registrations, conjunctionConsumerIds, regime } = context;
   // profile-guard:authoring-start — this draft→module map is the ONE place that AUTHORS a module's
   // purity/export-shape flags (a draft is not a ModuleModel, so it reads the draft's authoring intent
   // directly; `moduleProfile` interprets those flags everywhere else). The module-profile guard test
@@ -975,18 +1149,21 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
 
   const chunking = buildChunkingConfig(rng, drafts, cycleMemberIds, entries.length);
 
-  // Flag a minority of eligible modules with `sideEffects: false` package metadata. Flagged modules
+  // Mark a minority of eligible modules with `sideEffects: false` package metadata. Marked modules
   // emit no events (their events are stripped), so the bundler's legal DCE cannot silently drop an
   // observed side effect; only their folded value survives downstream. The rolls come last so the
-  // rest of a given seed's structure is unchanged.
+  // rest of a given seed's structure is unchanged. W14b MIGRATION: the metadata is persisted as
+  // single-member PACKAGES (the same `sef-<id>` shape the legacy seam derives for an old flagged
+  // artifact), never as the module-level flag — the draws are byte-identical to the flag era, only
+  // the representation moved.
   const flagged = chooseSideEffectFreeModules(rng, modules, entries);
   const flaggedModules =
     flagged.size === 0
       ? modules
       : modules.map(
-          (module): ModuleModel =>
-            flagged.has(module.id) ? { ...module, events: [], sideEffectFree: true } : module,
+          (module): ModuleModel => (flagged.has(module.id) ? { ...module, events: [] } : module),
         );
+  const flaggedPackages = [...flagged].map((id) => legacySideEffectFreePackage(id));
 
   // Statically-invisible reads (family B): rewrite some folded reads to happen INSIDE a local
   // function called at init, and some namespace member reads to a computed `ns[k]` access, biased
@@ -1000,24 +1177,48 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     conjunctionConsumerIds,
   );
 
-  // Roll the persisted BuildConfig axes LAST — AFTER every source-affecting roll (deps, entries,
-  // schedule, chunking, side-effect flagging, statically-invisible reads) — so the rendered source is
-  // byte-identical to before this wave: these axes are bundle-side only and never change the source run,
-  // and appending their rolls here shifts no earlier draw. `includeDependenciesRecursively` (the global
-  // codeSplitting fallback) and `lazyBarrel` (the barrel-pruning optimization) are the two W14a axes;
-  // `preserveEntrySignatures` and `strictExecutionOrder` are fixed (the latter not rolled — every case
-  // keeps strict order; a seo:false cell needs a weaker order oracle that lands in W14b).
+  // Roll the persisted BuildConfig axes AFTER every W14a-era source-affecting roll (deps, entries,
+  // schedule, chunking, side-effect flagging, statically-invisible reads): these axes are bundle-side
+  // only and never change the source run, and appending their rolls here shifts no earlier draw.
+  // `includeDependenciesRecursively` (the global codeSplitting fallback) and `lazyBarrel` (the
+  // barrel-pruning optimization) are the two W14a axes; `preserveEntrySignatures` and
+  // `strictExecutionOrder` are fixed (the latter not rolled — a seo:false cell needs a weaker order
+  // oracle, deferred past W14b).
   const includeDependenciesRecursively = rng.boolean();
   const lazyBarrel = rng.boolean();
+
+  // The W14b END-STAGE enrichment — packages, the family-B eager-barrel conjunction, the
+  // retained-reference witness, and the camunda local-re-export composition. Every enrichment roll
+  // draws AFTER the last pre-W14b draw (the lazyBarrel axis above), so a case where no enrichment
+  // fires is byte-identical to the W14a corpus; a case where one fires changes exactly because it
+  // gained packages or a new operation (the labeled golden delta).
+  const enriched = applyW14bEnrichment(rng, {
+    regime,
+    modules: finalModules,
+    entries,
+    schedule,
+    chunking,
+    packages: flaggedPackages,
+    ...(context.conjunctionCluster === undefined
+      ? {}
+      : { conjunctionCluster: context.conjunctionCluster }),
+  });
+
   const build: BuildConfig = {
-    chunking: chunkingUnionOf(chunking),
+    chunking: chunkingUnionOf(enriched.chunking),
     includeDependenciesRecursively,
     preserveEntrySignatures: "allow-extension",
     lazyBarrel,
     strictExecutionOrder: true,
   };
 
-  const program: ProgramModel = { modules: finalModules, entries, schedule, build };
+  const program: ProgramModel = {
+    modules: enriched.modules,
+    entries: enriched.entries,
+    schedule: enriched.schedule,
+    ...(enriched.packages.length > 0 ? { packages: enriched.packages } : {}),
+    build,
+  };
   // Deep-freeze the finalized program so accidental post-finalization mutation throws in tests — nothing
   // downstream (render, validate, tags, the artifact writer) mutates it; they only READ. analyzeProgram
   // then freezes the plan and the analyzed view over this frozen graph.
@@ -1044,6 +1245,582 @@ function deepFreeze<T>(value: T): T {
     return Object.freeze(value);
   }
   return value;
+}
+
+/// The rolled (pre-union) chunking shape `buildChunkingConfig` produces and the W14b enrichment may
+/// extend: at most one of the two group arrays is non-empty.
+interface RolledChunking {
+  readonly manualChunkGroups?: readonly ManualChunkGroup[];
+  readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
+}
+
+/// The mutable program surface the W14b end-stage enrichment works over. Every roll it makes draws
+/// AFTER the last pre-W14b draw (the lazyBarrel axis), so a case where nothing fires is
+/// byte-identical to the W14a corpus.
+interface W14bEnrichmentInput {
+  readonly regime: FormatRegime;
+  readonly modules: readonly ModuleModel[];
+  readonly entries: readonly EntryModel[];
+  readonly schedule: readonly ScheduleOperation[];
+  readonly chunking: RolledChunking;
+  readonly packages: readonly PackageModel[];
+  readonly conjunctionCluster?: ConjunctionClusterInfo;
+}
+
+interface W14bEnrichmentResult {
+  readonly modules: readonly ModuleModel[];
+  readonly entries: readonly EntryModel[];
+  readonly schedule: readonly ScheduleOperation[];
+  readonly chunking: RolledChunking;
+  readonly packages: readonly PackageModel[];
+}
+
+/// The probability gates of the W14b enrichment sub-steps, each rolled once per case in this fixed
+/// order. Family-B is biased so the COMPLETE conjunction reaches double-digit density in
+/// random-mixed (measured by `scripts/tag-density.ts`); the rest are deliberate minorities.
+const FAMILY_B_PROBABILITY_PERCENT = 16;
+const RETAINED_REFERENCE_PROBABILITY_PERCENT = 10;
+const CONJUNCTION_PACKAGING_PROBABILITY_PERCENT = 25;
+const PLAIN_PACKAGING_PROBABILITY_PERCENT = 8;
+const CAMUNDA_REWRITE_PROBABILITY_PERCENT = 10;
+
+/// The W14b END-STAGE enrichment: the package/metadata realism cluster. Sub-steps in fixed order —
+/// (1) the family-B eager-barrel conjunction (the vben shape), (2) the retained-reference witness,
+/// (3) the family-A conjunction packaging variant, (4) plain single-member packaging, (5) the
+/// camunda local-re-export rewrite. The two injectors are ESM-only constructs, so a pure-CJS case
+/// skips them; 3–5 target structures a pure-CJS case simply lacks.
+function applyW14bEnrichment(rng: SeededRng, input: W14bEnrichmentInput): W14bEnrichmentResult {
+  const modules: ModuleModel[] = [...input.modules];
+  const entries: EntryModel[] = [...input.entries];
+  const schedule: ScheduleOperation[] = [...input.schedule];
+  const packages: PackageModel[] = [...input.packages];
+  let chunking = input.chunking;
+
+  if (input.regime !== "pure-cjs") {
+    chunking = injectFamilyBEagerBarrel(rng, modules, entries, schedule, chunking, packages);
+    injectRetainedReference(rng, modules, entries, schedule, packages);
+  }
+  applyConjunctionPackaging(rng, input.conjunctionCluster, packages);
+  applyPlainPackaging(rng, modules, entries, packages);
+  const rewritten = applyCamundaRewrite(rng, modules, entries, schedule, packages);
+
+  return { modules: rewritten, entries, schedule, chunking, packages };
+}
+
+/// Inject the family-B eager-barrel conjunction — the vben `initPreferences is not a function` shape,
+/// translated ingredient-for-ingredient from the real fix's regression fixture and probed od-RED /
+/// wa-GREEN against the frozen snapshot:
+///
+/// - a PACKAGE whose `sideEffects` ARRAY lists only the sibling (manager), so the barrel and facade
+///   are metadata-pure;
+/// - the package MAIN barrel: `export * from facade` (the hop that gets TREE-SHAKEN — a named hop
+///   resolves the binding directly and greens) PLUS a DECLARED local export the entry CALLS (the
+///   "one own helper keeps the barrel included" ingredient — without an included own statement the
+///   delegation never happens and the shape greens);
+/// - the facade: metadata-pure, its export assigned at init from a CALL of the sibling's function
+///   (non-inlinable, so a dropped init reads `undefined` → NaN → the event channel rejects it);
+/// - the sibling: the package's one listed, side-effectful module;
+/// - a chunk group splitting {facade, sibling} away from the entry chunk (the predicted-order
+///   deviation seed — no group, no bug), merged into whatever chunking mode the case rolled;
+/// - a root side-effectful module the entry imports FIRST (source order runs it before the manager;
+///   predicted chunk order runs the manager first — the deviation; removing it greens);
+/// - the entry: reads the facade's value through the barrel inside a hiddenReadFn-invoked function
+///   and calls the barrel's own helper.
+///
+/// A minority variant also re-exports the sibling's value as BOTH a named and a `default` alias
+/// through the same barrel (witness D2), consumed by the entry alongside the core reads.
+function injectFamilyBEagerBarrel(
+  rng: SeededRng,
+  modules: ModuleModel[],
+  entries: EntryModel[],
+  schedule: ScheduleOperation[],
+  chunking: RolledChunking,
+  packages: PackageModel[],
+): RolledChunking {
+  if (rng.integer(100) >= FAMILY_B_PROBABILITY_PERCENT) {
+    return chunking;
+  }
+  if (MAX_RANDOM_MODULES - modules.length < 5) {
+    return chunking;
+  }
+  const counter = modules.length;
+  const firstId = `fbfirst${counter}`;
+  const barrelId = `fbbar${counter}`;
+  const facadeId = `fbdef${counter}`;
+  const siblingId = `fbsib${counter}`;
+  const entryId = `fbent${counter}`;
+  const packageName = `fbpkg${counter}`;
+  const facadeName = `v${facadeId}`;
+  const helperName = `v${barrelId}`;
+  const siblingFnName = `f${siblingId}`;
+  const siblingName = `v${siblingId}`;
+  const dualDefault = rng.integer(100) < 35;
+
+  modules.push(
+    {
+      id: firstId,
+      format: "esm",
+      dependencies: [],
+      events: [{ module: firstId, phase: "evaluate", value: rng.integer(1_000_000) }],
+    },
+    {
+      id: barrelId,
+      format: "esm",
+      localExports: [helperName],
+      dependencies: [
+        { kind: "esm-reexport-star", target: facadeId },
+        ...(dualDefault
+          ? ([
+              {
+                kind: "esm-reexport-named",
+                target: siblingId,
+                sourceName: siblingName,
+                exportedName: siblingName,
+              },
+              {
+                kind: "esm-reexport-named",
+                target: siblingId,
+                sourceName: siblingName,
+                exportedName: "default",
+              },
+            ] as const)
+          : []),
+      ],
+      events: [],
+    },
+    {
+      id: facadeId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: siblingId,
+          importedName: siblingFnName,
+          localName: `cc_${facadeId}`,
+          call: true,
+        },
+      ],
+      events: [],
+    },
+    {
+      id: siblingId,
+      format: "esm",
+      dependencies: [],
+      events: [{ module: siblingId, phase: "evaluate", value: rng.integer(1_000_000) }],
+    },
+    {
+      id: entryId,
+      format: "esm",
+      dependencies: [
+        { kind: "esm-side-effect-import", target: firstId },
+        {
+          kind: "esm-value-import",
+          target: barrelId,
+          importedName: facadeName,
+          localName: `vf_${entryId}`,
+        },
+        {
+          kind: "esm-value-import",
+          target: barrelId,
+          importedName: helperName,
+          localName: `vb_${entryId}`,
+          call: true,
+        },
+        ...(dualDefault
+          ? ([
+              {
+                kind: "esm-value-import",
+                target: barrelId,
+                importedName: siblingName,
+                localName: `vs_${entryId}`,
+              },
+              {
+                kind: "esm-value-import",
+                target: barrelId,
+                importedName: "default",
+                localName: `vd_${entryId}`,
+              },
+            ] as const)
+          : []),
+      ],
+      events: [
+        {
+          module: entryId,
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          reads: [
+            { binding: `vb_${entryId}`, call: true },
+            ...(dualDefault ? [{ binding: `vs_${entryId}` }, { binding: `vd_${entryId}` }] : []),
+          ],
+        },
+        {
+          module: entryId,
+          phase: "evaluate-1",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: `vf_${entryId}` }],
+          hiddenReadFn: true,
+        },
+      ],
+    },
+  );
+  entries.push({ name: `entry-${entryId}`, moduleId: entryId });
+  schedule.push({ kind: "import-entry", entry: `entry-${entryId}` });
+  packages.push({
+    name: packageName,
+    sideEffects: [`./${siblingId}.mjs`],
+    moduleIds: [barrelId, facadeId, siblingId],
+  });
+  return mergeFamilyBChunkGroup(chunking, counter, packageName, facadeId, siblingId);
+}
+
+/// Merge the family-B {facade, sibling} chunk group into whatever chunking mode the case rolled:
+/// manual and default modes gain (or start) a manual group with the two exact modules; an organic
+/// mode appends an organic group whose regex test selects the two rendered package files (separator-
+/// tolerant), with a priority above every generated organic flavor so another group cannot steal the
+/// members. The split is load-bearing — without a group the shape greens.
+function mergeFamilyBChunkGroup(
+  chunking: RolledChunking,
+  counter: number,
+  packageName: string,
+  facadeId: string,
+  siblingId: string,
+): RolledChunking {
+  const groupName = `fb-pref${counter}`;
+  if (chunking.organicChunkGroups !== undefined && chunking.organicChunkGroups.length > 0) {
+    return {
+      organicChunkGroups: [
+        ...chunking.organicChunkGroups,
+        {
+          name: groupName,
+          test: `node_modules[\\\\/]${packageName}[\\\\/](${facadeId}|${siblingId})\\.mjs$`,
+          priority: 9,
+        },
+      ],
+    };
+  }
+  return {
+    manualChunkGroups: [
+      ...(chunking.manualChunkGroups ?? []),
+      { name: groupName, moduleIds: [facadeId, siblingId] },
+    ],
+  };
+}
+
+/// Inject the retained-reference witness (the closed #9961/#10123 family): a `sideEffects: false`
+/// package member whose top-level reference to a PURE definer is retained by demand elsewhere — a
+/// root entry folds the member's export into a KEPT event, so the bundler must keep the member's
+/// value code and the definer's init in order; tree-shaking that drops the pure definer while the
+/// reference survives is the historical crash. The definer is inferred-pure (a non-inlinable PURE
+/// call — an inlinable literal would dissolve the reference), IN the package on one variant
+/// (exercising the deliberately-allowed inferred-pure-inside-metadata combination) and a ROOT module
+/// on the other (the member then climbs out of node_modules for it). A 50% variant re-exports the
+/// member's value as BOTH a named and a `default` alias through the package barrel (witness D2).
+function injectRetainedReference(
+  rng: SeededRng,
+  modules: ModuleModel[],
+  entries: EntryModel[],
+  schedule: ScheduleOperation[],
+  packages: PackageModel[],
+): void {
+  if (rng.integer(100) >= RETAINED_REFERENCE_PROBABILITY_PERCENT) {
+    return;
+  }
+  if (MAX_RANDOM_MODULES - modules.length < 4) {
+    return;
+  }
+  const counter = modules.length;
+  const definerId = `rrdef${counter}`;
+  const middleId = `rrmid${counter}`;
+  const barrelId = `rrbar${counter}`;
+  const entryId = `rrent${counter}`;
+  const packageName = `rrpkg${counter}`;
+  const definerName = `v${definerId}`;
+  const middleName = `v${middleId}`;
+  const definerInPackage = rng.boolean();
+  const dualDefault = rng.boolean();
+
+  modules.push(
+    {
+      id: definerId,
+      format: "esm",
+      dependencies: [],
+      events: [],
+      inferredPure: true,
+      pureBase: 1 + rng.integer(900_000),
+    },
+    {
+      id: middleId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: definerId,
+          importedName: definerName,
+          localName: `rm_${middleId}`,
+        },
+      ],
+      events: [],
+    },
+    {
+      id: barrelId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-reexport-named",
+          target: middleId,
+          sourceName: middleName,
+          exportedName: middleName,
+        },
+        ...(dualDefault
+          ? ([
+              {
+                kind: "esm-reexport-named",
+                target: middleId,
+                sourceName: middleName,
+                exportedName: "default",
+              },
+            ] as const)
+          : []),
+      ],
+      events: [],
+    },
+    {
+      id: entryId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: barrelId,
+          importedName: middleName,
+          localName: `re_${entryId}`,
+        },
+        ...(dualDefault
+          ? ([
+              {
+                kind: "esm-value-import",
+                target: barrelId,
+                importedName: "default",
+                localName: `rd_${entryId}`,
+              },
+            ] as const)
+          : []),
+      ],
+      events: [
+        {
+          module: entryId,
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          reads: [
+            { binding: `re_${entryId}` },
+            ...(dualDefault ? [{ binding: `rd_${entryId}` }] : []),
+          ],
+        },
+      ],
+    },
+  );
+  entries.push({ name: `entry-${entryId}`, moduleId: entryId });
+  schedule.push({ kind: "import-entry", entry: `entry-${entryId}` });
+  packages.push({
+    name: packageName,
+    sideEffects: false,
+    moduleIds: [barrelId, middleId, ...(definerInPackage ? [definerId] : [])],
+  });
+}
+
+/// Package an injected family-A conjunction cluster (compose family A BEHIND a package boundary):
+/// the outer barrel becomes the package MAIN the consumers import bare, and the metadata rolls the
+/// vben partial ARRAY (listing only the side-effectful sibling — the definer is then metadata-pure
+/// ON TOP of inferred-pure) or a plain `sideEffects: true`.
+function applyConjunctionPackaging(
+  rng: SeededRng,
+  cluster: ConjunctionClusterInfo | undefined,
+  packages: PackageModel[],
+): void {
+  if (cluster === undefined) {
+    return;
+  }
+  if (rng.integer(100) >= CONJUNCTION_PACKAGING_PROBABILITY_PERCENT) {
+    return;
+  }
+  const sideEffects: PackageModel["sideEffects"] =
+    rng.integer(100) < 70 ? [`./${cluster.siblingId}.mjs`] : true;
+  packages.push({
+    name: `fa-${cluster.definerId.toLowerCase()}`,
+    sideEffects,
+    moduleIds: [
+      cluster.outerBarrelId,
+      ...cluster.barrelIds.filter((id) => id !== cluster.outerBarrelId),
+      cluster.siblingId,
+      cluster.definerId,
+    ],
+  });
+}
+
+/// Wrap one or two ordinary modules into single-member `sideEffects: true` packages — no purity
+/// claim, purely the node_modules/bare-specifier resolution surface (real graphs import most of
+/// their modules from packages). Entries and existing package members are excluded.
+function applyPlainPackaging(
+  rng: SeededRng,
+  modules: readonly ModuleModel[],
+  entries: readonly EntryModel[],
+  packages: PackageModel[],
+): void {
+  if (rng.integer(100) >= PLAIN_PACKAGING_PROBABILITY_PERCENT) {
+    return;
+  }
+  const entryIds = new Set(entries.map((entry) => entry.moduleId));
+  const packagedIds = new Set(packages.flatMap((pkg) => pkg.moduleIds));
+  const usedNames = new Set(packages.map((pkg) => pkg.name));
+  const eligible = modules.filter(
+    (module) =>
+      !entryIds.has(module.id) &&
+      !packagedIds.has(module.id) &&
+      /^[A-Za-z0-9_-]+$/.test(module.id) &&
+      !usedNames.has(`pkg-${module.id.toLowerCase()}`),
+  );
+  if (eligible.length === 0) {
+    return;
+  }
+  for (const module of pickDistinct(rng, eligible, 1 + rng.integer(2))) {
+    packages.push({
+      name: `pkg-${module.id.toLowerCase()}`,
+      sideEffects: true,
+      moduleIds: [module.id],
+    });
+  }
+}
+
+/// Flip ONE named re-export into the camunda LOCAL re-export form (`import { s as l } …;
+/// export { l as e };` — supply-identical, but the import is a LIVE record on a different rolldown
+/// surface), sometimes adding an OWN event to the flipped module (the package-barrel-with-own-effect
+/// composition) when its purity permits one. Composes the M4 operation into whatever named hops the
+/// case carries — family-A conjunction barrels, retained-reference package barrels (camunda BEHIND a
+/// package), generated barrel chains, or the family-B dual-default hops.
+function applyCamundaRewrite(
+  rng: SeededRng,
+  modules: readonly ModuleModel[],
+  entries: readonly EntryModel[],
+  schedule: readonly ScheduleOperation[],
+  packages: readonly PackageModel[],
+): readonly ModuleModel[] {
+  if (rng.integer(100) >= CAMUNDA_REWRITE_PROBABILITY_PERCENT) {
+    return modules;
+  }
+  // A named re-export is only LINK-checked, but the local form's import half is a LIVE NUMERIC
+  // demand — so a hop is flippable only when its resolved origin renders a value-category form: a
+  // numeric-fold definer whose export no direct call edge marked callable (a callable-constant,
+  // callable-own-state, or fresh-object origin would make the flipped import an invalid consumption).
+  const facts = ProgramFacts.from(modules);
+  const modulesById = new Map(modules.map((module) => [module.id, module]));
+  const callMarked = new Set<string>();
+  for (const module of modules) {
+    for (const dependency of module.dependencies) {
+      if (dependency.kind === "esm-value-import" && dependency.call === true) {
+        callMarked.add(`${dependency.target}\0${dependency.importedName}`);
+      }
+      if (dependency.kind === "esm-namespace-import") {
+        for (const member of dependency.callMembers ?? []) {
+          callMarked.add(`${dependency.target}\0${member}`);
+        }
+      }
+    }
+  }
+  const flippable = (
+    dependency: EsmDependencyOperation & { kind: "esm-reexport-named" },
+  ): boolean => {
+    const supply = facts.resolveExportRoute(dependency.target, dependency.sourceName);
+    if (supply.status !== "supplied") {
+      return false;
+    }
+    if (callMarked.has(`${supply.origin.moduleId}\0${supply.origin.exportName}`)) {
+      return false;
+    }
+    const origin = modulesById.get(supply.origin.moduleId);
+    return origin === undefined || moduleProfile(origin).exportShape.kind === "numeric-fold";
+  };
+  const candidates: { readonly moduleIndex: number; readonly depIndex: number }[] = [];
+  for (const [moduleIndex, module] of modules.entries()) {
+    if (module.format !== "esm") {
+      continue;
+    }
+    const declared = new Set(module.localExports ?? []);
+    for (const [depIndex, dependency] of module.dependencies.entries()) {
+      if (
+        dependency.kind === "esm-reexport-named" &&
+        !declared.has(dependency.exportedName) &&
+        flippable(dependency)
+      ) {
+        candidates.push({ moduleIndex, depIndex });
+      }
+    }
+  }
+  if (candidates.length === 0) {
+    return modules;
+  }
+  const pick = candidates[rng.integer(candidates.length)];
+  if (pick === undefined) {
+    return modules;
+  }
+  const module = modules[pick.moduleIndex];
+  if (module === undefined || module.format !== "esm") {
+    return modules;
+  }
+  const flipped = module.dependencies[pick.depIndex];
+  if (flipped === undefined || flipped.kind !== "esm-reexport-named") {
+    return modules;
+  }
+  const usedBindings = new Set(
+    module.dependencies.flatMap((dependency) => {
+      if (
+        dependency.kind === "esm-value-import" ||
+        dependency.kind === "esm-namespace-import" ||
+        dependency.kind === "esm-local-reexport"
+      ) {
+        return [dependency.localName];
+      }
+      return [];
+    }),
+  );
+  let localName = `lr_${module.id}`;
+  for (let suffix = 0; usedBindings.has(localName); suffix += 1) {
+    localName = `lr_${module.id}_${suffix}`;
+  }
+  const dependencies = module.dependencies.map((dependency, index) =>
+    index === pick.depIndex
+      ? ({
+          kind: "esm-local-reexport",
+          target: flipped.target,
+          sourceName: flipped.sourceName,
+          localName,
+          exportedName: flipped.exportedName,
+        } as const)
+      : dependency,
+  );
+  // The own-effect roll (the full camunda shape): only when the module carries no events yet and its
+  // purity permits one — never on a metadata-pure package member (the value-only contract), an
+  // inferred-pure definer (an event is a top-level side effect), or the no-events witness shapes.
+  const metadataPure = metadataPureModuleIds({
+    modules,
+    entries,
+    schedule,
+    ...(packages.length > 0 ? { packages } : {}),
+  });
+  const profile = moduleProfile(module);
+  const mayCarryEvent =
+    module.events.length === 0 &&
+    !metadataPure.has(module.id) &&
+    profile.purity.kind !== "inferred" &&
+    profile.exportShape.kind === "numeric-fold";
+  const addEvent = rng.boolean();
+  const events =
+    mayCarryEvent && addEvent
+      ? [{ module: module.id, phase: "evaluate", value: rng.integer(1_000_000) }]
+      : module.events;
+  return modules.map((candidate, index) =>
+    index === pick.moduleIndex
+      ? ({ ...candidate, dependencies, events } as ModuleModel)
+      : candidate,
+  );
 }
 
 /// The per-case chunking-config axis (wave 6): roll one of three modes and produce the matching
@@ -1329,19 +2106,25 @@ function injectPureDefinerConjunctions(
   rng: SeededRng,
   drafts: readonly RandomModuleDraft[],
   regime: FormatRegime,
-): RandomModuleDraft[] {
-  return injectCluster(rng, drafts, regime, {
+): { readonly drafts: RandomModuleDraft[]; readonly cluster?: ConjunctionClusterInfo } {
+  let cluster: ConjunctionClusterInfo | undefined;
+  const appended = injectCluster(rng, drafts, regime, {
     minBudget: 5,
     probabilityPercent: 22,
-    build: (rng, counter, budget) => buildPureDefinerConjunction(rng, counter, budget),
+    build: (rng, counter, budget) => {
+      const built = buildPureDefinerConjunction(rng, counter, budget);
+      cluster = built.cluster;
+      return built.drafts;
+    },
   });
+  return { drafts: appended, ...(cluster === undefined ? {} : { cluster }) };
 }
 
 function buildPureDefinerConjunction(
   rng: SeededRng,
   counter: number,
   budget: number,
-): RandomModuleDraft[] {
+): { readonly drafts: RandomModuleDraft[]; readonly cluster: ConjunctionClusterInfo } {
   const definerId = `pdef${counter}`;
   const siblingId = `psib${counter}`;
   const outerBarrelId = `pbar${counter}`;
@@ -1429,7 +2212,16 @@ function buildPureDefinerConjunction(
     forceEntry: true,
   };
 
-  return [definer, sibling, ...barrels, consumerA, consumerB];
+  return {
+    drafts: [definer, sibling, ...barrels, consumerA, consumerB],
+    cluster: {
+      definerId,
+      siblingId,
+      barrelIds: barrels.map((barrel) => barrel.id),
+      outerBarrelId,
+      consumerIds: [consumerAId, consumerBId],
+    },
+  };
 }
 
 /// Inject a callable-reads-own-state cluster (`.agents/docs/object-identity-and-callable-own-state.md`):
@@ -2335,12 +3127,20 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     tags.add("variation:value-read");
   }
 
-  // A module carries `sideEffects: false` package metadata: the primary dead-code-elimination
-  // versus execution-order trigger. Flagged modules emit no events and contribute only values.
-  // Classified through the ONE ModuleProfile projection, not the raw flags (the tag deriver is a pure
-  // consumer of a module's purity/export-shape, so it reads the canonical interpretation).
-  if (program.modules.some((module) => moduleProfile(module).purity.kind === "metadata")) {
+  // Metadata purity (`sideEffects` package metadata asserting some member pure): the primary
+  // dead-code-elimination versus execution-order trigger, read from the ONE resolved packages view
+  // (`metadataPureModuleIds` over the `packagesOf` seam), so legacy flagged models and package models
+  // tag identically. Plus the W14b package-surface tags: any package at all, and the partial ARRAY
+  // metadata form (the vben/family-B ingredient).
+  const packages = packagesOf(program);
+  if (metadataPureModuleIds(program).size > 0) {
     tags.add("variation:side-effect-free-metadata");
+  }
+  if (packages.length > 0) {
+    tags.add("variation:package");
+  }
+  if (packages.some((pkg) => typeof pkg.sideEffects !== "boolean")) {
+    tags.add("variation:side-effects-array");
   }
 
   // Family A/B mechanisms (`.agents/docs/real-app-bug-families.md`). An inferred-pure definer (judged
@@ -2388,6 +3188,22 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     tags.add("mechanism:pure-definer-behind-barrel");
   }
 
+  // The COMPLETE family-B eager-barrel conjunction (the vben shape): partial-array package metadata
+  // keeping a star barrel eager while its facade hop is shaken, an included own helper, a chunk group
+  // splitting {facade, sibling} from the entry chunk, an effectful first import, and a
+  // hiddenReadFn-consumed facade value. Only a complete conjunction is tagged (density = the
+  // conjunction, not sprinkled ingredients); purely structural, so it holds for generated,
+  // handwritten, and shrunk models alike.
+  if (hasCompleteFamilyBConjunction(program, modulesById, plan, entryModuleIds)) {
+    tags.add("mechanism:family-b-eager-barrel");
+  }
+
+  // The retained-reference witness: a metadata-pure package member whose top-level reference to a
+  // PURE definer is retained by a kept event's demand — the closed #9961/#10123 family's shape.
+  if (hasRetainedPureReference(program, modulesById, plan)) {
+    tags.add("mechanism:package-retained-reference");
+  }
+
   // Namespace imports (`import * as ns`) with a folded member read exercise the namespace-shape
   // interop surface; re-export (barrel) chains forward a value several hops from its definer.
   const dependencyKinds = new Set(
@@ -2420,6 +3236,26 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     )
   ) {
     tags.add("variation:reexport-default");
+  }
+  // The SAME source binding re-exported as BOTH a named alias and `default` through one module
+  // (witness D2): two re-export deps (source-form or local) sharing a (target, sourceName) where one
+  // exported name is `default` and another is not.
+  if (
+    program.modules.some((module) => {
+      const aliasesBySource = new Map<string, Set<string>>();
+      for (const dependency of module.dependencies) {
+        if (dependency.kind !== "esm-reexport-named" && dependency.kind !== "esm-local-reexport") {
+          continue;
+        }
+        const key = `${dependency.target}\0${dependency.sourceName}`;
+        const names = aliasesBySource.get(key) ?? new Set<string>();
+        names.add(dependency.exportedName);
+        aliasesBySource.set(key, names);
+      }
+      return [...aliasesBySource.values()].some((names) => names.has("default") && names.size >= 2);
+    })
+  ) {
+    tags.add("variation:named-and-default-alias");
   }
   // A LOCAL re-export (`import { x } from …; export { x };` — the camunda package-barrel shape, M4).
   if (dependencyKinds.has("esm-local-reexport")) {
@@ -2579,6 +3415,222 @@ function hasCompletePureDefinerConjunction(
       false,
     );
     if (readsPureDefiner && readsSideEffectfulSibling) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// A COMPLETE family-B eager-barrel conjunction (`mechanism:family-b-eager-barrel`), requiring EVERY
+/// ingredient the snapshot bisection proved load-bearing (probed od-RED / wa-GREEN; removing any one
+/// greens the shape):
+///
+/// - a package P with ARRAY (partial) `sideEffects` metadata;
+/// - a metadata-pure member barrel B of P carrying a STAR re-export to a facade F (a named hop
+///   resolves the binding directly and greens);
+/// - B declares a local export that is CALL-marked and demanded — the included own statement (an
+///   inlinable const, or nothing, greens: the delegation only happens for an INCLUDED forwarder);
+/// - F: a metadata-pure member of P whose init assigns its value from a CALL of a listed member S
+///   (S carries events — the package's one side-effectful module);
+/// - a chunk group placing F and S together AWAY from the entry chunk: a manual group containing
+///   both, or an organic group whose regex test matches both rendered package files;
+/// - an ENTRY E that (a) consumes a name whose supply is F reached through B's star, (b) reads that
+///   binding inside a hiddenReadFn event, (c) calls B's declared helper, and (d) side-effect-imports
+///   an event-carrying non-member module at a LOWER dependency index than the facade import (source
+///   order runs it before S; predicted chunk order runs S first — the deviation seed).
+function hasCompleteFamilyBConjunction(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  plan: ExportDemandPlan,
+  entryModuleIds: ReadonlySet<string>,
+): boolean {
+  const packages = packagesOf(program);
+  const metadataPure = metadataPureModuleIds(program);
+  const chunking = programChunking(program);
+
+  const splitsAcrossChunkGroup = (facade: ModuleModel, sibling: ModuleModel): boolean => {
+    if (chunking.kind === "manual") {
+      return chunking.groups.some(
+        (group) => group.moduleIds.includes(facade.id) && group.moduleIds.includes(sibling.id),
+      );
+    }
+    if (chunking.kind === "organic") {
+      const membership = packageMembershipOf(program);
+      const renderedPath = (module: ModuleModel): string | undefined => {
+        const member = membership.get(module.id);
+        return member === undefined
+          ? undefined
+          : `node_modules/${member.package.name}/${packageMemberFileName(module)}`;
+      };
+      const facadePath = renderedPath(facade);
+      const siblingPath = renderedPath(sibling);
+      if (facadePath === undefined || siblingPath === undefined) {
+        return false;
+      }
+      return chunking.groups.some((group) => {
+        if (group.test === undefined) {
+          return false;
+        }
+        try {
+          const test = new RegExp(group.test);
+          return test.test(facadePath) && test.test(siblingPath);
+        } catch {
+          return false;
+        }
+      });
+    }
+    return false;
+  };
+
+  for (const pkg of packages) {
+    if (typeof pkg.sideEffects === "boolean") {
+      continue;
+    }
+    const members = new Set(pkg.moduleIds);
+    for (const barrelId of pkg.moduleIds) {
+      const barrel = modulesById.get(barrelId);
+      if (barrel === undefined || barrel.format !== "esm" || !metadataPure.has(barrelId)) {
+        continue;
+      }
+      const starTargets = barrel.dependencies.flatMap((dependency) =>
+        dependency.kind === "esm-reexport-star" ? [dependency.target] : [],
+      );
+      if (starTargets.length === 0) {
+        continue;
+      }
+      // The included own statement: a DECLARED local export the plan call-marked and demanded.
+      const declared = barrel.localExports ?? [];
+      const demandedOnBarrel = new Set(plan.requestedNames.get(barrelId) ?? []);
+      const callable = plan.callableNames.get(barrelId) ?? new Set<string>();
+      const hasIncludedHelper = declared.some(
+        (name) => demandedOnBarrel.has(name) && callable.has(name),
+      );
+      if (!hasIncludedHelper) {
+        continue;
+      }
+      for (const facadeId of starTargets) {
+        const facade = modulesById.get(facadeId);
+        if (facade === undefined || !members.has(facadeId) || !metadataPure.has(facadeId)) {
+          continue;
+        }
+        // The facade's init-assigned value: a CALL import of a LISTED (side-effectful) member.
+        const managerEdge = facade.dependencies.find(
+          (dependency) =>
+            dependency.kind === "esm-value-import" &&
+            dependency.call === true &&
+            members.has(dependency.target) &&
+            !metadataPure.has(dependency.target) &&
+            (modulesById.get(dependency.target)?.events.length ?? 0) > 0,
+        );
+        if (managerEdge === undefined) {
+          continue;
+        }
+        const sibling = modulesById.get(managerEdge.target);
+        if (sibling === undefined || !splitsAcrossChunkGroup(facade, sibling)) {
+          continue;
+        }
+        // The entry: facade value through B's star, read inside a hiddenReadFn event, plus the
+        // helper call and the earlier effectful side-effect import.
+        for (const entryId of entryModuleIds) {
+          const entry = modulesById.get(entryId);
+          if (entry === undefined || entry.format !== "esm") {
+            continue;
+          }
+          const facadeImportIndex = entry.dependencies.findIndex((dependency) => {
+            if (dependency.kind !== "esm-value-import" || dependency.target !== barrelId) {
+              return false;
+            }
+            const consumption = plan.consumptions.find(
+              (record) => record.consumerModuleId === entryId && record.dependency === dependency,
+            );
+            return (
+              consumption !== undefined &&
+              consumption.supply.status === "supplied" &&
+              consumption.supply.origin.moduleId === facadeId &&
+              consumption.supply.hops.some((hop) => hop.via === "star" && hop.through === barrelId)
+            );
+          });
+          if (facadeImportIndex < 0) {
+            continue;
+          }
+          const facadeDependency = entry.dependencies[facadeImportIndex];
+          if (facadeDependency === undefined || facadeDependency.kind !== "esm-value-import") {
+            continue;
+          }
+          const facadeBinding = facadeDependency.localName;
+          const hiddenRead = entry.events.some(
+            (event) =>
+              event.hiddenReadFn === true &&
+              (event.reads ?? []).some((read) => read.binding === facadeBinding),
+          );
+          const callsHelper = entry.dependencies.some(
+            (dependency) =>
+              dependency.kind === "esm-value-import" &&
+              dependency.target === barrelId &&
+              dependency.call === true &&
+              declared.includes(dependency.importedName),
+          );
+          const effectfulFirst = entry.dependencies.some(
+            (dependency, index) =>
+              index < facadeImportIndex &&
+              dependency.kind === "esm-side-effect-import" &&
+              !members.has(dependency.target) &&
+              (modulesById.get(dependency.target)?.events.length ?? 0) > 0,
+          );
+          if (hiddenRead && callsHelper && effectfulFirst) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/// The retained-reference witness (`mechanism:package-retained-reference`, the closed #9961/#10123
+/// family): a METADATA-PURE package member M whose top level references a PURE definer (metadata- or
+/// inferred-pure — either way legally droppable), while M's own export is retained by a LIVE demand
+/// from an event-carrying consumer. Tree-shaking that drops the definer while M's reference survives
+/// is the historical dropped-binding crash; on a correct build the kept event pins the whole chain.
+function hasRetainedPureReference(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  plan: ExportDemandPlan,
+): boolean {
+  const metadataPure = metadataPureModuleIds(program);
+  if (metadataPure.size === 0) {
+    return false;
+  }
+  const retainedOrigins = new Set(
+    plan.consumptions.flatMap((consumption) => {
+      if (consumption.purpose !== "live" || consumption.supply.status !== "supplied") {
+        return [];
+      }
+      const consumer = modulesById.get(consumption.consumerModuleId);
+      return consumer !== undefined && consumer.events.length > 0
+        ? [consumption.supply.origin.moduleId]
+        : [];
+    }),
+  );
+  for (const moduleId of metadataPure) {
+    if (!retainedOrigins.has(moduleId)) {
+      continue;
+    }
+    const module = modulesById.get(moduleId);
+    if (module === undefined) {
+      continue;
+    }
+    const referencesPureDefiner = module.dependencies.some((dependency) => {
+      if (dependency.kind !== "esm-value-import") {
+        return false;
+      }
+      const target = modulesById.get(dependency.target);
+      return (
+        target !== undefined &&
+        (metadataPure.has(target.id) || moduleProfile(target).purity.kind === "inferred")
+      );
+    });
+    if (referencesPureDefiner) {
       return true;
     }
   }

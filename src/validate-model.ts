@@ -16,7 +16,7 @@ import type {
   ProgramModel,
   ValueRead,
 } from "./model.ts";
-import { metadataPureModuleIds, moduleProfile, programChunking } from "./model.ts";
+import { metadataPureModuleIds, programChunking } from "./model.ts";
 import type { ProgramFacts } from "./program-facts.ts";
 
 /// Generated package names: npm-safe, lowercase, deterministic. Restrictive on purpose — the name is
@@ -473,7 +473,6 @@ function validateModules(
   errors: string[],
 ): void {
   for (const [moduleIndex, module] of modules.entries()) {
-    validateSideEffectFreeModule(module, moduleIndex, errors);
     validateInferredPureModule(module, moduleIndex, errors);
     validateCallableOwnStateModule(module, moduleIndex, errors);
     validateObjectExportModule(module, moduleIndex, errors);
@@ -660,41 +659,16 @@ function validateValueOnlyEsmContract(
   }
 }
 
-/// A `sideEffects: false` (metadata-purity) module. Beyond the shared value-only ESM contract, it may
-/// not ALSO be a callable-own-state definer: the bundler is entitled to drop a metadata-pure module's
-/// state initialization, so the state-reading callable would read `undefined` on a legal DCE — a false
-/// positive, not a witness (the generator already excludes callable-own-state from flagging). See the
-/// `sideEffectFree` doc in model.ts and `.agents/docs/namespace-and-barrel-reexports.md`.
-function validateSideEffectFreeModule(
-  module: ModuleModel,
-  moduleIndex: number,
-  errors: string[],
-): void {
-  if (moduleProfile(module).purity.kind !== "metadata") {
-    return;
-  }
-
-  const path = `modules[${moduleIndex}]`;
-  validateValueOnlyEsmContract(
-    module,
-    path,
-    "a side-effect-free",
-    "its events can be legally dropped under sideEffects:false",
-    errors,
-  );
-  if (module.callableOwnState === true) {
-    errors.push(
-      `${path}: a module cannot be both sideEffectFree and callableOwnState; a legal DCE may drop the state a callable-own-state export reads`,
-    );
-  }
-}
-
 /// An inferred-pure definer (`inferredPure`) is judged side-effect-free by the bundler from its
-/// STATEMENTS (not a `package.json` flag): local pure functions, a `const` assigned from a
+/// STATEMENTS (not package metadata): local pure functions, a `const` assigned from a
 /// `/* @__PURE__ */` call, exports of those bindings. It shares the value-only ESM contract, carries a
-/// finite numeric `pureBase` (the build function's return value), and is MUTUALLY EXCLUSIVE with
-/// `sideEffectFree` and `objectExport` — distinct mechanisms. See the `inferredPure` doc in model.ts
-/// and `.agents/docs/real-app-bug-families.md`.
+/// finite numeric `pureBase` (the build function's return value), and is mutually exclusive with
+/// `objectExport` (a different export rendering). It MAY additionally sit under package
+/// `sideEffects` metadata — both mechanisms assert "no side effects", and real packages (vben) carry
+/// exactly that combination — so the historical flag-level exclusion against `sideEffectFree` is
+/// gone WITH the flag's live role: metadata purity is validated on the package view
+/// (`validatePackages`), through the one `packagesOf` seam, identically for legacy and new models.
+/// See the `inferredPure` doc in model.ts and `.agents/docs/real-app-bug-families.md`.
 function validateInferredPureModule(
   module: ModuleModel,
   moduleIndex: number,
@@ -705,9 +679,6 @@ function validateInferredPureModule(
   }
 
   const path = `modules[${moduleIndex}]`;
-  if (module.sideEffectFree === true) {
-    errors.push(`${path}: a module cannot be both inferredPure and sideEffectFree`);
-  }
   if (module.objectExport === true) {
     errors.push(`${path}: a module cannot be both inferredPure and objectExport`);
   }
@@ -771,9 +742,8 @@ function validateObjectExportModule(
   if (module.dependencies.length > 0) {
     errors.push(`${path}: an object-export module must be a leaf (no dependencies)`);
   }
-  if (module.sideEffectFree === true) {
-    errors.push(`${path}: a module cannot be both objectExport and sideEffectFree`);
-  }
+  // objectExport × metadata purity is rejected on the PACKAGE view (`validatePackages`), through the
+  // one `packagesOf` seam — a legacy `sideEffectFree` flag normalizes there, so no flag check here.
 }
 
 function validateEventReads(

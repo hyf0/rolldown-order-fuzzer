@@ -12,7 +12,7 @@ import {
 } from "../src/generate.ts";
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
-import { buildConfigOf, programChunking } from "../src/model.ts";
+import { buildConfigOf, metadataPureModuleIds, packagesOf, programChunking } from "../src/model.ts";
 import { ProgramFacts } from "../src/program-facts.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
@@ -189,15 +189,22 @@ describe("generateCase", () => {
           continue;
         }
         sawBarrel = true;
-        // A barrel is a pure ESM re-exporter: ESM, no events, only re-export dependencies.
+        const localReexports = module.dependencies.filter(
+          (dependency) => dependency.kind === "esm-local-reexport",
+        );
+        // A barrel is an ESM re-exporter carrying only re-export dependencies (source-form or the
+        // camunda LOCAL form). A PURE barrel emits no events; the camunda composition (W14b) may
+        // give a barrel that carries a local re-export its own side effect — that is the point.
         expect(module.format, `seed ${seed}: barrel ${module.id} not ESM`).toBe("esm");
-        expect(module.events, `seed ${seed}: barrel ${module.id} emits events`).toEqual([]);
+        if (localReexports.length === 0) {
+          expect(module.events, `seed ${seed}: barrel ${module.id} emits events`).toEqual([]);
+        }
         expect(
           module.dependencies.length,
           `seed ${seed}: barrel ${module.id} carries non-re-export deps`,
-        ).toBe(reexports.length);
+        ).toBe(reexports.length + localReexports.length);
         // Every hop forwards to another ESM module (an all-ESM chain), never a CJS target.
-        for (const dependency of reexports) {
+        for (const dependency of [...reexports, ...localReexports]) {
           expect(
             modulesById.get(dependency.target)?.format,
             `seed ${seed}: barrel ${module.id} forwards non-ESM ${dependency.target}`,
@@ -218,15 +225,27 @@ describe("generateCase", () => {
         continue;
       }
       randomTotal += 1;
-      const flaggedModules = generated.program.modules.filter(
-        (module) => module.sideEffectFree === true,
+      // The flagger's output is now single-member `sef-<id>` sideEffects:false packages (the same
+      // shape the legacy seam derives), read through the one resolved packages view.
+      const modulesByIdForFlags = new Map(
+        generated.program.modules.map((module) => [module.id, module]),
       );
-      if (flaggedModules.length === 0) {
+      const flaggedModules = packagesOf(generated.program)
+        .filter((pkg) => pkg.name.startsWith("sef-") && pkg.sideEffects === false)
+        .flatMap((pkg) => pkg.moduleIds)
+        .flatMap((id) => {
+          const module = modulesByIdForFlags.get(id);
+          return module === undefined ? [] : [module];
+        });
+      if (metadataPureModuleIds(generated.program).size === 0) {
         expect(generated.coverageTags).not.toContain("variation:side-effect-free-metadata");
+      } else {
+        expect(generated.coverageTags).toContain("variation:side-effect-free-metadata");
+      }
+      if (flaggedModules.length === 0) {
         continue;
       }
       flaggedCases += 1;
-      expect(generated.coverageTags).toContain("variation:side-effect-free-metadata");
 
       const valueReadTargets = new Set(
         generated.program.modules.flatMap((module) =>

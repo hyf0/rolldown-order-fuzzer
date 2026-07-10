@@ -894,32 +894,33 @@ describe("renderProgram", () => {
 
     expect(rendered.files.map((file) => file.path)).toEqual([
       "module-0000.mjs",
-      "side-effect-free/module-0001.mjs",
+      "node_modules/sef-flagged/flagged.mjs",
       "module-0002.mjs",
-      "side-effect-free/package.json",
+      "node_modules/sef-flagged/package.json",
       "schedule.json",
     ]);
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
-        'import { w as flaggedW } from "./side-effect-free/module-0001.mjs";',
+        // The legacy flag normalizes to a single-member package, so the reader imports it BARE.
+        'import { w as flaggedW } from "sef-flagged";',
         "",
         'globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: 1 + flaggedW });',
         "",
       ].join("\n"),
     );
-    // The flagged module renders inside the side-effect-free package, reads upstream through a
-    // parent-relative specifier, emits no events, and exports only its folded value.
-    expect(fileContents(rendered.files, "side-effect-free/module-0001.mjs")).toBe(
+    // The flagged module renders inside its normalized node_modules package, reads upstream through
+    // a parent-relative specifier, emits no events, and exports only its folded value.
+    expect(fileContents(rendered.files, "node_modules/sef-flagged/flagged.mjs")).toBe(
       [
-        'import { v as sourceV } from "../module-0002.mjs";',
+        'import { v as sourceV } from "../../module-0002.mjs";',
         "",
         "const __orderExport0 = 0 + sourceV;",
         "export { __orderExport0 as w };",
         "",
       ].join("\n"),
     );
-    expect(fileContents(rendered.files, "side-effect-free/package.json")).toBe(
-      '{\n  "sideEffects": false\n}\n',
+    expect(fileContents(rendered.files, "node_modules/sef-flagged/package.json")).toBe(
+      '{\n  "name": "sef-flagged",\n  "main": "./flagged.mjs",\n  "sideEffects": false\n}\n',
     );
 
     await withRenderedProgram(rendered.files, async (directory) => {

@@ -170,11 +170,13 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
+    // The legacy flags normalize to sideEffects:false packages, so the metadata-purity contract is
+    // enforced on the PACKAGE view — one message vocabulary for legacy and package models alike.
     expect(validateProgramModel(analyzeProgram(program))).toEqual([
-      "modules[0]: a side-effect-free module must be ESM, received cjs",
-      "modules[0]: a side-effect-free module must not emit events; its events can be legally dropped under sideEffects:false",
-      "modules[0].dependencies[0]: a side-effect-free module may only carry value-only ESM dependencies, received cjs-require",
-      "modules[1].dependencies[0]: a side-effect-free module may only carry value-only ESM dependencies, received esm-side-effect-import",
+      "modules[0]: a metadata-pure package member module must be ESM, received cjs",
+      "modules[0]: a metadata-pure package member module must not emit events; its events can be legally dropped under the package's sideEffects metadata",
+      "modules[0].dependencies[0]: a metadata-pure package member module may only carry value-only ESM dependencies, received cjs-require",
+      "modules[1].dependencies[0]: a metadata-pure package member module may only carry value-only ESM dependencies, received esm-side-effect-import",
     ]);
   });
 
@@ -2009,7 +2011,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
     expect(validateProgramModel(analyzeProgram(program))).toEqual([
-      "modules[1]: a module cannot be both sideEffectFree and callableOwnState; a legal DCE may drop the state a callable-own-state export reads",
+      "modules[1]: a metadata-pure package member cannot be callableOwnState; a legal DCE may drop the state a callable-own-state export reads",
     ]);
   });
 });

@@ -30,9 +30,14 @@
 ///    so this reader can never drift from them again.
 ///
 /// Usage:
-///   node scripts/corpus-manifest.ts write <path>   # write the manifest to <path>
-///   node scripts/corpus-manifest.ts check <path>   # regenerate and diff against <path>
-///   node scripts/corpus-manifest.ts                # print the manifest to stdout
+///   node scripts/corpus-manifest.ts write <path>          # write the manifest to <path>
+///   node scripts/corpus-manifest.ts check <path>          # regenerate and diff against <path>
+///   node scripts/corpus-manifest.ts explain-delta <path>  # diff against an OLD golden and PROVE the
+///                                                         # delta: every changed case must carry
+///                                                         # packages or a new W14b operation; every
+///                                                         # package-free, new-op-free case must be
+///                                                         # byte-identical (exit 1 otherwise)
+///   node scripts/corpus-manifest.ts                       # print the manifest to stdout
 
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -46,7 +51,7 @@ import {
   type MixedTemplateName,
 } from "../src/generate.ts";
 import { analyzeProgram } from "../src/analyzed-program.ts";
-import { buildConfigOf, programChunking, type ProgramModel } from "../src/model.ts";
+import { buildConfigOf, packagesOf, programChunking, type ProgramModel } from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 
@@ -88,6 +93,14 @@ interface CaseManifest {
     readonly preserveEntrySignatures: unknown;
     readonly strictExecutionOrder: boolean;
   };
+  /// The resolved packages (W14b) — present ONLY when the case carries any, so a package-free case's
+  /// manifest entry is byte-identical to the pre-package golden AND the golden delta is
+  /// self-explaining: every changed case either lists its packages here or gained a new operation.
+  readonly packages?: readonly {
+    readonly name: string;
+    readonly sideEffects: boolean | readonly string[];
+    readonly moduleIds: readonly string[];
+  }[];
   readonly error?: string;
 }
 
@@ -112,6 +125,24 @@ function sha256(contents: string): string {
   return createHash("sha256").update(contents, "utf8").digest("hex");
 }
 
+/// The generated program behind each manifest entry, kept aside so `explain-delta` can inspect the
+/// MODEL (new operations) and not just the rendered bytes.
+const programsByKey = new Map<string, ProgramModel>();
+
+function caseKey(group: string, seed: number): string {
+  return `${group}:${seed}`;
+}
+
+/// Whether a program carries a W14b-new operation surface: a source-less local re-export (the
+/// camunda M4 op) or declared local exports beside a star (the vben index shape).
+function carriesNewOperation(program: ProgramModel): boolean {
+  return program.modules.some(
+    (module) =>
+      module.dependencies.some((dependency) => dependency.kind === "esm-local-reexport") ||
+      (module.format === "esm" && (module.localExports?.length ?? 0) > 0),
+  );
+}
+
 function renderCase(
   group: string,
   seed: number,
@@ -119,12 +150,14 @@ function renderCase(
   template: MixedTemplateName,
   program: ProgramModel,
 ): CaseManifest {
+  programsByKey.set(caseKey(group, seed), program);
   try {
     const rendered = renderProgram(analyzeProgram(program));
     const files = [...rendered.files]
       .map((file) => ({ path: file.path, sha256: sha256(file.contents) }))
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     const build = buildConfigOf(program);
+    const packages = packagesOf(program);
     return {
       group,
       seed,
@@ -138,6 +171,15 @@ function renderCase(
         preserveEntrySignatures: build.preserveEntrySignatures,
         strictExecutionOrder: build.strictExecutionOrder,
       },
+      ...(packages.length > 0
+        ? {
+            packages: packages.map((pkg) => ({
+              name: pkg.name,
+              sideEffects: pkg.sideEffects,
+              moduleIds: pkg.moduleIds,
+            })),
+          }
+        : {}),
     };
   } catch (error) {
     return {
@@ -322,6 +364,61 @@ function main(argv: readonly string[]): number {
     }
     process.stderr.write(`FAIL: ${mismatches} case(s) drifted from ${path}\n`);
     return 1;
+  }
+
+  if (command === "explain-delta") {
+    if (path === undefined) {
+      process.stderr.write("usage: corpus-manifest.ts explain-delta <old-golden-path>\n");
+      return 2;
+    }
+    // PROVE the labeled golden delta: regenerate against an OLD golden and require every changed
+    // case to be explained by the W14b additions — it now carries packages, or a new operation
+    // (local re-export / declared local exports). A package-free, new-op-free case whose bytes moved
+    // is an UNEXPLAINED regression and fails the proof, as does any removed/added case.
+    const baselineCases = JSON.parse(readFileSync(path, "utf8")) as CaseManifest[];
+    const baselineByKey = new Map(
+      baselineCases.map((entry) => [caseKey(entry.group, entry.seed), entry]),
+    );
+    const currentByKey = new Map(
+      manifest.map((entry) => [caseKey(entry.group, entry.seed), entry]),
+    );
+    let unchanged = 0;
+    let changedWithPackages = 0;
+    let changedNewOpOnly = 0;
+    const unexplained: string[] = [];
+    for (const [key, before] of baselineByKey) {
+      const after = currentByKey.get(key);
+      if (after === undefined) {
+        unexplained.push(`${key}: REMOVED`);
+        continue;
+      }
+      if (canonicalJson(before) === canonicalJson(after)) {
+        unchanged += 1;
+        continue;
+      }
+      const program = programsByKey.get(key);
+      if ((after.packages?.length ?? 0) > 0) {
+        changedWithPackages += 1;
+      } else if (program !== undefined && carriesNewOperation(program)) {
+        changedNewOpOnly += 1;
+      } else {
+        unexplained.push(`${key}: changed without packages or a new operation`);
+      }
+    }
+    for (const key of currentByKey.keys()) {
+      if (!baselineByKey.has(key)) {
+        unexplained.push(`${key}: ADDED`);
+      }
+    }
+    process.stdout.write(
+      `explain-delta: ${baselineByKey.size} baseline cases — ${unchanged} byte-identical, ` +
+        `${changedWithPackages} changed with packages, ${changedNewOpOnly} changed by a new operation only, ` +
+        `${unexplained.length} unexplained\n`,
+    );
+    for (const line of unexplained.slice(0, 20)) {
+      process.stderr.write(`UNEXPLAINED: ${line}\n`);
+    }
+    return unexplained.length === 0 ? 0 : 1;
   }
 
   process.stdout.write(rendered);
