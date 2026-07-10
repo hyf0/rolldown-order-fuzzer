@@ -2,7 +2,14 @@
 
 import { posix } from "node:path";
 
-import { collectRequestedExports, localExportsFor } from "./analyzed-program.ts";
+import {
+  analyzeProgram,
+  localExportsFor,
+  resolvedExportKey,
+  type AnalyzedProgram,
+  type ExportDemandPlan,
+  type RenderedExportForm,
+} from "./analyzed-program.ts";
 import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
 import { moduleProfile, readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
@@ -32,8 +39,11 @@ const SCHEDULE_PATH = "schedule.json";
 const SIDE_EFFECT_FREE_DIRECTORY = "side-effect-free";
 const SIDE_EFFECT_FREE_PACKAGE_JSON = '{\n  "sideEffects": false\n}\n';
 
-export function renderProgram(program: ProgramModel): RenderedProgram {
-  const validationErrors = validateProgramModel(program);
+export function renderProgram(
+  program: ProgramModel,
+  analyzed: AnalyzedProgram = analyzeProgram(program),
+): RenderedProgram {
+  const validationErrors = validateProgramModel(program, analyzed);
   if (validationErrors.length > 0) {
     throw new Error(
       ["Cannot render invalid program:", ...validationErrors.map((error) => `- ${error}`)].join(
@@ -42,6 +52,11 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
     );
   }
 
+  // The ONE analyzed view: the renderer reads the plan's `requestedNames` (which names each module must
+  // expose) and `resolvedDemands.renderedForm` (the SOLE value/function/object decision), instead of
+  // re-running its own `collectRequestedExports` fixpoint and re-deriving callability. Threaded in along
+  // the case path so demand analysis runs ONCE; a standalone caller builds it via the default above.
+  const { plan } = analyzed;
   const isMetadataPure = (module: ModuleModel): boolean =>
     moduleProfile(module).purity.kind === "metadata";
   const modulePaths = new Map(
@@ -50,7 +65,6 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
       modulePath(index, module.format, isMetadataPure(module)),
     ]),
   );
-  const requestedExports = collectRequestedExports(program);
   const files: RenderedFile[] = [];
 
   for (const module of program.modules) {
@@ -60,8 +74,8 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
       contents: renderModule(
         module,
         modulePaths,
-        requestedExports.requestedNames.get(module.id) ?? [],
-        requestedExports.callableNames.get(module.id) ?? new Set<string>(),
+        plan.requestedNames.get(module.id) ?? [],
+        (name) => renderedFormOnModule(plan, module.id, name),
       ),
     });
   }
@@ -96,6 +110,21 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
   };
 }
 
+/// The rendered form the plan assigns to `name` on `moduleId` — the SOLE source of the renderer's
+/// value/function decision for a numeric-fold definer, so callability is never re-derived in the
+/// renderer. A local export with no consumer has no resolved demand and renders a plain numeric value
+/// (a `const`), exactly as an un-call-marked export always did; that keeps this byte-identical.
+function renderedFormOnModule(
+  plan: ExportDemandPlan,
+  moduleId: string,
+  name: string,
+): RenderedExportForm {
+  return (
+    plan.resolvedDemands.get(resolvedExportKey({ moduleId, exportName: name }))?.renderedForm ??
+    "value"
+  );
+}
+
 function modulePath(index: number, format: ModuleFormat, sideEffectFree: boolean): string {
   const extension = format === "esm" ? "mjs" : "cjs";
   const base = `module-${String(index).padStart(4, "0")}.${extension}`;
@@ -125,7 +154,7 @@ function renderModule(
   module: ModuleModel,
   modulePaths: ReadonlyMap<string, string>,
   requestedExports: readonly string[],
-  callableExports: ReadonlySet<string>,
+  formOf: (name: string) => RenderedExportForm,
 ): string {
   const readable = readableBindingsOf(module.dependencies);
   const selfPath = getRequiredPath(modulePaths, module.id);
@@ -214,7 +243,7 @@ function renderModule(
     sections.push(renderEvents(module));
   }
   if (localExports.length > 0) {
-    sections.push(renderEsmExports(module, localExports, usedBindings, readable, callableExports));
+    sections.push(renderEsmExports(module, localExports, usedBindings, readable, formOf));
   }
 
   return renderSections(sections);
@@ -516,11 +545,14 @@ function renderEsmExports(
   requestedExports: readonly string[],
   usedBindings: Set<string>,
   readable: readonly ValueRead[],
-  callableExports: ReadonlySet<string>,
+  formOf: (name: string) => RenderedExportForm,
 ): string[] {
-  // One dispatch on the module's profile. exportShape decides the export FORM (a callable-own-state
-  // definer that is also inferred-pure still renders its state-reading callables, so exportShape is
-  // checked before purity); a numeric-fold module then splits on inferred vs normal/metadata purity.
+  // The module's export SHAPE (fresh-object / callable-own-state / inferred-pure) picks the concrete
+  // renderer — the shape is intrinsic and the plan's `renderedForm` agrees with it by construction
+  // (`renderedFormOf` is derived from the same profile). For a numeric-fold definer, the value-vs-callable
+  // decision is the plan's `renderedForm` (`formOf`), NOT a callability set the renderer re-derives — so a
+  // call not forwarded through a barrel, or a call of an inferred-pure/CJS numeric export, is rejected at
+  // validation rather than mis-rendered here.
   const profile = moduleProfile(module);
   if (profile.exportShape.kind === "fresh-object") {
     return renderObjectExports(module, requestedExports, usedBindings);
@@ -537,7 +569,7 @@ function renderEsmExports(
   let candidateIndex = 0;
 
   for (const exportName of requestedExports) {
-    if (callableExports.has(exportName)) {
+    if (formOf(exportName) === "function") {
       // A hoisted callable export returns a CONSTANT (the module's base), so it is safe to call
       // before this module's body has run (even mid-cycle, up the stack). It deliberately does NOT
       // fold the module's own reads: a callable that called its siblings would mutually recurse

@@ -89,11 +89,43 @@ by `corpus-manifest.golden.json` and `npm run corpus:check`). The boundary contr
   interpreter with a grep guard (I), discriminated finalization asserts (J), the chunking union through
   the adapter (K), and reserved-word (`default`) export declarations via `export { local as name }`.
 
+## Round 3 — the final integration before the barrel wave
+
+A clearance re-review named ten residual findings; round 3 executed exactly those, still
+byte-identity-preserving (458 golden, `npm run corpus:check`) and 0 rejections over a 6000-case validate
+sweep. The [boundary contract](./analyzed-program-boundary.md) now reflects the ONE carried instance.
+
+- **The ONE `AnalyzedProgram` is threaded through the whole case path (findings 1, 2).** `finalizeProgram`
+  produces it; the `GeneratedCase` CARRIES it (`analyzed`, in-memory — the artifact is unchanged);
+  validation, rendering, tags, and evaluation all consume THAT instance, so demand analysis runs EXACTLY
+  ONCE per case (a counter in `analyzeProgram`, asserted architecturally). `collectRequestedExports` is
+  private to the boundary; the validator's `resolveExportOrigin` capability walk, the renderer's demand
+  fixpoint + callability set, the tags' rebuilt `ProgramFacts` + direct `resolveExportRoute`, and the
+  shrink route reconstruction are all gone — a grep test keeps the killed entry points out of every
+  consumer. The finalized program and plan are FROZEN.
+- **The plan's `renderedForm` is the renderer's SOLE form dispatch (finding 3).** A CJS and an inferred-pure
+  numeric definer render a `value`, never a callable, so a call of one is rejected at validation (the two
+  degenerate `TypeError` crash models). Crafted-violation tests pin both.
+- **Per-consumption shape↔form soundness over the plan (finding 2).** `validateExportDemand` replaced the
+  capability walk: every consumption's shape must match its resolved definer's `renderedForm`
+  (`numeric↔value`, `callable↔function`, `reference↔object`). Only the CJS-`default`-require interop check
+  stays direct.
+- **Smaller tightenings.** Shrink signature normalizer keys by the shared numeric module identity across
+  `init_`/`require_`/plain prefixes (finding 4); a duplicate explicit named re-export of one name is
+  rejected (finding 6); `moduleProfile` guard narrowed to authoring + constraint-validation sites, with
+  generate.ts gated to a marked authoring section and capture-analysis dropped (finding 7); finalize
+  asserts a plain callable-own-state draft is ESM (finding 8); `executeProgram(program, minimalOptions)` is
+  the seam the campaign and the shrinker's evaluator both wrap (finding 10).
+- **Catching-power baseline (finding 9).** `npm run catching-power` (NOT part of `vp test` — it needs the
+  frozen snapshot) builds a fixed 2×300 seed set (mixed od/wa) against
+  `pr10104-runtime-snapshot/rolldown/dist/index.mjs` and asserts the family-A red-rate band (21–27%).
+
 ## Deferred (corpus-semantic — needs its own re-acceptance wave)
 
 The renderer's category-ordered dependency emission (see
 [renderer-dependency-order](./renderer-dependency-order.md)); domain-separated RNGs, feature-budget
-reservation, and pass reordering; deriving dynamic registrations from the final graph (changes schedule
-RNG — round 2 kept the creation-ordered side list on purpose); persisted capture/profile/chunking schema
-migration. Each changes emitted source or RNG and is out of scope for a byte-identity-preserving
-consolidation.
+reservation, and pass reordering; persisted capture/profile/chunking schema migration. Each changes
+emitted source or RNG and is out of scope for a byte-identity-preserving consolidation. (Round 3 DID
+reconcile dynamic registrations against the finalized graph — finding 5 — but byte-identically, by sorting
+the graph's edges on their creation ordinal rather than re-deriving order from a module scan, so the
+seeded schedule is unchanged.)

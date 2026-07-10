@@ -13,9 +13,9 @@ import type {
   ScheduleOperation,
   ValueRead,
 } from "./model.ts";
-import { analyzeProgram, type AnalyzedProgram } from "./analyzed-program.ts";
+import { analyzeProgram, type AnalyzedProgram, type ExportDemandPlan } from "./analyzed-program.ts";
 import { moduleProfile, programChunking, readableBindingsOf } from "./model.ts";
-import { ProgramFacts } from "./program-facts.ts";
+import { ProgramFacts, type ExportSupply } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
 
 export const FIXED_TEMPLATE_NAMES = [
@@ -40,6 +40,10 @@ export interface GeneratedCase {
   readonly template: MixedTemplateName;
   readonly coverageTags: readonly string[];
   readonly program: ProgramModel;
+  /// The ONE AnalyzedProgram for this case (graph facts + the canonical export-demand plan), carried
+  /// IN MEMORY only — the persisted artifact still records just `program`. Validation, rendering, tags,
+  /// and evaluation all read THIS instance, so a case path runs demand analysis exactly once.
+  readonly analyzed: AnalyzedProgram;
 }
 
 export const MAX_CASE_SIZE = 48;
@@ -86,11 +90,15 @@ export function generateCase(
       : rng.boolean()
         ? "random-mixed"
         : rng.pick(FIXED_TEMPLATE_NAMES);
-  const generated =
+  const built =
     template === "random-mixed"
       ? buildRandomMixed(rng, size, forcedRegime)
       : TEMPLATE_BUILDERS[template](rng, size);
-  const coverageTags = deriveCoverageTags(generated.program);
+  // The ONE AnalyzedProgram for the case: finalizeProgram already produced it for random-mixed; a fixed
+  // template analyzes its assembled program ONCE here. Everything downstream (tags, validation, render,
+  // evaluation) reads THIS instance, so demand analysis runs exactly once per case.
+  const analyzed = built.analyzed ?? analyzeProgram(built.program);
+  const coverageTags = deriveCoverageTags(built.program, analyzed);
   // `template:*` tags stay purely structural; only fixed templates promise their own shape.
   if (template !== "random-mixed" && !coverageTags.includes(`template:${template}`)) {
     throw new Error(`Generated ${template} program does not match its template`);
@@ -101,12 +109,17 @@ export function generateCase(
     size,
     template,
     coverageTags,
-    program: generated.program,
+    program: built.program,
+    analyzed,
   };
 }
 
 interface TemplateResult {
   readonly program: ProgramModel;
+  /// Present when the builder already finalized AND analyzed the program (random-mixed, via
+  /// `finalizeProgram`). A fixed template omits it — its program is assembled directly — and
+  /// `generateCase` analyzes it once. Either way exactly one `AnalyzedProgram` is built per case.
+  readonly analyzed?: AnalyzedProgram;
 }
 
 type TemplateBuilder = (rng: SeededRng, size: number) => TemplateResult;
@@ -637,10 +650,13 @@ function buildRandomMixed(
   drafts.push(...injectCallableOwnStateClusters(rng, drafts, regime));
   drafts.push(...injectObjectIdentityClusters(rng, drafts, regime));
 
-  return {
-    program: finalizeProgram({ drafts, cycleMemberIds, registrations, conjunctionConsumerIds }, rng)
-      .program,
-  };
+  // finalizeProgram is the SINGLE finalization point: it freezes the generation state into a
+  // ProgramModel and returns its one AnalyzedProgram, carried out of here so nothing downstream re-derives.
+  const analyzed = finalizeProgram(
+    { drafts, cycleMemberIds, registrations, conjunctionConsumerIds },
+    rng,
+  );
+  return { program: analyzed.program, analyzed };
 }
 
 /// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
@@ -668,6 +684,10 @@ interface GenerationContext {
 /// SAME order the inline tail did, so the corpus is byte-identical, and analysis is pure (no RNG).
 function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedProgram {
   const { drafts, cycleMemberIds, registrations, conjunctionConsumerIds } = context;
+  // profile-guard:authoring-start — this draft→module map is the ONE place that AUTHORS a module's
+  // purity/export-shape flags (a draft is not a ModuleModel, so it reads the draft's authoring intent
+  // directly; `moduleProfile` interprets those flags everywhere else). The module-profile guard test
+  // allows raw flag reads only between these markers.
   const modules = drafts.map((draft): ModuleModel => {
     // Finalization ASSERTS a draft's dependencies are already legal for its format rather than silently
     // filtering illegal kinds away — a bad future transform then fails loudly at generation instead of
@@ -724,6 +744,15 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
         ],
       };
     }
+    // A plain (not inferred-pure) callable-own-state draft is ESM-only — validation rejects a CJS
+    // callable-own-state module (only an ESM function export is callable while its module init is
+    // skipped). ASSERT it here, BEFORE the format branch, rather than letting a CJS draft fall through
+    // to `cjsModule` and SILENTLY lose the flag: a future transform that mis-formats such a draft then
+    // fails loudly at generation instead of producing a model whose dropped flag the validator can no
+    // longer catch. (The inferred-pure + callable-own-state combination is asserted in its own branch above.)
+    if (draft.callableOwnState === true) {
+      assertEsmSpecialDraft(draft, "callable-own-state");
+    }
     const isBarrel = draft.dependencies.some(isReexportDependency);
     const moduleEvents = isBarrel
       ? []
@@ -736,6 +765,7 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     }
     return cjsModule(draft.id, cjsDraftDependencies(draft), moduleEvents);
   });
+  // profile-guard:authoring-end
 
   // Module 0 anchors the schedule; extra entries may be modules other modules also import,
   // which exercises entry facades and shared entry chunks.
@@ -768,7 +798,10 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     .filter((draft) => draft !== undefined)
     .map((draft) => ({ name: `entry-${draft.id}`, moduleId: draft.id }));
 
-  const schedule = buildRandomSchedule(rng, modules, entries, registrations);
+  // Derive the dynamic-import registration sequence from the FINALIZED graph, ordered by each edge's
+  // creation ordinal, reconciling it against the creation-ordered side list so the two can never drift.
+  const orderedRegistrations = deriveRegistrationSequence(modules, registrations);
+  const schedule = buildRandomSchedule(rng, modules, entries, orderedRegistrations);
 
   const chunking = buildChunkingConfig(rng, drafts, cycleMemberIds, entries.length);
 
@@ -808,7 +841,32 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
       ? { organicChunkGroups: chunking.organicChunkGroups }
       : {}),
   };
+  // Deep-freeze the finalized program so accidental post-finalization mutation throws in tests — nothing
+  // downstream (render, validate, tags, the artifact writer) mutates it; they only READ. analyzeProgram
+  // then freezes the plan and the analyzed view over this frozen graph.
+  deepFreeze(program);
   return analyzeProgram(program);
+}
+
+/// Recursively freeze a finalized program's plain objects and arrays. Cheap over the bounded model
+/// (dozens of modules, a handful of dependencies/events each) and one-shot per case, so an accidental
+/// mutation of the frozen generation state surfaces immediately instead of silently corrupting a later
+/// pass. Only walks arrays and plain objects; it never recurses into the analysis (that is frozen
+/// separately) because the program has no back-reference to it.
+function deepFreeze<T>(value: T): T {
+  if (Array.isArray(value)) {
+    for (const element of value) {
+      deepFreeze(element);
+    }
+    return Object.freeze(value);
+  }
+  if (value !== null && typeof value === "object") {
+    for (const key of Object.keys(value)) {
+      deepFreeze((value as Record<string, unknown>)[key]);
+    }
+    return Object.freeze(value);
+  }
+  return value;
 }
 
 /// The per-case chunking-config axis (wave 6): roll one of three modes and produce the matching
@@ -1560,19 +1618,22 @@ function chooseSideEffectFreeModules(
     }
   }
   const entryIds = new Set(entries.map((entry) => entry.moduleId));
-  const eligible = modules.filter(
-    (module) =>
+  const eligible = modules.filter((module) => {
+    // Classified through the ONE ModuleProfile projection, not the raw flags: an inferred-pure definer
+    // and the wave-8 witness definers (objectExport, callable-own-state) carry their own export rendering
+    // and must not be flagged — an objectExport must not be sideEffectFree (a dropped object export
+    // defeats the identity witness), and a callable-own-state definer's state must not be stripped.
+    const profile = moduleProfile(module);
+    return (
       module.format === "esm" &&
-      module.inferredPure !== true &&
-      // The wave-8 witness definers carry their own export rendering and must not be flagged: an
-      // objectExport must not be sideEffectFree (a dropped object export defeats the identity witness),
-      // and a callable-own-state definer's state must not be stripped.
-      module.objectExport !== true &&
-      module.callableOwnState !== true &&
+      profile.purity.kind !== "inferred" &&
+      profile.exportShape.kind !== "fresh-object" &&
+      profile.exportShape.kind !== "callable-own-state" &&
       module.dependencies.length === 0 &&
       !entryIds.has(module.id) &&
-      valueReadTargets.has(module.id),
-  );
+      valueReadTargets.has(module.id)
+    );
+  });
   // Flag in a meaningful minority of eligible cases, then a minority of that case's eligible modules.
   if (eligible.length === 0 || !rng.boolean()) {
     return flagged;
@@ -1594,6 +1655,54 @@ function chooseSideEffectFreeModules(
 /// Entries evaluate once each in random order; available dynamic-import triggers are
 /// interleaved after entries and flushed at the end. Some registrations intentionally
 /// never fire, leaving retained-but-unloaded dynamic entries in the bundle.
+/// The dynamic-import registration sequence, DERIVED from the FINALIZED graph and ordered by each edge's
+/// CREATION ORDINAL — not the creation-ordered side list iterated on trust. The side list records the
+/// creation ordinal of each edge (its position IS the ordinal, keyed by the edge's unique registration);
+/// this scans the frozen graph for every dynamic edge, tags it with that ordinal, and sorts. Because the
+/// ordinal is the side-list index, the result reproduces the old side-list order EXACTLY, so the seeded
+/// schedule — which iterates registrations in creation order — stays byte-identical. The asserts turn a
+/// future graph/side-list divergence (a registration with no edge, an edge with no ordinal, or a
+/// duplicate) into a loud generation failure instead of a silently reordered, corpus-moving schedule.
+export function deriveRegistrationSequence(
+  modules: readonly ModuleModel[],
+  registrations: readonly { readonly owner: string; readonly registration: string }[],
+): { owner: string; registration: string }[] {
+  const ordinalOf = new Map<string, number>();
+  registrations.forEach((entry, index) => {
+    if (ordinalOf.has(entry.registration)) {
+      throw new Error(`duplicate dynamic-import registration ordinal for ${entry.registration}`);
+    }
+    ordinalOf.set(entry.registration, index);
+  });
+  const graphEdges: { owner: string; registration: string; ordinal: number }[] = [];
+  const seen = new Set<string>();
+  for (const module of modules) {
+    for (const dependency of module.dependencies) {
+      if (dependency.kind !== "esm-dynamic-import") {
+        continue;
+      }
+      const ordinal = ordinalOf.get(dependency.registration);
+      if (ordinal === undefined) {
+        throw new Error(
+          `dynamic edge ${dependency.registration} on ${module.id} has no creation ordinal (graph/side-list drift)`,
+        );
+      }
+      if (seen.has(dependency.registration)) {
+        throw new Error(`duplicate dynamic edge registration ${dependency.registration} in graph`);
+      }
+      seen.add(dependency.registration);
+      graphEdges.push({ owner: module.id, registration: dependency.registration, ordinal });
+    }
+  }
+  if (seen.size !== ordinalOf.size) {
+    throw new Error(
+      `dynamic registration/graph mismatch: ${ordinalOf.size} recorded, ${seen.size} present in the finalized graph`,
+    );
+  }
+  graphEdges.sort((left, right) => left.ordinal - right.ordinal);
+  return graphEdges.map(({ owner, registration }) => ({ owner, registration }));
+}
+
 function buildRandomSchedule(
   rng: SeededRng,
   modules: readonly ModuleModel[],
@@ -1745,10 +1854,16 @@ function buildRandomManualGroups(
   return groups;
 }
 
-export function deriveCoverageTags(program: ProgramModel): readonly string[] {
+export function deriveCoverageTags(
+  program: ProgramModel,
+  analyzed: AnalyzedProgram = analyzeProgram(program),
+): readonly string[] {
   const tags = new Set<string>();
   const modulesById = new Map(program.modules.map((module) => [module.id, module]));
-  const facts = ProgramFacts.from(program.modules);
+  // Read the ONE analyzed view's facts and plan rather than rebuilding a parallel ProgramFacts or
+  // re-resolving export routes: along the case path this is the carried instance, so tags add no extra
+  // demand analysis; a standalone caller builds one via the default above.
+  const { facts, plan } = analyzed;
   const formats = new Set(program.modules.map((module) => module.format));
   const esmCarriersByCjsTarget = new Map<string, Set<string>>();
   let requiresSynchronousEsm = false;
@@ -1995,7 +2110,7 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   // complete conjunction is tagged, so a campaign summary's count proves conjunction DENSITY (the
   // failure mode that made the old corpus miss these bugs was ingredients that rarely all met).
   const entryModuleIds = new Set(program.entries.map((entry) => entry.moduleId));
-  if (hasCompletePureDefinerConjunction(program, modulesById, facts, entryModuleIds)) {
+  if (hasCompletePureDefinerConjunction(program, modulesById, plan, entryModuleIds)) {
     tags.add("mechanism:pure-definer-behind-barrel");
   }
 
@@ -2105,16 +2220,30 @@ function hasNestedDynamicChain(program: ProgramModel, facts: ProgramFacts): bool
 function hasCompletePureDefinerConjunction(
   program: ProgramModel,
   modulesById: ReadonlyMap<string, ModuleModel>,
-  facts: ProgramFacts,
+  plan: ExportDemandPlan,
   entryModuleIds: ReadonlySet<string>,
 ): boolean {
+  // An inferred-pure (not callable-own-state) definer, read through the ONE ModuleProfile projection
+  // rather than the raw flags — the tag deriver is a pure consumer of a module's purity/export-shape.
   const pureDefinerIds = new Set(
     program.modules
-      .filter((module) => module.inferredPure === true && module.callableOwnState !== true)
+      .filter((module) => {
+        const profile = moduleProfile(module);
+        return (
+          profile.purity.kind === "inferred" && profile.exportShape.kind !== "callable-own-state"
+        );
+      })
       .map((module) => module.id),
   );
   if (pureDefinerIds.size === 0) {
     return false;
+  }
+  // Each namespace member read THROUGH a barrel is already a consumption in the ONE plan, whose `supply`
+  // is `resolveExportRoute(barrel, member)` — so the split is read from the plan instead of re-calling
+  // the route resolver here. Keyed by `${barrel}\0${member}` (the route is a pure function of the pair).
+  const routeByTargetName = new Map<string, ExportSupply>();
+  for (const consumption of plan.consumptions) {
+    routeByTargetName.set(`${consumption.target}\0${consumption.demandedName}`, consumption.supply);
   }
   for (const barrel of program.modules) {
     const entryNamespaceImporters = program.modules.filter(
@@ -2145,8 +2274,9 @@ function hasCompletePureDefinerConjunction(
             dependency.kind === "esm-namespace-import" &&
             dependency.target === barrel.id &&
             dependency.readMembers.some((member) => {
-              const supply = facts.resolveExportRoute(barrel.id, member);
+              const supply = routeByTargetName.get(`${barrel.id}\0${member}`);
               return (
+                supply !== undefined &&
                 supply.status === "supplied" &&
                 wantOrigin(supply.origin.moduleId) &&
                 (!requireStar || supply.hops.some((hop) => hop.via === "star"))

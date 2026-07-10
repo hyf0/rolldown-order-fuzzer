@@ -27,13 +27,19 @@ what is frozen when, and who consumes what.
 ## What is frozen when
 
 1. **During generation**, the mutable graph and the creation-ordered registration list are the live
-   state. The registrations are a transient side list ON PURPOSE: the seeded schedule RNG iterates them
-   in creation order, so re-deriving them by a final-graph module scan would reorder the trigger pool and
-   change the corpus. Membership/owner/target already match the final graph (each entry was recorded as
-   its dynamic edge was added), so no reconciliation pass is needed.
-2. **At `finalizeProgram`**, the graph and registration order are FROZEN into the `ProgramModel`, and the
-   analysis (`ProgramFacts` + `ExportDemandPlan`) is built over the frozen graph. From here nothing about
-   the program changes; downstream layers only READ.
+   state. Each dynamic edge carries a CREATION ORDINAL (its position in the side list, keyed by its unique
+   registration id). The seeded schedule iterates registrations in creation order, so the ordinal MUST be
+   the creation order for byte-identity.
+2. **At `finalizeProgram`** (round 3, finding 5), the final registration sequence is DERIVED FROM THE
+   FINALIZED GRAPH — every dynamic edge scanned out of the frozen modules, sorted by its creation ordinal —
+   rather than iterating the side list on trust. This RECONCILES the two: asserts every graph edge has an
+   ordinal (membership), no recorded ordinal is missing from the graph (the reverse), and ordinals are
+   unique. Because the ordinal is the creation order, the derived sequence equals the old side-list order
+   exactly, so the seeded schedule is byte-identical; a future drift becomes a loud generation failure
+   instead of a silently reordered, corpus-moving schedule.
+3. **The finalized `program` is DEEP-FROZEN** and `analyzeProgram` freezes the plan, so accidental
+   post-finalization mutation throws in tests. From here nothing about the program changes; downstream
+   layers only READ.
 
 ## The ExportDemandPlan (`analyzed-program.ts`), keyed by resolved `(moduleId, exportName)`
 
@@ -52,22 +58,49 @@ what is frozen when, and who consumes what.
   larger than one is an incompatible-consumption conflict), and whether any route reaches it through a
   barrel.
 
-## Who consumes what
+## Who consumes what — the ONE carried instance (round 3)
 
-- **Renderer (`render.ts`).** Reads `requestedNames` / `callableNames` from the plan (its own fixpoint is
-  deleted) and `localExportsFor` from the boundary module. A reserved export name (`default`) renders via
-  a fresh local + `export { local as name }` rather than an invalid declaration.
-- **Validator (`validate-model.ts`).** `validateProgramModel` builds the `AnalyzedProgram` and adds
-  `validateExportDemand` over the plan: reject `unsupplied` / `ambiguous` demand, incompatible
-  consumption (one export consumed as more than one shape), and a call whose resolved definer does not
-  render a function (callability not forwarded through a barrel). Per-shape numeric/object soundness stays
-  the direct-target capability walk's job — no parallel projection.
-- **Coverage tags (`generate.ts`).** The family-A conjunction tag resolves each consumed member through
-  `resolveExportRoute` and counts the pure-definer read only when it genuinely travels through a STAR —
-  killing the old false tag on an unused star plus a consumed named route. Per-SCC cycle formats come from
-  `CycleFacts.sccFormats`. Purity/export-shape classification reads go through `moduleProfile`.
+Round 3 closed the last gap: the `AnalyzedProgram` `finalizeProgram` returns is now CARRIED on the
+`GeneratedCase` (`analyzed`, in-memory only — the persisted artifact is still just `program`) and THREADED
+into every downstream consumer, so a case path builds the plan EXACTLY ONCE (a counter in
+`analyzeProgram`, asserted by `tests/analyzed-program-boundary.test.ts`). `analyzeProgram` /
+`renderProgram` / `validateProgramModel` / `deriveCoverageTags` all take the analysis (a default builds one
+only for a standalone caller — a shrink candidate, a handwritten test). `collectRequestedExports` is now
+PRIVATE to `analyzed-program.ts`; a grep test asserts it, plus `resolveExportOrigin` and the deleted
+capability walk, never appear outside their boundary module.
+
+- **Renderer (`render.ts`).** Reads the ONE plan's `requestedNames` (which names each module exposes) and
+  `resolvedDemands.renderedForm` as the SOLE value/function/object dispatch — its own demand fixpoint and
+  its separate callability set are both gone. The module's export SHAPE still picks the concrete renderer
+  (object literal / state-reading callable / inferred-pure `const`), which the plan's `renderedForm` agrees
+  with by construction. A reserved export name (`default`) renders via a fresh local + `export { local as
+name }`.
+- **Validator (`validate-model.ts`).** `validateExportDemand` over the plan is now the WHOLE per-shape
+  soundness check: reject `unsupplied` / `ambiguous` demand, and every consumption whose SHAPE does not
+  match its resolved definer's `renderedForm` (`numeric↔value`, `callable↔function`, `reference↔object`) —
+  folding a function's source text, calling a number, calling an object, an identity capture of a non-object,
+  and callability-not-forwarded-through-a-barrel all surface here. The legacy `resolveExportOrigin`
+  capability walk (`describeCaptures` / `resolveExportCapability`) is DELETED; only the CJS-`default`-require
+  interop check stays a direct check (the supply route cannot see it). Object-identity same-origin comes
+  from the plan's `reference` consumptions, not a capability walk.
+- **Coverage tags (`generate.ts`).** `deriveCoverageTags` consumes the carried `facts` + `plan` (no rebuilt
+  `ProgramFacts`); the family-A conjunction tag reads each member's route from the plan's `consumptions`
+  (not a direct `resolveExportRoute`) and classifies definers through `moduleProfile`. Per-SCC cycle formats
+  come from `CycleFacts.sccFormats`.
 - **Shrinker (`shrink.ts` via `case-evaluator.ts`).** Uses `ProgramFacts` for cycle-edge and route facts;
-  the evaluator seam calls the lower `program-run.ts` execution layer, not the campaign/CLI file.
+  the evaluator seam now wraps `program-run.ts`'s `executeProgram(program, minimalOptions)` directly — it no
+  longer fabricates a `GeneratedCase` + full `CampaignOptions`. The signature normalizer canonicalizes by the
+  shared numeric module identity (preserving `init_`/`require_`/plain prefix), so a cross-prefix
+  two-module failure never collapses to a one-module one.
+
+### The rendered form is the SOLE dispatch (finding 3)
+
+`renderedFormOf` mirrors the renderer EXACTLY: a CJS definer and an inferred-pure numeric definer render a
+`value` (numeric export / non-inlinable `const`), NEVER a callable — even when a caller marked them callable.
+So a direct call of an inferred-pure numeric export, and a namespace `callMembers` against a numeric CJS
+export, are REJECTED at validation instead of rendering a value the caller then invokes (a `TypeError` —
+a degenerate both-sides crash). Byte-identical on the corpus: the generator never call-marks a CJS or
+inferred-pure export.
 
 ## ProgramFacts supply-aware primitives (`program-facts.ts`)
 

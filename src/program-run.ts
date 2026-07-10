@@ -12,8 +12,10 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import type { AnalyzedProgram } from "./analyzed-program.ts";
 import { executeManifest } from "./execute.ts";
 import type { FormatRegime, GeneratedCase } from "./generate.ts";
+import type { ProgramModel } from "./model.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -108,28 +110,54 @@ export interface CampaignCaseResult {
   readonly verdict: CampaignVerdict;
 }
 
-export interface ExecuteGeneratedCaseDependencies {
+/// The minimal build inputs one program run needs — which Rolldown to build with and the wrap mode.
+/// Everything else `CampaignOptions` threads (seed, template, coverage, case count, output directory,
+/// cosmetic size) is irrelevant to running a single loaded model, so `executeProgram` takes only this.
+export interface MinimalExecutionOptions {
+  readonly rolldownPackage: string;
+  readonly onDemandWrapping: boolean;
+}
+
+export interface ProgramExecutionDependencies {
   readonly executeSource: (rendered: RenderedProgram) => Promise<ExecutionOutcome>;
   readonly inspectRuntimeIdentity: typeof inspectRolldownRuntimeIdentity;
   readonly buildBundle: (
-    generated: GeneratedCase,
+    program: ProgramModel,
     rendered: RenderedProgram,
-    options: CampaignOptions,
+    options: MinimalExecutionOptions,
   ) => Promise<BundleBuildResult>;
 }
 
-export async function executeGeneratedCase(
-  generated: GeneratedCase,
-  options: CampaignOptions,
-  overrides: Partial<ExecuteGeneratedCaseDependencies> = {},
-): Promise<CampaignCaseResult> {
-  const dependencies: ExecuteGeneratedCaseDependencies = {
+/// Everything running ONE program produces, WITHOUT the campaign's generated-case / CLI-options
+/// bookkeeping — the seam both the campaign (`executeGeneratedCase`) and the shrinker's case-evaluator
+/// wrap, so neither fabricates a `GeneratedCase` and a full `CampaignOptions` merely to run a model.
+export interface ProgramExecutionResult {
+  readonly rendered: RenderedProgram;
+  readonly sourceOutcome: ExecutionOutcome;
+  readonly bundleOutcome: CampaignBundleOutcome;
+  readonly bundleManifest: ExecutionManifest | null;
+  readonly bundleFiles: readonly CapturedFile[];
+  readonly runtimeIdentity: ObservedRuntimeIdentity;
+  readonly verdict: CampaignVerdict;
+}
+
+/// Run ONE program end-to-end: render (reusing a carried `AnalyzedProgram` when the caller has one, so
+/// demand analysis is NOT re-run on the case path), execute the source under Node, build it with
+/// Rolldown, run the bundle, and classify the differential verdict. The campaign wraps this to attach the
+/// `GeneratedCase`/`CampaignOptions`; the shrinker's evaluator wraps it to read the verdict.
+export async function executeProgram(
+  program: ProgramModel,
+  options: MinimalExecutionOptions,
+  overrides: Partial<ProgramExecutionDependencies> = {},
+  analyzed?: AnalyzedProgram,
+): Promise<ProgramExecutionResult> {
+  const dependencies: ProgramExecutionDependencies = {
     executeSource: executeRenderedSource,
     inspectRuntimeIdentity: inspectRolldownRuntimeIdentity,
     buildBundle: buildAndExecuteBundle,
     ...overrides,
   };
-  const rendered = renderProgram(generated.program);
+  const rendered = renderProgram(program, analyzed);
   const sourceOutcome = await dependencies.executeSource(rendered);
   if (sourceOutcome.status === "timeout" || sourceOutcome.status === "harness-error") {
     const runtimeIdentity = await dependencies.inspectRuntimeIdentity(options.rolldownPackage);
@@ -138,8 +166,6 @@ export async function executeGeneratedCase(
       reason: "source-invalid",
     } as const satisfies SourceInvalidBundleOutcome;
     return {
-      generated,
-      options,
       rendered,
       sourceOutcome,
       bundleOutcome,
@@ -150,7 +176,7 @@ export async function executeGeneratedCase(
     };
   }
 
-  const built = await dependencies.buildBundle(generated, rendered, options);
+  const built = await dependencies.buildBundle(program, rendered, options);
 
   if (built.status === "failed") {
     const runtimeIdentity =
@@ -161,8 +187,6 @@ export async function executeGeneratedCase(
       adapterFailure: built.failure,
     } as const satisfies AdapterFailureBundleOutcome;
     return {
-      generated,
-      options,
       rendered,
       sourceOutcome,
       bundleOutcome,
@@ -177,8 +201,6 @@ export async function executeGeneratedCase(
     built.value.runtimeIdentity ??
     (await dependencies.inspectRuntimeIdentity(options.rolldownPackage));
   return {
-    generated,
-    options,
     rendered,
     sourceOutcome,
     bundleOutcome: built.value.bundleOutcome,
@@ -187,6 +209,22 @@ export async function executeGeneratedCase(
     runtimeIdentity,
     verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome),
   };
+}
+
+/// The campaign wrapper: run `generated`'s program (reusing its carried `AnalyzedProgram`, so the case
+/// path analyzes once) and attach the generated case and CLI options to form a `CampaignCaseResult`.
+export async function executeGeneratedCase(
+  generated: GeneratedCase,
+  options: CampaignOptions,
+  overrides: Partial<ProgramExecutionDependencies> = {},
+): Promise<CampaignCaseResult> {
+  const run = await executeProgram(
+    generated.program,
+    { rolldownPackage: options.rolldownPackage, onDemandWrapping: options.onDemandWrapping },
+    overrides,
+    generated.analyzed,
+  );
+  return { generated, options, ...run };
 }
 
 export function classifyCampaignVerdict(
@@ -224,9 +262,9 @@ async function executeRenderedSource(rendered: RenderedProgram): Promise<Executi
 }
 
 async function buildAndExecuteBundle(
-  generated: GeneratedCase,
+  program: ProgramModel,
   rendered: RenderedProgram,
-  options: CampaignOptions,
+  options: MinimalExecutionOptions,
 ): Promise<BundleBuildResult> {
   let failureArtifacts: Pick<CampaignCaseResult, "bundleManifest" | "bundleFiles"> & {
     readonly runtimeIdentity?: ObservedRuntimeIdentity;
@@ -235,7 +273,7 @@ async function buildAndExecuteBundle(
     bundleFiles: [],
   };
   const built = await withRolldownBuild(
-    generated.program,
+    program,
     rendered,
     async (artifacts) => ({
       bundleOutcome: await executeManifest(artifacts.bundleManifestPath),

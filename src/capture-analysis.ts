@@ -1,148 +1,16 @@
 import type { DependencyOperation, ValueRead } from "./model.ts";
 import { readableBindingsOf } from "./model.ts";
-import type { ModuleLike, ProgramFacts } from "./program-facts.ts";
-
-/// A canonical, resolved view of the read/export-demand concepts the schema spreads across
-/// `ValueRead`, value/namespace imports, requires, and re-exports. Built OVER the current schema (it
-/// does not migrate any persisted field) so validation can reason about a capture's CAPABILITY — what
-/// a consumer may soundly do with the value — after following re-export barrels to the defining module,
-/// which the direct-target checks could not see.
-
-/// What a demanded export ultimately IS at its defining module, after following re-export barrels:
-///
-/// - `value` — a folded numeric export (`export const v = <fold>`), read directly and summed.
-/// - `callable` — a FUNCTION export (a `callableOwnState` definer's state-reading function). Folding
-///   it without calling concatenates its source text into a number — a false-positive surface — so it
-///   must be consumed as a CALL (or captured as an objectRef for identity only).
-/// - `object` — a fresh-OBJECT export (an `objectExport` definer). It may only be captured by
-///   reference (`objectRef`) and compared for identity; a numeric fold or a call is a type error.
-export type ExportCapability = "value" | "callable" | "object";
-
-/// The canonical descriptor of ONE readable local binding a module introduces: the dependency that
-/// created it, its local name, the export it demands on its direct target, and the CAPABILITY that
-/// demand resolves to through re-export barrels.
-export interface CaptureDescriptor {
-  readonly binding: string;
-  readonly dependency: DependencyOperation;
-  /// The direct-target module id and the export name demanded on it (before barrel resolution).
-  readonly target: string;
-  readonly demandedName: string;
-  readonly capability: ExportCapability;
-  /// For an `objectRef` capture, where the object is ultimately defined — two captures witness the
-  /// same object only when these agree.
-  readonly objectOrigin?: { readonly moduleId: string; readonly exportName: string };
-}
-
-/// The capability a demanded export resolves to, following re-export barrels to the defining module and
-/// reading its profile. A `call`/`callMembers` demand SYNTHESIZES a constant-returning function on a
-/// plain target, so a plain origin stays `value` here (the per-binding call flag, not the origin, makes
-/// that consumption a call); only a `callableOwnState`/`objectExport` DEFINER changes the capability.
-export function resolveExportCapability(
-  facts: ProgramFacts,
-  modulesById: ReadonlyMap<
-    string,
-    { readonly callableOwnState?: boolean; readonly objectExport?: boolean }
-  >,
-  target: string,
-  exportName: string,
-): ExportCapability {
-  const origin = facts.resolveExportOrigin(target, exportName);
-  if (origin === undefined) {
-    return "value";
-  }
-  const originModule = modulesById.get(origin.moduleId);
-  if (originModule?.callableOwnState === true) {
-    return "callable";
-  }
-  if (originModule?.objectExport === true) {
-    return "object";
-  }
-  return "value";
-}
-
-/// The single export name a readable ESM/CJS edge demands on its DIRECT target (before barrel
-/// resolution), or `undefined` for edges that demand nothing readable (side-effect / dynamic imports,
-/// re-exports, plain requires).
-function demandedNameOf(dependency: DependencyOperation): string | undefined {
-  switch (dependency.kind) {
-    case "esm-value-import":
-      return dependency.importedName;
-    case "cjs-require":
-      return dependency.readName;
-    default:
-      return undefined;
-  }
-}
-
-/// Describe every readable binding a module introduces, with each capture's resolved capability. A
-/// namespace import yields one descriptor per read member (each member is a distinct demand). Used by
-/// the validator's barrel-aware capability checks. Object-ref captures carry their resolved origin so
-/// an identity comparison can require both sides witness the SAME object.
-export function describeCaptures(
-  module: ModuleLike,
-  facts: ProgramFacts,
-  modulesById: ReadonlyMap<
-    string,
-    { readonly callableOwnState?: boolean; readonly objectExport?: boolean }
-  >,
-): CaptureDescriptor[] {
-  const captures: CaptureDescriptor[] = [];
-  for (const dependency of module.dependencies) {
-    if (dependency.kind === "esm-namespace-import") {
-      for (const member of dependency.readMembers) {
-        captures.push({
-          binding: dependency.localName,
-          dependency,
-          target: dependency.target,
-          demandedName: member,
-          capability: resolveExportCapability(facts, modulesById, dependency.target, member),
-        });
-      }
-      continue;
-    }
-    const demandedName = demandedNameOf(dependency);
-    if (demandedName === undefined) {
-      continue;
-    }
-    if (dependency.kind === "esm-value-import") {
-      const capability = resolveExportCapability(
-        facts,
-        modulesById,
-        dependency.target,
-        demandedName,
-      );
-      const objectOrigin =
-        dependency.objectRef === true
-          ? facts.resolveExportOrigin(dependency.target, demandedName)
-          : undefined;
-      captures.push({
-        binding: dependency.localName,
-        dependency,
-        target: dependency.target,
-        demandedName,
-        capability,
-        ...(objectOrigin !== undefined ? { objectOrigin } : {}),
-      });
-      continue;
-    }
-    if (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined) {
-      captures.push({
-        binding: dependency.resultBinding,
-        dependency,
-        target: dependency.target,
-        demandedName,
-        capability: resolveExportCapability(facts, modulesById, dependency.target, demandedName),
-      });
-    }
-  }
-  return captures;
-}
 
 /// The canonical `call`/`guard` an event read of a binding MUST carry, keyed by `binding\0member`.
 /// Derived from `readableBindingsOf` — the one shared read projection — so an event read is rejected
 /// when its call/guard disagrees with the dependency that created the binding (folding a hoisted
 /// function without calling it, or calling a plain numeric read). `computed` is a separate visibility
 /// flag added later, so it is not part of this canonical shape.
+///
+/// The barrel-aware CAPABILITY resolution that once lived here (a `resolveExportOrigin` capability walk
+/// classifying an export as value/callable/object at its defining module) is gone: the ONE
+/// `ExportDemandPlan` now owns per-consumption shape↔form soundness (`validate-model.ts`
+/// `validateExportDemand`), so the validator no longer re-derives capability through a parallel walk.
 export function canonicalReadFlags(
   dependencies: readonly DependencyOperation[],
 ): Map<string, { readonly call: boolean; readonly guard: boolean }> {

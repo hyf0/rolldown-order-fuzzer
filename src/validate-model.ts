@@ -1,11 +1,13 @@
-import { analyzeProgram, type ExportDemandPlan } from "./analyzed-program.ts";
 import {
-  canonicalReadFlags,
-  describeCaptures,
-  readKey,
-  resolveExportCapability,
-  type ExportCapability,
-} from "./capture-analysis.ts";
+  analyzeProgram,
+  requiredFormForShape,
+  resolvedExportKey,
+  type AnalyzedProgram,
+  type ConsumptionRecord,
+  type ExportDemandPlan,
+  type RenderedExportForm,
+} from "./analyzed-program.ts";
+import { canonicalReadFlags, readKey } from "./capture-analysis.ts";
 import type {
   CjsRequireOperation,
   DependencyOperation,
@@ -86,12 +88,18 @@ type ReadableBinding =
   // by an event's `identityCheck`, never a numeric read.
   | { readonly kind: "object" };
 
-export function validateProgramModel(program: ProgramModel): readonly string[] {
+export function validateProgramModel(
+  program: ProgramModel,
+  analyzed: AnalyzedProgram = analyzeProgram(program),
+): readonly string[] {
   const errors: string[] = [];
   const modulesById = collectModules(program.modules, errors);
-  // The ONE analyzed view: graph facts plus the canonical export-demand plan the program-level
-  // export soundness reads (supply status, consumption-shape aggregation, forwarded capability).
-  const { facts, plan } = analyzeProgram(program);
+  // The ONE analyzed view: graph facts plus the canonical export-demand plan the program-level export
+  // soundness reads (supply status, per-consumption shape↔form soundness, cross-consumer aggregation).
+  // Threaded in along the case path (finalizeProgram → renderProgram → here) so demand analysis runs
+  // EXACTLY ONCE per case; a standalone caller (a shrink candidate, a handwritten test) omits it and one
+  // is built here.
+  const { facts, plan } = analyzed;
   const dynamicRegistrationOwners = new Map<string, string>();
   const modulesReachingTopLevelAwait = facts.topLevelAwaitReachers();
 
@@ -99,6 +107,7 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
     program.modules,
     modulesById,
     facts,
+    plan,
     modulesReachingTopLevelAwait,
     dynamicRegistrationOwners,
     errors,
@@ -133,7 +142,9 @@ function validateExportDemand(plan: ExportDemandPlan, errors: string[]): void {
       errors.push(
         `${where}: the export is unsupplied — no provider (a star re-export never forwards \`default\`, and a barrel carrying a star synthesizes nothing locally)`,
       );
-    } else if (consumption.supply.status === "ambiguous") {
+      continue;
+    }
+    if (consumption.supply.status === "ambiguous") {
       const origins = consumption.supply.origins
         .map((origin) => quote(origin.moduleId))
         .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
@@ -141,35 +152,78 @@ function validateExportDemand(plan: ExportDemandPlan, errors: string[]): void {
       errors.push(
         `${where}: the export is ambiguous — it resolves to more than one definer (${origins}); duplicate named exports or two conflicting star re-exports`,
       );
+      continue;
+    }
+    // Supplied: the consumption's SHAPE must match the single FORM its resolved definer renders — the
+    // per-shape numeric/callable/object soundness read from the ONE plan's `renderedForm` instead of the
+    // old direct-target `resolveExportOrigin` capability walk. Folding a function's source text, calling a
+    // number, or comparing folded numbers for identity all surface here; callability-not-forwarded is the
+    // callable case (a call routed through a barrel to a numeric definer renders a value, not a function).
+    const demand = plan.resolvedDemands.get(resolvedExportKey(consumption.supply.origin));
+    if (demand !== undefined && demand.renderedForm !== requiredFormForShape(consumption.shape)) {
+      errors.push(consumptionMismatchMessage(consumption, demand.renderedForm));
     }
   }
 
+  // The CROSS-CONSUMER conflict the per-consumption check states less directly: one export consumed as
+  // more than one shape. A definer renders ONE form, so at least one of those consumers already mismatched
+  // above; this aggregate names the conflict at the definer for a clearer diagnostic.
   for (const demand of plan.resolvedDemands.values()) {
-    const at = `export ${quote(demand.origin.exportName)} on ${quote(demand.origin.moduleId)}`;
-    // Consumed as more than one shape: the definer renders ONE form, so a numeric fold and a call (or an
-    // identity capture) of the SAME export cannot both be sound. The per-shape numeric/object soundness
-    // stays the direct-target capability check's job (`validateCaptureCapability`); only the CROSS-CONSUMER
-    // conflict and the not-forwarded callability below need the whole-program plan.
     if (demand.shapes.size > 1) {
+      const at = `export ${quote(demand.origin.exportName)} on ${quote(demand.origin.moduleId)}`;
       const shapes = [...demand.shapes].sort((left, right) =>
         left < right ? -1 : left > right ? 1 : 0,
       );
       errors.push(
         `${at}: incompatible consumption — consumed as more than one shape (${shapes.join(", ")}); a definer renders ONE form, so mixing call / numeric fold / identity of one export misreads it`,
       );
-      continue;
     }
-    // A call demand must reach an export the definer renders as a FUNCTION. Callability is marked only on
-    // a DIRECT call edge (never forwarded through a barrel), so a call routed through a barrel to a
-    // numeric-fold definer renders a plain value and the call is a runtime TypeError — the gap the
-    // direct-target capability check cannot see. The plan's renderedForm is the single source of truth the
-    // renderer and this check share.
-    if (demand.shapes.has("callable") && demand.renderedForm !== "function") {
-      errors.push(
-        `${at}: called but not rendered as a function (renders a ${demand.renderedForm}); callability is not forwarded through a barrel — a call must reach a callable-own-state definer or a directly call-marked export`,
+  }
+}
+
+/// The diagnostic for a supplied consumption whose SHAPE does not match its resolved definer's rendered
+/// FORM. Phrased by shape so it reads naturally and preserves the substrings the crafted-violation tests
+/// key on (notably "callability is not forwarded through a barrel" for a call routed through a star).
+function consumptionMismatchMessage(
+  consumption: ConsumptionRecord,
+  renderedForm: RenderedExportForm,
+): string {
+  const origin = consumption.supply.status === "supplied" ? consumption.supply.origin : undefined;
+  const at =
+    origin === undefined
+      ? `demand ${quote(consumption.demandedName)} on ${quote(consumption.target)}`
+      : `export ${quote(origin.exportName)} on ${quote(origin.moduleId)}`;
+  const by = `consumed by module ${quote(consumption.consumerModuleId)} (demand ${quote(consumption.demandedName)} on ${quote(consumption.target)})`;
+  if (consumption.shape === "callable") {
+    const throughBarrel =
+      consumption.supply.status === "supplied" && consumption.supply.hops.length > 0;
+    return `${at}: called ${by} but the definer renders a ${renderedForm}${throughBarrel ? "; callability is not forwarded through a barrel" : ""} — a call must reach a callable-own-state definer or a directly call-marked export`;
+  }
+  if (consumption.shape === "reference") {
+    return `${at}: captured by identity (objectRef) ${by} but the definer renders a ${renderedForm}; an objectRef must reach a fresh-object export`;
+  }
+  return `${at}: folded numerically ${by} but the definer renders a ${renderedForm}; folding a ${renderedForm} (a function's source text or an object) is unsound`;
+}
+
+/// The object ORIGIN each objectRef capture in `moduleId` resolves to (through barrels), read from the
+/// ONE plan's `reference` consumptions, so an identity comparison can require both sides witness the SAME
+/// object export. Replaces the old describeCaptures / resolveExportOrigin capability walk.
+function objectOriginsForModule(moduleId: string, plan: ExportDemandPlan): Map<string, string> {
+  const origins = new Map<string, string>();
+  for (const consumption of plan.consumptions) {
+    if (
+      consumption.consumerModuleId === moduleId &&
+      consumption.shape === "reference" &&
+      consumption.supply.status === "supplied" &&
+      consumption.dependency.kind === "esm-value-import"
+    ) {
+      origins.set(
+        consumption.dependency.localName,
+        `${consumption.supply.origin.moduleId} ${consumption.supply.origin.exportName}`,
       );
     }
   }
+  return origins;
 }
 
 /// Cycle value-flow soundness (Node-legal, TDZ-free, NaN-free). A read across a cycle-closing edge
@@ -269,6 +323,7 @@ function validateModules(
   modules: readonly ModuleModel[],
   modulesById: ReadonlyMap<string, ModuleModel>,
   facts: ProgramFacts,
+  plan: ExportDemandPlan,
   modulesReachingTopLevelAwait: ReadonlySet<string>,
   dynamicRegistrationOwners: Map<string, string>,
   errors: string[],
@@ -286,18 +341,17 @@ function validateModules(
     // Per target, the pair "slots" already used from this module. A (importer, target) pair may carry
     // several DISTINCT dependency kinds (the wave-5 mixed pairs), but at most one edge per slot.
     const pairSlots = new Map<string, Set<string>>();
+    // The explicit named re-export names (`export { s as e } from`) this module already declares. A
+    // module may not declare the SAME exportedName twice, regardless of source origin: ESM permits one
+    // binding per exported name, so a second `export { … as X }` is a Node SyntaxError (Duplicate export
+    // of 'X'). `resolveExportRoute` dedups routes by resolved origin, so a duplicate that happens to reach
+    // the SAME definer would otherwise pass supply resolution while still rendering invalid ESM.
+    const explicitReexportNames = new Set<string>();
     // Where each objectRef binding's captured object is ultimately defined (following barrels), so an
     // identity comparison can require both sides witness the SAME object (not merely both be objectRef
-    // captures). Built from the canonical capture descriptors.
-    const objectOrigins = new Map<string, string>();
-    for (const capture of describeCaptures(module, facts, modulesById)) {
-      if (capture.objectOrigin !== undefined) {
-        objectOrigins.set(
-          capture.binding,
-          `${capture.objectOrigin.moduleId} ${capture.objectOrigin.exportName}`,
-        );
-      }
-    }
+    // captures). Read from the ONE plan's `reference` consumptions for this module, replacing the old
+    // describeCaptures/resolveExportOrigin walk.
+    const objectOrigins = objectOriginsForModule(module.id, plan);
 
     for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
       const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
@@ -306,6 +360,16 @@ function validateModules(
       validateDependencySyntax(module, operation, path, errors);
       validateDependencyBinding(operation, path, localBindings, readableBindings, errors);
       validatePairSlot(operation, path, pairSlots, errors);
+
+      if (operation.kind === "esm-reexport-named") {
+        if (explicitReexportNames.has(operation.exportedName)) {
+          errors.push(
+            `${path}.exportedName: duplicate named re-export of ${quote(operation.exportedName)}; a module may export a name at most once (Node: Duplicate export)`,
+          );
+        } else {
+          explicitReexportNames.add(operation.exportedName);
+        }
+      }
 
       const target = modulesById.get(operation.target);
       if (target === undefined) {
@@ -320,8 +384,22 @@ function validateModules(
         );
       }
 
-      if (target !== undefined) {
-        validateCaptureCapability(operation, path, facts, modulesById, errors);
+      // A readable require of `default` from a CJS target is unsupplied: a CommonJS provider renders
+      // `module.exports = <value>` (or filters `default` out of a `module.exports = {}`), so `.default`
+      // never exists and the fold is `undefined` → NaN, a degenerate both-sides crash. This is a CJS
+      // INTEROP fact the supply-aware route cannot see (a CJS module is a local definer of every name),
+      // so it stays a direct check; every OTHER per-shape capability soundness is now the plan's job
+      // (`validateExportDemand`), not a parallel resolveExportOrigin walk.
+      if (
+        target !== undefined &&
+        operation.kind === "cjs-require" &&
+        operation.resultBinding !== undefined &&
+        operation.readName === "default" &&
+        target.format === "cjs"
+      ) {
+        errors.push(
+          `${path}: a readable require cannot read ${quote("default")} from CJS module ${quote(operation.target)}; a CommonJS provider supplies no default property`,
+        );
       }
 
       if (operation.kind === "esm-dynamic-import") {
@@ -349,85 +427,6 @@ function validateModules(
       }
 
       validateEventReads(event, eventPath, readableBindings, readFlags, objectOrigins, errors);
-    }
-  }
-}
-
-/// A capture's CONSUMPTION must match the CAPABILITY its demanded export resolves to through re-export
-/// barrels — closing the gap where the direct-target checks stopped at the barrel and could not see a
-/// `callableOwnState`/`objectExport` definer several hops away.
-///
-/// - A `callable` origin (a function export) must be consumed as a CALL: a value import must be a
-///   `call` import or an `objectRef` capture; a namespace member must be in `callMembers`; a readable
-///   require may not target it. Folding a function binding numerically concatenates its source text —
-///   a false positive, not a witness.
-/// - An `object` origin (a fresh-object export) may only be captured by `objectRef`: a plain value
-///   import, a `call` import, a namespace member, or a readable require would fold or invoke an object.
-/// - A readable require reading `default` from a CJS target is unsupplied: a CJS provider renders
-///   `module.exports = <value>` (or filters `default` out of a `module.exports = {}`), so the required
-///   `.default` property never exists and the fold is `undefined` -> NaN, a degenerate both-sides
-///   crash the oracle must never rely on.
-function validateCaptureCapability(
-  operation: DependencyOperation,
-  path: string,
-  facts: ProgramFacts,
-  modulesById: ReadonlyMap<string, ModuleModel>,
-  errors: string[],
-): void {
-  const capabilityOf = (name: string): ExportCapability =>
-    resolveExportCapability(facts, modulesById, operation.target, name);
-
-  if (operation.kind === "esm-value-import") {
-    const capability = capabilityOf(operation.importedName);
-    if (capability === "callable" && operation.call !== true && operation.objectRef !== true) {
-      errors.push(
-        `${path}: import ${quote(operation.importedName)} resolves to a callable-own-state export; it must be a call import or an objectRef, a numeric fold of a function is unsound`,
-      );
-    }
-    if (capability === "object" && operation.objectRef !== true) {
-      errors.push(
-        `${path}: import ${quote(operation.importedName)} resolves to an object export; it must be an objectRef capture, folding or calling an object is unsound`,
-      );
-    }
-    return;
-  }
-
-  if (operation.kind === "esm-namespace-import") {
-    const callMembers = new Set(operation.callMembers ?? []);
-    for (const member of operation.readMembers) {
-      const capability = capabilityOf(member);
-      if (capability === "callable" && !callMembers.has(member)) {
-        errors.push(
-          `${path}: namespace member ${quote(member)} resolves to a callable-own-state export; it must be in callMembers, a plain member fold of a function is unsound`,
-        );
-      }
-      if (capability === "object") {
-        errors.push(
-          `${path}: namespace member ${quote(member)} resolves to an object export; folding an object numerically is unsound`,
-        );
-      }
-    }
-    return;
-  }
-
-  if (operation.kind === "cjs-require" && operation.resultBinding !== undefined) {
-    const target = modulesById.get(operation.target);
-    if (operation.readName === "default" && target?.format === "cjs") {
-      errors.push(
-        `${path}: a readable require cannot read ${quote("default")} from CJS module ${quote(operation.target)}; a CommonJS provider supplies no default property`,
-      );
-    }
-    const capability =
-      operation.readName === undefined ? "value" : capabilityOf(operation.readName);
-    if (capability === "callable") {
-      errors.push(
-        `${path}: a readable require resolves to a callable-own-state export on ${quote(operation.target)}; its exports are functions and a member fold is unsound`,
-      );
-    }
-    if (capability === "object") {
-      errors.push(
-        `${path}: a readable require resolves to an object export on ${quote(operation.target)}; folding an object numerically is unsound`,
-      );
     }
   }
 }

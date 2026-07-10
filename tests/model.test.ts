@@ -1183,6 +1183,9 @@ describe("validateProgramModel", () => {
     } satisfies ProgramModel;
     expect(validateProgramModel(callToCjs)).toEqual([
       'modules[0].dependencies[0]: a hoisted-function call import must target an ESM module, target "b" is cjs',
+      // The plan (finding 3) also rejects the call itself: a CJS definer renders numeric exports only, so
+      // `fb` is a `value`, not a callable — calling it is a TypeError, not a witness.
+      'export "fb" on "b": called consumed by module "a" (demand "fb" on "b") but the definer renders a value — a call must reach a callable-own-state definer or a directly call-marked export',
     ]);
   });
 
@@ -1419,8 +1422,10 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
+    // The plan resolves the member through the star barrel to the callable-own-state definer and rejects
+    // the numeric fold — the definer renders a function, so folding its member concatenates source text.
     expect(validateProgramModel(program)).toEqual([
-      'modules[0].dependencies[0]: namespace member "vdef" resolves to a callable-own-state export; it must be in callMembers, a plain member fold of a function is unsound',
+      'export "vdef" on "def": folded numerically consumed by module "consumer" (demand "vdef" on "barrel") but the definer renders a function; folding a function (a function\'s source text or an object) is unsound',
     ]);
   });
 
@@ -1453,8 +1458,10 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
+    // The plan rejects the call: an object-export definer renders an object literal, not a function, so
+    // calling it is a TypeError — a call must reach a callable-own-state or directly call-marked export.
     expect(validateProgramModel(program)).toContain(
-      'modules[0].dependencies[0]: import "vobj" resolves to an object export; it must be an objectRef capture, folding or calling an object is unsound',
+      'export "vobj" on "obj": called consumed by module "consumer" (demand "vobj" on "obj") but the definer renders a object — a call must reach a callable-own-state definer or a directly call-marked export',
     );
   });
 
@@ -1489,6 +1496,36 @@ describe("validateProgramModel", () => {
     expect(validateProgramModel(program)).toContain(
       'modules[0].dependencies[0]: a readable require cannot read "default" from CJS module "b"; a CommonJS provider supplies no default property',
     );
+  });
+
+  test("rejects a duplicate named re-export of the same exportedName regardless of origin (finding 6)", () => {
+    const program = {
+      modules: [
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-reexport-named", target: "def", sourceName: "vx", exportedName: "shared" },
+            // A SECOND explicit re-export of the SAME exported name — even resolving to the SAME origin
+            // `def`, this renders `export { … as shared }` twice, a Node SyntaxError (Duplicate export of
+            // 'shared'). resolveExportRoute dedups by origin, so only a structural check catches it.
+            { kind: "esm-reexport-named", target: "def", sourceName: "vx", exportedName: "shared" },
+          ],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 1 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "barrel" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].dependencies[1].exportedName: duplicate named re-export of "shared"; a module may export a name at most once (Node: Duplicate export)',
+    ]);
   });
 
   // Program-level export-demand rules (finding 2), read from the canonical ExportDemandPlan. Each
@@ -1653,6 +1690,92 @@ describe("validateProgramModel", () => {
           error.includes("callability is not forwarded through a barrel"),
         ),
       ).toBe(true);
+    });
+
+    // The two degenerate crash models finding 3 closes: the plan's rendered form is now the SOLE dispatch,
+    // so an inferred-pure-numeric and a CJS-numeric definer stay `value` and a callable consumption of one
+    // is REJECTED at validation instead of rendering a const/`exports.x = 5` the caller then invokes
+    // (a `TypeError: x is not a function` — a degenerate both-sides crash). Reproduced with /tmp probes.
+    test("rejects a DIRECT call import of an inferred-pure numeric definer (finding 3a)", () => {
+      const program = {
+        modules: [
+          {
+            id: "consumer",
+            format: "esm",
+            dependencies: [
+              {
+                kind: "esm-value-import",
+                target: "pure",
+                importedName: "vp",
+                localName: "p",
+                call: true,
+              },
+            ],
+            events: [
+              {
+                module: "consumer",
+                phase: "evaluate",
+                value: 1,
+                reads: [{ binding: "p", call: true }],
+              },
+            ],
+          },
+          // An inferred-pure definer renders `vp` as a non-inlinable `const`, never a callable.
+          {
+            id: "pure",
+            format: "esm",
+            dependencies: [],
+            events: [],
+            inferredPure: true,
+            pureBase: 42,
+          },
+        ],
+        entries: [{ name: "main", moduleId: "consumer" }],
+        schedule: [{ kind: "import-entry", entry: "main" }],
+      } satisfies ProgramModel;
+      expect(validateProgramModel(program)).toContain(
+        'export "vp" on "pure": called consumed by module "consumer" (demand "vp" on "pure") but the definer renders a value — a call must reach a callable-own-state definer or a directly call-marked export',
+      );
+    });
+
+    test("rejects namespace callMembers against a numeric CJS definer (finding 3b)", () => {
+      const program = {
+        modules: [
+          {
+            id: "consumer",
+            format: "esm",
+            dependencies: [
+              {
+                kind: "esm-namespace-import",
+                target: "cjsdef",
+                localName: "ns",
+                readMembers: ["vx"],
+                callMembers: ["vx"],
+              },
+            ],
+            events: [
+              {
+                module: "consumer",
+                phase: "evaluate",
+                value: 1,
+                reads: [{ binding: "ns", member: "vx", call: true }],
+              },
+            ],
+          },
+          // A CJS definer renders `exports.vx = <number>` — a value, never a callable function.
+          {
+            id: "cjsdef",
+            format: "cjs",
+            dependencies: [],
+            events: [{ module: "cjsdef", phase: "evaluate", value: 5 }],
+          },
+        ],
+        entries: [{ name: "main", moduleId: "consumer" }],
+        schedule: [{ kind: "import-entry", entry: "main" }],
+      } satisfies ProgramModel;
+      expect(validateProgramModel(program)).toContain(
+        'export "vx" on "cjsdef": called consumed by module "consumer" (demand "vx" on "cjsdef") but the definer renders a value — a call must reach a callable-own-state definer or a directly call-marked export',
+      );
     });
 
     // A compact table over origin profile x consumption shape on a DIRECT edge: the plan's rendered-form

@@ -1,50 +1,26 @@
-import { deriveCoverageTags, type GeneratedCase } from "./generate.ts";
 import type { ProgramModel } from "./model.ts";
 import {
-  DEFAULT_CASE_SIZE,
-  executeGeneratedCase,
-  type CampaignOptions,
+  executeProgram,
   type CampaignVerdict,
+  type MinimalExecutionOptions,
 } from "./program-run.ts";
 
 /// The minimal build inputs needed to evaluate ONE program: which Rolldown to build with and the wrap
 /// mode. Everything else the campaign runner threads (seed, template, coverage, case count, output
-/// directory, cosmetic size) is irrelevant to running a single loaded model.
-export interface CaseEvaluationOptions {
-  readonly rolldownPackage: string;
-  readonly onDemandWrapping: boolean;
-}
+/// directory, cosmetic size) is irrelevant to running a single loaded model — so this is exactly the
+/// `program-run.ts` minimal execution options.
+export type CaseEvaluationOptions = MinimalExecutionOptions;
 
 /// Evaluate one program end-to-end — render, run the source under Node, build it with Rolldown, run the
-/// bundle, and classify the differential verdict — returning the structured verdict. This is the seam
-/// BELOW the campaign/CLI layer: the shrinker calls it to replay a loaded model instead of fabricating
-/// a `GeneratedCase` and a full `CampaignOptions` merely to reach the evaluator. The execution
-/// primitives now live in `program-run.ts` (below `main.ts`), so this seam no longer imports the
-/// campaign/CLI layer at all.
+/// bundle, and classify the differential verdict — returning the structured verdict. It wraps the
+/// `program-run.ts` `executeProgram` seam directly, so the shrinker no longer fabricates a `GeneratedCase`
+/// and a full `CampaignOptions` merely to replay a loaded model.
 export async function evaluateProgram(
   program: ProgramModel,
   options: CaseEvaluationOptions,
 ): Promise<CampaignVerdict> {
-  const generated: GeneratedCase = {
-    seed: 0,
-    size: DEFAULT_CASE_SIZE,
-    template: "random-mixed",
-    coverageTags: deriveCoverageTags(program),
-    program,
-  };
-  const campaignOptions: CampaignOptions = {
-    seed: 0,
-    cases: 1,
-    caseSize: DEFAULT_CASE_SIZE,
-    // A loaded model replays as-is; the size mix is cosmetic here.
-    sizeMix: false,
-    onDemandWrapping: options.onDemandWrapping,
-    rolldownPackage: options.rolldownPackage,
-    outDir: "failures",
-    continueOnFail: false,
-  };
-  const result = await executeGeneratedCase(generated, campaignOptions);
-  return result.verdict;
+  const run = await executeProgram(program, options);
+  return run.verdict;
 }
 
 /// The failure signature of a program, or `undefined` when it passes.

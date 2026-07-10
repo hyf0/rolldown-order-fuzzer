@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import {
   deriveCoverageTags,
+  deriveRegistrationSequence,
   generateCase,
   MAX_CASE_SIZE,
   MIXED_TEMPLATE_NAMES,
@@ -1032,5 +1033,63 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
     const tags = deriveCoverageTags(program);
     expect(tags).toContain("mechanism:esm-cycle");
     expect(tags).toContain("mechanism:cjs-cycle");
+  });
+});
+
+describe("dynamic-import registration sequence (finding 5)", () => {
+  const dyn = (target: string, registration: string) =>
+    ({ kind: "esm-dynamic-import", target, registration }) as const;
+  const modulesWith = (edges: { owner: string; registration: string }[]): ModuleModel[] =>
+    edges.map((edge) => ({
+      id: edge.owner,
+      format: "esm",
+      dependencies: [dyn(`t-${edge.registration}`, edge.registration)],
+      events: [],
+    }));
+
+  test("derives the registration order from the graph, ordered by creation ordinal", () => {
+    // The side list records creation order; the graph is scanned in a DIFFERENT order. Sorting the
+    // graph's dynamic edges by their creation ordinal must reproduce the side-list order exactly.
+    const registrations = [
+      { owner: "a", registration: "r0" },
+      { owner: "b", registration: "r1" },
+      { owner: "c", registration: "r2" },
+    ];
+    const shuffledGraph = modulesWith([
+      { owner: "c", registration: "r2" },
+      { owner: "a", registration: "r0" },
+      { owner: "b", registration: "r1" },
+    ]);
+    expect(deriveRegistrationSequence(shuffledGraph, registrations)).toEqual(registrations);
+  });
+
+  test("asserts MEMBERSHIP: a graph edge with no recorded ordinal throws", () => {
+    const graph = modulesWith([
+      { owner: "a", registration: "r0" },
+      { owner: "b", registration: "orphan" },
+    ]);
+    expect(() => deriveRegistrationSequence(graph, [{ owner: "a", registration: "r0" }])).toThrow(
+      /no creation ordinal|graph\/side-list drift/,
+    );
+  });
+
+  test("asserts MEMBERSHIP the other way: a recorded registration absent from the graph throws", () => {
+    const graph = modulesWith([{ owner: "a", registration: "r0" }]);
+    expect(() =>
+      deriveRegistrationSequence(graph, [
+        { owner: "a", registration: "r0" },
+        { owner: "b", registration: "r1" },
+      ]),
+    ).toThrow(/registration\/graph mismatch/);
+  });
+
+  test("asserts UNIQUENESS: a duplicate registration ordinal throws", () => {
+    const graph = modulesWith([{ owner: "a", registration: "r0" }]);
+    expect(() =>
+      deriveRegistrationSequence(graph, [
+        { owner: "a", registration: "r0" },
+        { owner: "a", registration: "r0" },
+      ]),
+    ).toThrow(/duplicate dynamic-import registration ordinal/);
   });
 });
