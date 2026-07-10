@@ -286,6 +286,14 @@ function validateCycleValueFlow(
             `${path}: an ESM namespace import cannot close a cycle; a member read would hit TDZ`,
           );
         }
+      } else if (dependency.kind === "esm-local-reexport") {
+        // The imported binding is a plain (non-hoisted) value read; across a cycle-closing edge it
+        // would risk TDZ exactly like a namespace member read, so the edge stays forward-only.
+        if (closesCycle) {
+          errors.push(
+            `${path}: an ESM local re-export cannot close a cycle; its imported binding would hit TDZ`,
+          );
+        }
       } else if (
         dependency.kind === "cjs-require" &&
         dependency.resultBinding !== undefined &&
@@ -380,7 +388,10 @@ function validateModules(
       validateDependencyBinding(operation, path, localBindings, readableBindings, errors);
       validatePairSlot(operation, path, pairSlots, errors);
 
-      if (operation.kind === "esm-reexport-named") {
+      if (operation.kind === "esm-reexport-named" || operation.kind === "esm-local-reexport") {
+        // Named and LOCAL re-exports share one per-module exported-name space: ESM permits one
+        // binding per exported name, so a second `export { … as X }` of either form is a Node
+        // SyntaxError (Duplicate export of 'X').
         if (explicitReexportNames.has(operation.exportedName)) {
           errors.push(
             `${path}.exportedName: duplicate named re-export of ${quote(operation.exportedName)}; a module may export a name at most once (Node: Duplicate export)`,
@@ -451,15 +462,17 @@ function validateModules(
 }
 
 /// The value-only ESM dependency kinds a `sideEffects: false` module may carry: value/namespace
-/// imports and re-exports. Each only matters when the flagged module's value is used — the bundler
-/// must then keep it (and its upstream) in order — so dropping the flagged module when unused stays
-/// invisible. A side-effect import, dynamic-import registration, or interop require would be
+/// imports and re-exports (including the LOCAL re-export form, whose two statements are a value
+/// import plus an export clause). Each only matters when the flagged module's value is used — the
+/// bundler must then keep it (and its upstream) in order — so dropping the flagged module when unused
+/// stays invisible. A side-effect import, dynamic-import registration, or interop require would be
 /// droppable under the flag yet could reorder or drop another module's events.
 const SIDE_EFFECT_FREE_DEPENDENCY_KINDS = new Set([
   "esm-value-import",
   "esm-namespace-import",
   "esm-reexport-named",
   "esm-reexport-star",
+  "esm-local-reexport",
 ]);
 
 /// The shared contract of BOTH purity mechanisms (metadata `sideEffects: false` and statement-inferred
@@ -804,6 +817,25 @@ function validateDependencyBinding(
       errors.push(
         `${path}.exportedName: invalid JavaScript identifier ${quote(dependency.exportedName)}`,
       );
+    }
+    return;
+  }
+
+  if (dependency.kind === "esm-local-reexport") {
+    // A local re-export BINDS `localName` (a live import read like a value import's) and re-exports
+    // it under `exportedName`; both statement halves carry validated names.
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.sourceName)) {
+      errors.push(
+        `${path}.sourceName: invalid JavaScript identifier ${quote(dependency.sourceName)}`,
+      );
+    }
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.exportedName)) {
+      errors.push(
+        `${path}.exportedName: invalid JavaScript identifier ${quote(dependency.exportedName)}`,
+      );
+    }
+    if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
+      readableBindings.set(dependency.localName, { kind: "direct" });
     }
     return;
   }

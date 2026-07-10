@@ -2421,6 +2421,21 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   ) {
     tags.add("variation:reexport-default");
   }
+  // A LOCAL re-export (`import { x } from …; export { x };` — the camunda package-barrel shape, M4).
+  if (dependencyKinds.has("esm-local-reexport")) {
+    tags.add("variation:reexport-local");
+    // The camunda breakage's full shape: the local re-export sits on a module that ALSO carries its
+    // own side effect (events) — a barrel with an own effect, not a pure forwarder.
+    if (
+      program.modules.some(
+        (module) =>
+          module.events.length > 0 &&
+          module.dependencies.some((dependency) => dependency.kind === "esm-local-reexport"),
+      )
+    ) {
+      tags.add("mechanism:local-reexport-with-own-effect");
+    }
+  }
 
   // A module reaches the SAME target through more than one dependency KIND — a real multi-edge pair
   // (static + lazy, side-effect + value, require + dynamic, …), the most common shape real code writes

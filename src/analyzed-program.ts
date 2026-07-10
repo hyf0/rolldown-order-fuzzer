@@ -197,7 +197,10 @@ function freezePlan(plan: ExportDemandPlan): ExportDemandPlan {
 
 /// The single export name a readable ESM/CJS edge demands on its DIRECT target, plus how the edge
 /// consumes it, or `undefined` for edges that demand nothing readable. A namespace import demands one
-/// name per read member, so it is expanded by the caller.
+/// name per read member, so it is expanded by the caller. A LOCAL re-export's import half is a plain
+/// LIVE numeric demand — the binding is genuinely in scope (readable), so it is supply- AND
+/// shape-checked exactly like a value import (strictly stronger than the link-required check a pure
+/// `export … from` re-export gets), which also keeps every event read of the binding sound.
 function directDemandOf(
   dependency: DependencyOperation,
 ): { readonly name: string; readonly shape: ConsumptionShape } | undefined {
@@ -211,6 +214,9 @@ function directDemandOf(
             ? "callable"
             : "numeric",
     };
+  }
+  if (dependency.kind === "esm-local-reexport") {
+    return { name: dependency.sourceName, shape: "numeric" };
   }
   if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
     return { name: dependency.readName, shape: "numeric" };
@@ -407,7 +413,12 @@ function collectRequestedExports(program: ProgramModel): {
         }
       } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
         demand(dependency.target, dependency.readName);
-      } else if (dependency.kind === "esm-reexport-named") {
+      } else if (
+        dependency.kind === "esm-reexport-named" ||
+        dependency.kind === "esm-local-reexport"
+      ) {
+        // Both re-export forms demand their source name on the target; a LOCAL re-export's demand is
+        // additionally a live import (see `directDemandOf`), but the requested-name projection is one.
         demand(dependency.target, dependency.sourceName);
       }
     }
@@ -429,11 +440,7 @@ function collectRequestedExports(program: ProgramModel): {
       if (starTargets.length === 0) {
         continue;
       }
-      const namedProvided = new Set(
-        module.dependencies.flatMap((dependency) =>
-          dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
-        ),
-      );
+      const namedProvided = providedExportNames(module);
       const demandedHere = requestedExports.get(module.id);
       for (let index = 0; index < (demandedHere?.length ?? 0); index += 1) {
         const name = demandedHere?.[index];
@@ -452,10 +459,24 @@ function collectRequestedExports(program: ProgramModel): {
   return { requestedNames: requestedExports, callableNames: callableExports };
 }
 
+/// The export names a module's dependencies PROVIDE without local synthesis: a named re-export's
+/// `exportedName` (forwarded from its target) and a LOCAL re-export's `exportedName` (bound to its
+/// imported binding). Shared by the demand fixpoint (such names never forward through a star) and the
+/// renderer's local-synthesis subtraction.
+function providedExportNames(module: ModuleModel): ReadonlySet<string> {
+  return new Set(
+    module.dependencies.flatMap((dependency) =>
+      dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport"
+        ? [dependency.exportedName]
+        : [],
+    ),
+  );
+}
+
 /// The subset of a module's requested exports it must synthesize LOCALLY (a state-derived value):
-/// everything a re-export does not forward. CJS synthesizes all; an ESM barrel forwards names via named
-/// re-exports or a star (which forwards everything else), leaving a pure barrel with no local exports.
-/// RELOCATED verbatim from the renderer.
+/// everything a re-export (named, star, or local) does not provide. CJS synthesizes all; an ESM barrel
+/// forwards names via named/local re-exports or a star (which forwards everything else), leaving a
+/// pure barrel with no local exports. RELOCATED verbatim from the renderer.
 export function localExportsFor(
   module: ModuleModel,
   requested: readonly string[],
@@ -463,11 +484,7 @@ export function localExportsFor(
   if (module.format === "cjs") {
     return requested;
   }
-  const namedProvided = new Set(
-    module.dependencies.flatMap((dependency) =>
-      dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
-    ),
-  );
+  const namedProvided = providedExportNames(module);
   const hasStar = module.dependencies.some((dependency) => dependency.kind === "esm-reexport-star");
   return requested.filter((name) => !namedProvided.has(name) && !hasStar);
 }

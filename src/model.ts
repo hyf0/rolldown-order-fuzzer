@@ -148,6 +148,26 @@ export interface EsmReexportStarOperation {
   readonly target: string;
 }
 
+/// `import { <sourceName> as <localName> } from "..."; export { <localName> as <exportedName> };` —
+/// a LOCAL re-export (the camunda package-barrel shape, M4): the name is imported into scope as a
+/// LIVE binding and re-exported through a SOURCE-LESS export clause, on a module that may ALSO carry
+/// its own side effects (events). This is a DIFFERENT rolldown surface from `esm-reexport-named`
+/// (`export { s as e } from "..."`, which binds nothing locally): the import record is live, the
+/// export references a local binding, and the two statements are decoupled in the module body — the
+/// exact shape the camunda breakage manifested in. Demand for `exportedName` on this module routes to
+/// the target's `sourceName` (like a named re-export), and the import itself demands `sourceName` as
+/// a LIVE numeric consumption (supply- AND shape-checked, strictly stronger than the link-required
+/// check a pure re-export gets), so an unsupplied name is rejected at validation, never rendered.
+/// `localName` is a readable binding (events may fold it). Forward-only: validate-model.ts rejects a
+/// local re-export that closes a cycle (the mid-evaluation read risk is TDZ, like a namespace edge).
+export interface EsmLocalReexportOperation {
+  readonly kind: "esm-local-reexport";
+  readonly target: string;
+  readonly sourceName: string;
+  readonly localName: string;
+  readonly exportedName: string;
+}
+
 export interface CjsRequireOperation {
   readonly kind: "cjs-require";
   readonly target: string;
@@ -170,7 +190,8 @@ export type EsmDependencyOperation =
   | EsmNamespaceImportOperation
   | EsmDynamicImportOperation
   | EsmReexportNamedOperation
-  | EsmReexportStarOperation;
+  | EsmReexportStarOperation
+  | EsmLocalReexportOperation;
 
 export type DependencyOperation = EsmDependencyOperation | CjsRequireOperation;
 
@@ -479,16 +500,19 @@ export function programChunking(program: ProgramModel): Chunking {
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an
 /// ESM value-import contributes its `localName`; an ESM namespace-import contributes one read per
 /// `readMembers` entry (`localName.member`); a CJS readable require contributes its `resultBinding`
-/// plus the `readName` member read off the required module's exports. Re-export dependencies bind
-/// nothing locally and contribute no readable value (a barrel forwards, it does not read). This is
-/// a pure model fact shared by the generator (choosing event reads), the renderer (folding
-/// exports), and validation.
+/// plus the `readName` member read off the required module's exports; an ESM LOCAL re-export
+/// contributes its `localName` (the binding is genuinely imported into scope, unlike a source-form
+/// re-export). Pure re-export dependencies (`export … from`) bind nothing locally and contribute no
+/// readable value (a barrel forwards, it does not read). This is a pure model fact shared by the
+/// generator (choosing event reads), the renderer (folding exports), and validation.
 export function readableBindingsOf(
   dependencies: readonly DependencyOperation[],
 ): readonly ValueRead[] {
   const reads: ValueRead[] = [];
   for (const dependency of dependencies) {
-    if (dependency.kind === "esm-value-import") {
+    if (dependency.kind === "esm-local-reexport") {
+      reads.push({ binding: dependency.localName });
+    } else if (dependency.kind === "esm-value-import") {
       // An objectRef import binds an object reference, never a folded number: it is compared for
       // identity, not summed, so it contributes no numeric readable binding.
       if (dependency.objectRef === true) {

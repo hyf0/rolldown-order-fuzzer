@@ -722,6 +722,72 @@ describe("withRolldownBuild", () => {
     });
   });
 
+  test("builds and round-trips a camunda-shaped local re-export with an own side effect (M4)", async () => {
+    // The barrel IMPORTS the definer's binding, emits its OWN event, and re-exports the binding
+    // through a source-less `export { … };` clause — the package-barrel-with-own-effect shape from
+    // the camunda breakage. On a correct build the value flows and the barrel's event stays ordered.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "barrel", importedName: "vx", localName: "e_vx" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 5, reads: [{ binding: "e_vx" }] }],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-local-reexport",
+              target: "def",
+              sourceName: "vdef",
+              localName: "b_vdef",
+              exportedName: "vx",
+            },
+          ],
+          events: [
+            { module: "barrel", phase: "evaluate", value: 20, reads: [{ binding: "b_vdef" }] },
+          ],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 7 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          events: moduleEventPairs(sourceOutcome.events),
+        };
+      },
+    );
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      events: [
+        ["def", 7],
+        ["barrel", 27],
+        ["entry", 12],
+      ],
+    });
+  });
+
   test("builds and round-trips a #8777-shaped side-effect-free barrel re-export chain", async () => {
     // A `sideEffects:false` barrel re-exporting a value-only definer whose value the entry folds. If
     // rolldown drops the re-exported init under strictExecutionOrder (#8777: the re-exported variable

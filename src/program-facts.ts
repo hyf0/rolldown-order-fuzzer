@@ -36,9 +36,10 @@ export interface ExportOrigin {
 }
 
 /// One re-export hop a demanded name travels through on its way to a definer: a named re-export
-/// (`export { s as e } from`) or a star re-export (`export * from`), and the barrel module doing it.
+/// (`export { s as e } from`), a star re-export (`export * from`), or a LOCAL re-export
+/// (`import { s as l } from …; export { l as e };`), and the barrel module doing it.
 export interface RouteHop {
-  readonly via: "named" | "star";
+  readonly via: "named" | "star" | "local";
   readonly through: string;
 }
 
@@ -269,7 +270,10 @@ export class ProgramFacts {
     visited.add(key);
 
     for (const dependency of module.dependencies) {
-      if (dependency.kind === "esm-reexport-named" && dependency.exportedName === exportName) {
+      if (
+        (dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport") &&
+        dependency.exportedName === exportName
+      ) {
         return this.#resolveExportOrigin(dependency.target, dependency.sourceName, visited);
       }
     }
@@ -332,12 +336,24 @@ export class ProgramFacts {
 
     let matchedNamed = false;
     for (const dependency of module.dependencies) {
-      if (dependency.kind === "esm-reexport-named" && dependency.exportedName === exportName) {
+      if (
+        (dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport") &&
+        dependency.exportedName === exportName
+      ) {
+        // A LOCAL re-export (`import { s as l } …; export { l as e };`) forwards demand exactly like
+        // a named re-export for SUPPLY purposes — the binding is the target's `sourceName` — while its
+        // import half is additionally a live consumption (recorded by the plan, not here).
         matchedNamed = true;
         this.#collectDefiners(
           dependency.target,
           dependency.sourceName,
-          [...hops, { via: "named", through: moduleId }],
+          [
+            ...hops,
+            {
+              via: dependency.kind === "esm-local-reexport" ? "local" : "named",
+              through: moduleId,
+            },
+          ],
           visited,
           out,
         );

@@ -183,6 +183,12 @@ function renderModule(
 
   const dependencyLines: string[] = [];
   const usedBindings = new Set<string>();
+  // A LOCAL re-export renders as TWO statements: the live `import { source as local }` in the
+  // dependency stream (its array slot — the import is a real record whose order matters), and a
+  // source-less `export { local as exported };` clause emitted with the module's exports (the
+  // camunda package-barrel shape: the module imports the binding, runs its own side effects, and
+  // re-exports the binding it holds).
+  const localReexportLines: string[] = [];
   for (const dependency of module.dependencies) {
     const specifier = importSpecifier(selfPath, getRequiredPath(modulePaths, dependency.target));
     if (dependency.kind === "esm-side-effect-import") {
@@ -203,6 +209,16 @@ function renderModule(
       );
     } else if (dependency.kind === "esm-reexport-star") {
       dependencyLines.push(`export * from "${specifier}";`);
+    } else if (dependency.kind === "esm-local-reexport") {
+      usedBindings.add(dependency.localName);
+      dependencyLines.push(
+        `import { ${dependency.sourceName} as ${dependency.localName} } from "${specifier}";`,
+      );
+      localReexportLines.push(
+        dependency.localName === dependency.exportedName
+          ? `export { ${dependency.localName} };`
+          : `export { ${dependency.localName} as ${dependency.exportedName} };`,
+      );
     } else {
       dependencyLines.push(dynamicRegistration(dependency, specifier));
     }
@@ -219,8 +235,14 @@ function renderModule(
   if (module.events.length > 0) {
     sections.push(renderEvents(module));
   }
-  if (localExports.length > 0) {
-    sections.push(renderEsmExports(module, localExports, usedBindings, readable, formOf));
+  const exportLines = [
+    ...localReexportLines,
+    ...(localExports.length > 0
+      ? renderEsmExports(module, localExports, usedBindings, readable, formOf)
+      : []),
+  ];
+  if (exportLines.length > 0) {
+    sections.push(exportLines);
   }
 
   return renderSections(sections);

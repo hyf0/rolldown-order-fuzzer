@@ -333,6 +333,30 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
       } as typeof module);
     }
   }
+  // Downgrade a LOCAL re-export (`import { s as l } …; export { l as e };`) to the equivalent
+  // source-form named re-export (`export { s as e } from …`). Supply routing is identical, so the
+  // candidate is valid whenever no event read the local binding (reads of it are dropped with the
+  // binding); if the failure needed the LIVE-import form — the camunda mechanism — it vanishes and
+  // the greedy pass keeps the local form, proving it load-bearing.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    for (const [depIndex, dependency] of module.dependencies.entries()) {
+      if (dependency.kind !== "esm-local-reexport") {
+        continue;
+      }
+      const dependencies = module.dependencies.map((candidate, index) =>
+        index === depIndex
+          ? ({
+              kind: "esm-reexport-named",
+              target: dependency.target,
+              sourceName: dependency.sourceName,
+              exportedName: dependency.exportedName,
+            } as const)
+          : candidate,
+      );
+      const events = module.events.map((event) => dropReadsOfBinding(event, dependency.localName));
+      yield editModule(program, moduleIndex, { ...module, dependencies, events } as typeof module);
+    }
+  }
   // Unflag a side-effect-free module (drop its `sideEffects: false` metadata). When the failure does
   // not depend on the flag this simplifies the case; the greedy pass keeps it only if the failure
   // kind is preserved, which also tells whether the metadata is load-bearing for the bug.
@@ -558,9 +582,13 @@ function renameEventReadMember(event: EventRecord, rename: MemberRename): EventR
 }
 
 /// The local read binding a dependency introduces (dropped along with the dependency), or undefined
-/// when it binds nothing readable (side-effect / dynamic import, plain require, re-export).
+/// when it binds nothing readable (side-effect / dynamic import, plain require, source-form re-export).
 function droppedReadBinding(dependency: DependencyOperation): string | undefined {
-  if (dependency.kind === "esm-value-import" || dependency.kind === "esm-namespace-import") {
+  if (
+    dependency.kind === "esm-value-import" ||
+    dependency.kind === "esm-namespace-import" ||
+    dependency.kind === "esm-local-reexport"
+  ) {
     return dependency.localName;
   }
   if (dependency.kind === "cjs-require" && dependency.resultBinding !== undefined) {
