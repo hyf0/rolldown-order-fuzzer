@@ -12,6 +12,7 @@ import type { ProgramModel } from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
+import { fileContents } from "./fixtures.ts";
 
 // A callable-reads-own-state cluster: an inferred-pure definer whose exported function reads a
 // module-scope state var, forwarded through a STAR barrel, and CALLED by two entry consumers (one
@@ -447,17 +448,6 @@ describe("wave-8 generation", () => {
     }
   });
 });
-
-function fileContents(
-  files: readonly { readonly path: string; readonly contents: string }[],
-  path: string,
-): string {
-  const file = files.find((candidate) => candidate.path === path);
-  if (file === undefined) {
-    throw new Error(`Missing rendered file ${JSON.stringify(path)}`);
-  }
-  return file.contents;
-}
 
 async function withRenderedProgram(
   files: readonly { readonly path: string; readonly contents: string }[],

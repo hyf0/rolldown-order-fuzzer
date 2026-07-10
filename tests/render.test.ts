@@ -13,6 +13,7 @@ import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
 import type { ExecutionEvent } from "../src/protocol.ts";
 import { renderProgram } from "../src/render.ts";
+import { fileContents } from "./fixtures.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -1383,17 +1384,6 @@ describe("renderProgram", () => {
     expect(requireAt).toBeLessThan(dynamicAt);
   });
 });
-
-function fileContents(
-  files: readonly { readonly path: string; readonly contents: string }[],
-  path: string,
-): string {
-  const file = files.find((candidate) => candidate.path === path);
-  if (file === undefined) {
-    throw new Error(`Missing rendered file ${JSON.stringify(path)}`);
-  }
-  return file.contents;
-}
 
 async function withRenderedProgram(
   files: readonly { readonly path: string; readonly contents: string }[],

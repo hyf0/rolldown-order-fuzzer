@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
+import { sideEffectFreeTransitiveProgram } from "./fixtures.ts";
 
 describe("validateProgramModel", () => {
   test("accepts a program using every initial model operation", () => {
@@ -139,44 +140,7 @@ describe("validateProgramModel", () => {
   });
 
   test("accepts a side-effect-free transitive value module", () => {
-    const program = {
-      modules: [
-        {
-          id: "entry",
-          format: "esm",
-          dependencies: [
-            {
-              kind: "esm-value-import",
-              target: "flagged",
-              importedName: "w",
-              localName: "flaggedW",
-            },
-          ],
-          events: [
-            { module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "flaggedW" }] },
-          ],
-        },
-        {
-          id: "flagged",
-          format: "esm",
-          sideEffectFree: true,
-          dependencies: [
-            { kind: "esm-value-import", target: "source", importedName: "v", localName: "sourceV" },
-          ],
-          events: [],
-        },
-        {
-          id: "source",
-          format: "esm",
-          dependencies: [],
-          events: [{ module: "source", phase: "evaluate", value: 7 }],
-        },
-      ],
-      entries: [{ name: "main", moduleId: "entry" }],
-      schedule: [{ kind: "import-entry", entry: "main" }],
-    } satisfies ProgramModel;
-
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(sideEffectFreeTransitiveProgram())).toEqual([]);
   });
 
   test("rejects a side-effect-free module that emits events, is CJS, or carries non-value dependencies", () => {

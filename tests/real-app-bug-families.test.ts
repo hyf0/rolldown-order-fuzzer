@@ -13,6 +13,7 @@ import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 import { parseArgs, detectArtifactWrapMode } from "../src/shrink.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
+import { fileContents } from "./fixtures.ts";
 
 // A complete family-A conjunction: an inferred-pure definer (m_def) STAR-re-exported through a barrel
 // (m_bar) that two entries namespace-import, one reading the definer's value and one the sibling's.
@@ -492,17 +493,6 @@ describe("shrinker --wrap-all plumbing", () => {
     }
   });
 });
-
-function fileContents(
-  files: readonly { readonly path: string; readonly contents: string }[],
-  path: string,
-): string {
-  const file = files.find((candidate) => candidate.path === path);
-  if (file === undefined) {
-    throw new Error(`Missing rendered file ${JSON.stringify(path)}`);
-  }
-  return file.contents;
-}
 
 async function withRenderedProgram(
   files: readonly { readonly path: string; readonly contents: string }[],
