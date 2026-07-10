@@ -13,7 +13,7 @@ import type {
   ScheduleOperation,
   ValueRead,
 } from "./model.ts";
-import { readableBindingsOf } from "./model.ts";
+import { programChunking, readableBindingsOf } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
 
@@ -1725,21 +1725,17 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     tags.add("mechanism:overlapping-dependencies");
   }
 
-  const groups = program.manualChunkGroups ?? [];
-  const organicGroups = program.organicChunkGroups ?? [];
-  if (groups.length > 0) {
+  // The per-case chunking-config axis (wave 6), driven by the single `programChunking` matcher.
+  const chunking = programChunking(program);
+  if (chunking.kind === "manual") {
     tags.add("mechanism:manual-chunks");
-  }
-  if (manualGroupsSeparateFormats(groups, modulesById)) {
-    tags.add("mechanism:separate-interop");
-  }
-  // The per-case chunking-config axis (wave 6). Organic groups (rolldown decides composition) take
-  // precedence over manual groups; the two are mutually exclusive by construction.
-  if (organicGroups.length > 0) {
+    tags.add("chunking:explicit");
+    if (manualGroupsSeparateFormats(chunking.groups, modulesById)) {
+      tags.add("mechanism:separate-interop");
+    }
+  } else if (chunking.kind === "organic") {
     tags.add("chunking:organic");
     tags.add("mechanism:organic-chunks");
-  } else if (groups.length > 0) {
-    tags.add("chunking:explicit");
   } else {
     tags.add("chunking:default");
   }

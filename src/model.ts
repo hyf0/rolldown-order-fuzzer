@@ -326,6 +326,30 @@ export interface ProgramModel {
   readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
 }
 
+/// The three mutually-exclusive chunking modes as ONE discriminated union, so tags, artifact identity,
+/// adapter options, and shrinking share a single matcher instead of each re-deriving the mode from two
+/// optional arrays (where an EMPTY array leaks as a fourth, ambiguous state). The persisted
+/// `ProgramModel` still carries the two optional arrays (no schema migration); `programChunking`
+/// projects them onto this union canonically.
+export type Chunking =
+  | { readonly kind: "automatic" }
+  | { readonly kind: "manual"; readonly groups: readonly ManualChunkGroup[] }
+  | { readonly kind: "organic"; readonly groups: readonly OrganicChunkGroupConfig[] };
+
+/// The canonical chunking mode of a program. Organic groups win over manual (mirroring the build
+/// child's precedence), and an EMPTY manual/organic array is `automatic` — the fix for the artifact
+/// identity that recorded `{ groups: [] }` while the build ran automatic chunking. A program with both
+/// arrays is rejected by the validator, so precedence only disambiguates the empty cases.
+export function programChunking(program: ProgramModel): Chunking {
+  if (program.organicChunkGroups !== undefined && program.organicChunkGroups.length > 0) {
+    return { kind: "organic", groups: program.organicChunkGroups };
+  }
+  if (program.manualChunkGroups !== undefined && program.manualChunkGroups.length > 0) {
+    return { kind: "manual", groups: program.manualChunkGroups };
+  }
+  return { kind: "automatic" };
+}
+
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an
 /// ESM value-import contributes its `localName`; an ESM namespace-import contributes one read per
 /// `readMembers` entry (`localName.member`); a CJS readable require contributes its `resultBinding`

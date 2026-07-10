@@ -15,6 +15,7 @@ import {
   type FormatRegime,
   type GeneratedCase,
 } from "./generate.ts";
+import { programChunking } from "./model.ts";
 import { SeededRng } from "./rng.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
@@ -635,18 +636,22 @@ function createFailureArtifactIdentity(
 }
 
 /// The effective `codeSplitting` descriptor a case builds with, recorded in the artifact identity so
-/// a different chunking config (default / explicit / organic) yields a distinct artifact. Mirrors the
-/// child's `createOutputOptions` precedence: organic groups win, then manual groups, then automatic.
+/// a different chunking config (default / explicit / organic) yields a distinct artifact. Driven by
+/// the single `programChunking` matcher, so an EMPTY manual/organic array records `true` (automatic) —
+/// matching what the build child actually does — instead of the old `{ groups: [] }` that made the
+/// recorded identity diverge from the build.
 function effectiveCodeSplitting(
   program: GeneratedCase["program"],
 ): FailureArtifactIdentity["inputs"]["buildOptions"]["codeSplitting"] {
-  if (program.organicChunkGroups !== undefined && program.organicChunkGroups.length > 0) {
-    return { organicGroups: program.organicChunkGroups };
+  const chunking = programChunking(program);
+  switch (chunking.kind) {
+    case "organic":
+      return { organicGroups: chunking.groups };
+    case "manual":
+      return { groups: chunking.groups };
+    default:
+      return true;
   }
-  if (program.manualChunkGroups !== undefined) {
-    return { groups: program.manualChunkGroups };
-  }
-  return true;
 }
 
 function hashPathAndContents(path: string, contents: Uint8Array): string {
