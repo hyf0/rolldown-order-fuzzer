@@ -230,9 +230,17 @@ function localExportsFor(module: ModuleModel, requested: readonly string[]): rea
   return requested.filter((name) => !namedProvided.has(name) && !hasStar);
 }
 
-/// Dependencies render in array order, one statement each, so a multi-kind pair (the same target
-/// imported statically AND dynamically, say) emits several legal statements for one specifier in a
-/// deterministic order — no dedup by specifier.
+/// Dependencies render one statement each — no dedup by specifier, so a multi-kind pair (the same
+/// target imported statically AND dynamically) emits several legal statements for one specifier. The
+/// emission order is deterministic but currently BY CATEGORY, not by dependency-array position: CJS
+/// emits all requires, then all dynamic registrations; ESM emits all static imports, then all
+/// re-exports, then all dynamic registrations. Because generated barrels are re-export-only and a
+/// module never mixes imports with re-exports of overlapping requested-module order, this matches
+/// array order today — but the model permits a module that both imports and re-exports, whose
+/// requested-module evaluation order this category grouping would reorder. Correcting it to a single
+/// ordered requested-module stream is scheduled for the next interop wave (which re-accepts the
+/// corpus); the current category order is PINNED by `render.test.ts` so the change is deliberate. See
+/// `.agents/docs/renderer-dependency-order.md`.
 function renderModule(
   module: ModuleModel,
   modulePaths: ReadonlyMap<string, string>,

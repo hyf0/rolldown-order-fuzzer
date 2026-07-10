@@ -1304,6 +1304,84 @@ describe("renderProgram", () => {
       });
     });
   });
+
+  // Finding 7 (renderer dependency order): PIN the CURRENT category-ordered emission. Dependencies
+  // render by category (ESM: imports, then re-exports, then dynamic registrations; CJS: requires, then
+  // dynamic registrations), NOT by dependency-array position. These cases put a dynamic import FIRST in
+  // the array yet expect the static edge to render FIRST, locking today's behavior so the scheduled
+  // interop-wave correction to a single ordered requested-module stream is deliberate and re-accepted.
+  test("PINS category-ordered dependency emission (ESM: imports before dynamic registrations)", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-dynamic-import", target: "lazy", registration: "r" },
+            { kind: "esm-value-import", target: "val", importedName: "v", localName: "entryV" },
+          ],
+          events: [
+            { module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "entryV" }] },
+          ],
+        },
+        { id: "lazy", format: "esm", dependencies: [], events: [] },
+        {
+          id: "val",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "val", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    const contents = fileContents(renderProgram(program).files, "module-0000.mjs");
+    const importAt = contents.indexOf("import { v as entryV }");
+    const dynamicAt = contents.indexOf("__orderDynamicImports");
+    expect(importAt).toBeGreaterThanOrEqual(0);
+    expect(dynamicAt).toBeGreaterThanOrEqual(0);
+    // The static import renders before the dynamic registration although the dynamic edge is first.
+    expect(importAt).toBeLessThan(dynamicAt);
+  });
+
+  test("PINS category-ordered dependency emission (CJS: requires before dynamic registrations)", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "cjs",
+          dependencies: [
+            { kind: "esm-dynamic-import", target: "lazy", registration: "r" },
+            { kind: "cjs-require", target: "dep", resultBinding: "d", readName: "vdep" },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "d", member: "vdep" }],
+            },
+          ],
+        },
+        { id: "lazy", format: "esm", dependencies: [], events: [] },
+        {
+          id: "dep",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "dep", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    const contents = fileContents(renderProgram(program).files, "module-0000.cjs");
+    const requireAt = contents.indexOf("const d = require(");
+    const dynamicAt = contents.indexOf("__orderDynamicImports");
+    expect(requireAt).toBeGreaterThanOrEqual(0);
+    expect(dynamicAt).toBeGreaterThanOrEqual(0);
+    // The require renders before the dynamic registration although the dynamic edge is first.
+    expect(requireAt).toBeLessThan(dynamicAt);
+  });
 });
 
 function fileContents(
