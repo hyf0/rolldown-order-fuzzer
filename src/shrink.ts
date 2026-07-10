@@ -12,7 +12,12 @@ import type {
   PackageModel,
   ProgramModel,
 } from "./model.ts";
-import { buildConfigOf, legacySideEffectFreePackage, programChunking } from "./model.ts";
+import {
+  buildConfigOf,
+  legacySideEffectFreePackage,
+  normalizeLegacyReads,
+  programChunking,
+} from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -58,7 +63,7 @@ async function main(): Promise<void> {
     `Shrinking under ${onDemandWrapping ? "on-demand" : "wrap-all"} wrapping.\n`,
   );
   const original = canonicalizeLegacyMetadata(
-    JSON.parse(await readFile(options.modelPath, "utf8")) as ProgramModel,
+    normalizeLegacyReads(JSON.parse(await readFile(options.modelPath, "utf8")) as ProgramModel),
   );
   const baseline = await run(original, options);
   if (baseline === undefined) {
@@ -290,18 +295,20 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
       }
       for (let memberIndex = 0; memberIndex < dependency.readMembers.length; memberIndex += 1) {
         const removedMember = dependency.readMembers[memberIndex];
+        const removedKey = (removedMember ?? []).join("\0");
+        const removedDeepest = removedMember?.[removedMember.length - 1];
         const dependencies = module.dependencies.map((candidate, index) =>
           index === depIndex
             ? {
                 ...dependency,
                 readMembers: dependency.readMembers.filter((_, i) => i !== memberIndex),
-                // A callable member (`ns.member()`) must also leave callMembers, else the removed
-                // member lingers in callMembers (which must be a subset of readMembers) and the
+                // A callable member (`ns.….member()`) must also leave callMembers, else the removed
+                // member lingers in callMembers (which must name deepest members of readMembers) and the
                 // candidate fails validation and is silently skipped.
-                ...(dependency.callMembers !== undefined
+                ...(dependency.callMembers !== undefined && removedDeepest !== undefined
                   ? {
                       callMembers: dependency.callMembers.filter(
-                        (member) => member !== removedMember,
+                        (member) => member !== removedDeepest,
                       ),
                     }
                   : {}),
@@ -313,7 +320,11 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
             return event;
           }
           const reads = event.reads.filter(
-            (read) => !(read.binding === dependency.localName && read.member === removedMember),
+            (read) =>
+              !(
+                read.binding === dependency.localName &&
+                (read.memberPath ?? []).join("\0") === removedKey
+              ),
           );
           if (reads.length === event.reads.length) {
             return event;
@@ -560,7 +571,11 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
 
 /// If `dependency` reads a single name from a pure single-re-export barrel, return an equivalent
 /// dependency that reads directly from the barrel's target (collapsing one hop); otherwise undefined.
-/// A named re-export maps the read name to its source; a star re-export forwards the same name.
+/// GENERALIZES over the ENRICHED canonical `RouteHop` (W14c): instead of a named/star-only switch, it
+/// reads the barrel's ONE hop for the demanded name — which carries the module it forwards to
+/// (`target`) and the name demanded there (`importedName`) — so a named, star, OR local re-export
+/// barrel collapses through the same path (the manual switch is deleted; a nested namespace read is not
+/// a single-hop rewire, so it is skipped).
 function rewireReadPastBarrel(
   dependency: DependencyOperation,
   program: ProgramModel,
@@ -568,8 +583,12 @@ function rewireReadPastBarrel(
   let readName: string | undefined;
   if (dependency.kind === "esm-value-import") {
     readName = dependency.importedName;
-  } else if (dependency.kind === "esm-namespace-import" && dependency.readMembers.length === 1) {
-    readName = dependency.readMembers[0];
+  } else if (
+    dependency.kind === "esm-namespace-import" &&
+    dependency.readMembers.length === 1 &&
+    dependency.readMembers[0]?.length === 1
+  ) {
+    readName = dependency.readMembers[0]?.[0];
   } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
     readName = dependency.readName;
   }
@@ -578,40 +597,37 @@ function rewireReadPastBarrel(
   }
 
   const barrel = program.modules.find((module) => module.id === dependency.target);
+  // Only collapse a PURE single-re-export barrel (exactly one dependency), so skipping it leaves the
+  // barrel droppable by a later pass.
   if (barrel === undefined || barrel.dependencies.length !== 1) {
     return undefined;
   }
-  const reexport = barrel.dependencies[0];
-  if (reexport === undefined) {
+  const route = ProgramFacts.from(program.modules).resolveExportRoute(barrel.id, readName);
+  if (route.status !== "supplied" || route.hops.length === 0) {
     return undefined;
   }
-  let target: string;
-  let name: string;
-  if (reexport.kind === "esm-reexport-named" && reexport.exportedName === readName) {
-    target = reexport.target;
-    name = reexport.sourceName;
-  } else if (reexport.kind === "esm-reexport-star") {
-    target = reexport.target;
-    name = readName;
-  } else {
+  const firstHop = route.hops[0];
+  if (firstHop === undefined || firstHop.through !== barrel.id) {
     return undefined;
   }
+  const target = firstHop.target;
+  const name = firstHop.importedName;
 
   if (dependency.kind === "esm-value-import") {
     return { ...dependency, target, importedName: name };
   }
   if (dependency.kind === "esm-namespace-import") {
-    // The read member is renamed (barrel exportedName -> definer sourceName). A callMember (`ns.m()`)
-    // names a read member, so it must be renamed TOGETHER: leaving the old name in callMembers breaks
-    // the callMembers ⊆ readMembers invariant, so the candidate fails validation and is silently skipped.
-    const oldMember = dependency.readMembers[0];
-    const rewired = { ...dependency, target, readMembers: [name] };
+    // The read member is renamed (barrel exportedName -> definer importedName). A callMember (`ns.m()`)
+    // names a read member's deepest name, so it must be renamed TOGETHER: leaving the old name in
+    // callMembers breaks the callMembers ⊆ readMembers invariant and the candidate is silently skipped.
+    const oldDeepest = dependency.readMembers[0]?.[0];
+    const rewired = { ...dependency, target, readMembers: [[name]] };
     if (dependency.callMembers === undefined) {
       return rewired;
     }
     return {
       ...rewired,
-      callMembers: dependency.callMembers.includes(oldMember ?? "") ? [name] : [],
+      callMembers: dependency.callMembers.includes(oldDeepest ?? "") ? [name] : [],
     };
   }
   if (dependency.kind === "cjs-require") {
@@ -649,12 +665,14 @@ function barrelMemberRename(
     after.kind === "esm-namespace-import" &&
     before.readMembers.length === 1 &&
     after.readMembers.length === 1 &&
-    before.readMembers[0] !== after.readMembers[0]
+    before.readMembers[0]?.length === 1 &&
+    after.readMembers[0]?.length === 1 &&
+    before.readMembers[0][0] !== after.readMembers[0][0]
   ) {
     return {
       binding: before.localName,
-      from: before.readMembers[0] as string,
-      to: after.readMembers[0] as string,
+      from: before.readMembers[0][0] as string,
+      to: after.readMembers[0][0] as string,
     };
   }
   if (
@@ -676,9 +694,14 @@ function renameEventReadMember(event: EventRecord, rename: MemberRename): EventR
   }
   let changed = false;
   const reads = event.reads.map((read) => {
-    if (read.binding === rename.binding && read.member === rename.from) {
+    // Only a single-level member read (`ns.from`) is renamed by a single-hop barrel rewire.
+    if (
+      read.binding === rename.binding &&
+      read.memberPath?.length === 1 &&
+      read.memberPath[0] === rename.from
+    ) {
       changed = true;
-      return { ...read, member: rename.to };
+      return { ...read, memberPath: [rename.to] };
     }
     return read;
   });

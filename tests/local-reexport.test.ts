@@ -100,7 +100,15 @@ describe("local re-export (camunda shape, M4)", () => {
     expect(consumption?.supply.status).toBe("supplied");
     if (consumption?.supply.status === "supplied") {
       expect(consumption.supply.origin).toEqual({ moduleId: "def", exportName: "vdef" });
-      expect(consumption.supply.hops).toEqual([{ via: "local", through: "barrel" }]);
+      expect(consumption.supply.hops).toEqual([
+        {
+          via: "local",
+          through: "barrel",
+          target: "def",
+          exportedName: "vx",
+          importedName: "vdef",
+        },
+      ]);
     }
     // The definer synthesizes vdef; the barrel synthesizes nothing (the local re-export provides vx).
     expect(analyzed.plan.requestedNames.get("def")).toEqual(["vdef"]);

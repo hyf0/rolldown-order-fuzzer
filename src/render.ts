@@ -252,6 +252,11 @@ function renderModule(
       );
     } else if (dependency.kind === "esm-reexport-star") {
       dependencyLines.push(`export * from "${specifier}";`);
+    } else if (dependency.kind === "esm-reexport-namespace") {
+      // `export * as ns from "..."` — one named namespace-object export (M7). Emitted directly from
+      // the dependency op (it is not driven by requested names): the demand fixpoint routes a nested
+      // `outer.ns.member` read through it to the target's `member`.
+      dependencyLines.push(`export * as ${dependency.exportedName} from "${specifier}";`);
     } else if (dependency.kind === "esm-local-reexport") {
       usedBindings.add(dependency.localName);
       dependencyLines.push(
@@ -305,16 +310,19 @@ const PARTIAL_READ_SENTINEL = -1;
 const OBJECT_IDENTITY_MISMATCH_SENTINEL = 987_654_321;
 
 function renderRead(read: ValueRead): string {
-  let access: string;
-  if (read.member === undefined) {
-    access = read.binding;
-  } else if (read.computed === true) {
-    // `binding[<runtime key>]` — the member name is built at runtime (a split literal the bundler
-    // cannot fold to `binding.member`), so which export is used stays statically invisible. Same
-    // observed value as `binding.member` (validated to a namespace member).
-    access = `${read.binding}[${computedMemberKey(read.member)}]`;
-  } else {
-    access = `${read.binding}.${read.member}`;
+  // Walk the canonical member path (W14c): `binding.p0.p1.…`. Intermediate hops (a re-exported
+  // namespace navigated to reach the export) stay static; only the DEEPEST access is rendered
+  // COMPUTED when `computed` is set (`…[<runtime key>]` — a split literal the bundler cannot fold to
+  // a static member, so which export is used stays invisible to on-demand liveness). An empty path is
+  // a plain binding read.
+  const path = read.memberPath ?? [];
+  let access = read.binding;
+  for (let index = 0; index < path.length; index += 1) {
+    const member = path[index] ?? "";
+    access =
+      index === path.length - 1 && read.computed === true
+        ? `${access}[${computedMemberKey(member)}]`
+        : `${access}.${member}`;
   }
   // A call read folds a hoisted function's return value; safe to call before the defining module's
   // body has run (function declarations initialize first), so it never hits TDZ across a cycle edge.

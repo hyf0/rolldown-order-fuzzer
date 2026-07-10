@@ -55,6 +55,11 @@ export interface BuildChildOrganicChunkGroup {
   readonly minShareCount?: number;
   readonly priority?: number;
   readonly includeDependenciesRecursively?: boolean;
+  /// `CodeSplittingGroup.entriesAware` / `entriesAwareMergeThreshold` (W14c) — the #9998 cross-entry
+  /// config. When any group sets `entriesAware`, the child also enables `experimental.chunkOptimization`
+  /// (the pairing the issue's verified repro uses).
+  readonly entriesAware?: boolean;
+  readonly entriesAwareMergeThreshold?: number;
 }
 
 export interface BuildChildRequest {
@@ -194,6 +199,19 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
               `build organicChunkGroups[${index}].includeDependenciesRecursively`,
             ),
           }),
+      ...(group.entriesAware === undefined
+        ? {}
+        : {
+            entriesAware: requireBoolean(
+              group.entriesAware,
+              `build organicChunkGroups[${index}].entriesAware`,
+            ),
+          }),
+      ...optionalNonNegativeNumber(
+        group.entriesAwareMergeThreshold,
+        `build organicChunkGroups[${index}].entriesAwareMergeThreshold`,
+        "entriesAwareMergeThreshold",
+      ),
     };
   });
   const output = requireRecord(request.output, "build output");
@@ -318,6 +336,9 @@ export async function runBuildChild(
       experimental: {
         onDemandWrapping: request.onDemandWrapping,
         lazyBarrel: request.lazyBarrel,
+        // The #9998 cross-entry-leak repro pairs entriesAware groups with chunkOptimization; enabled
+        // only when a group asks for it, so every other case's build is unchanged.
+        ...(usesChunkOptimization(request) ? { chunkOptimization: true } : {}),
       },
     };
     bundle = await (loaded.rolldown as RolldownFunction)(inputOptions);
@@ -422,9 +443,20 @@ function organicCodeSplitting(request: BuildChildRequest): { groups: CodeSplitti
       ...(group.includeDependenciesRecursively === undefined
         ? {}
         : { includeDependenciesRecursively: group.includeDependenciesRecursively }),
+      ...(group.entriesAware === undefined ? {} : { entriesAware: group.entriesAware }),
+      ...(group.entriesAwareMergeThreshold === undefined
+        ? {}
+        : { entriesAwareMergeThreshold: group.entriesAwareMergeThreshold }),
     }),
   );
   return { groups };
+}
+
+/// Whether any organic group requests `entriesAware`, which pairs with `experimental.chunkOptimization`
+/// (the verified #9998 repro enables both). Only turned on when a group asks for it, so no other case's
+/// build changes.
+function usesChunkOptimization(request: BuildChildRequest): boolean {
+  return request.organicChunkGroups.some((group) => group.entriesAware === true);
 }
 
 function manualCodeSplitting(request: BuildChildRequest): true | { groups: CodeSplittingGroup[] } {
@@ -575,11 +607,18 @@ function requireBoolean(value: unknown, label: string): boolean {
 
 /// An optional finite non-negative numeric threshold, returned as a spreadable partial so an absent
 /// field stays absent (rolldown then applies its own default).
+type OptionalNumericGroupField =
+  | "minSize"
+  | "maxSize"
+  | "minShareCount"
+  | "priority"
+  | "entriesAwareMergeThreshold";
+
 function optionalNonNegativeNumber(
   value: unknown,
   label: string,
-  key: "minSize" | "maxSize" | "minShareCount" | "priority",
-): Partial<Record<"minSize" | "maxSize" | "minShareCount" | "priority", number>> {
+  key: OptionalNumericGroupField,
+): Partial<Record<OptionalNumericGroupField, number>> {
   if (value === undefined) {
     return {};
   }

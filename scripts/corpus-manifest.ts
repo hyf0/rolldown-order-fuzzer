@@ -146,12 +146,22 @@ function caseKey(group: string, seed: number): string {
   return `${group}:${seed}`;
 }
 
-/// Whether a program carries a W14b-new operation surface: a source-less local re-export (the
-/// camunda M4 op) or declared local exports beside a star (the vben index shape).
+/// Whether a program carries a W14b- or W14c-new operation surface, the labeled golden delta:
+/// - W14b: a source-less local re-export (the camunda M4 op) or declared local exports beside a star
+///   (the vben index shape);
+/// - W14c: an `export * as ns from` namespace re-export (M7), or a NESTED namespace member read
+///   (`readMembers` path of depth ≥ 2 — the canonical member-path surface). The dead-barrel-hop
+///   injector is covered by the `localExports` clause (its mixed barrel declares a local export).
 function carriesNewOperation(program: ProgramModel): boolean {
   return program.modules.some(
     (module) =>
-      module.dependencies.some((dependency) => dependency.kind === "esm-local-reexport") ||
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-local-reexport" ||
+          dependency.kind === "esm-reexport-namespace" ||
+          (dependency.kind === "esm-namespace-import" &&
+            dependency.readMembers.some((path) => path.length >= 2)),
+      ) ||
       (module.format === "esm" && (module.localExports?.length ?? 0) > 0),
   );
 }
@@ -274,9 +284,25 @@ function unexplainedChangeReasons(
   });
   const importsPackageMember = (module: ModuleModel): boolean =>
     module.dependencies.some((dependency) => memberIds.has(dependency.target));
+  // A module carrying a W14b/W14c new operation surface: a source-less local re-export, an
+  // `export * as ns from` namespace re-export, a NESTED namespace member read, or declared localExports.
   const carriesModuleNewOp = (module: ModuleModel): boolean =>
-    module.dependencies.some((dependency) => dependency.kind === "esm-local-reexport") ||
+    module.dependencies.some(
+      (dependency) =>
+        dependency.kind === "esm-local-reexport" ||
+        dependency.kind === "esm-reexport-namespace" ||
+        (dependency.kind === "esm-namespace-import" &&
+          dependency.readMembers.some((path) => path.length >= 2)),
+    ) ||
     (module.format === "esm" && (module.localExports?.length ?? 0) > 0);
+  const modulesByIdLocal = new Map(program.modules.map((module) => [module.id, module]));
+  // An entry whose module IMPORTS a module carrying a new op (the W14c ns-reexport barrel / dead-hop
+  // mixed barrel) is an enrichment entry too — the injector added it alongside that new-op module.
+  const importsNewOpModule = (module: ModuleModel): boolean =>
+    module.dependencies.some((dependency) => {
+      const target = modulesByIdLocal.get(dependency.target);
+      return target !== undefined && carriesModuleNewOp(target);
+    });
   const afterFiles = new Map(after.files.map((file) => [file.path, file.sha256]));
   for (const beforeFile of before.files) {
     const afterHash = afterFiles.get(beforeFile.path);
@@ -299,6 +325,7 @@ function unexplainedChangeReasons(
           entryModule !== undefined &&
           (importsPackageMember(entryModule) ||
             carriesModuleNewOp(entryModule) ||
+            importsNewOpModule(entryModule) ||
             memberIds.has(entryModule.id))
         );
       });

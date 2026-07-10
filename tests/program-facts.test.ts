@@ -93,7 +93,9 @@ describe("resolveExportRoute supply resolution", () => {
     expect(route.status).toBe("supplied");
     if (route.status === "supplied") {
       expect(route.origin).toEqual({ moduleId: "def", exportName: "v" });
-      expect(route.hops).toEqual([{ via: "star", through: "bar" }]);
+      expect(route.hops).toEqual([
+        { via: "star", through: "bar", target: "def", exportedName: "v", importedName: "v" },
+      ]);
     }
   });
 
@@ -113,7 +115,9 @@ describe("resolveExportRoute supply resolution", () => {
     expect(route.status).toBe("supplied");
     if (route.status === "supplied") {
       expect(route.origin).toEqual({ moduleId: "def", exportName: "v" });
-      expect(route.hops).toEqual([{ via: "named", through: "bar" }]);
+      expect(route.hops).toEqual([
+        { via: "named", through: "bar", target: "def", exportedName: "w", importedName: "v" },
+      ]);
     }
   });
 

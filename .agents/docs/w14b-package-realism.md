@@ -250,8 +250,11 @@ shrunken repro committed); the seed-200063 reorder reproduced with retained arti
 root cause tied by ablation (`.agents/evidence/seed-200063-reorder.json`); tag densities as listed
 above (family-A conjunction unchanged at 22.7%).
 
-## Residual gaps (W14c scope — deliberately untouched)
+## Residual gaps — CLOSED in W14c
 
-- Member-path `ValueRead` / canonical `RouteHop` target+name enrichment / dead-hop witnesses.
-- The `export * as ns` operation (M7).
-- The `seo:false` relaxed-order oracle (#9998 isolation).
+All three landed in [w14c-demand-and-flagoff](./w14c-demand-and-flagoff.md):
+
+- Member-path `ValueRead` / canonical `RouteHop` target+name enrichment / dead-hop witnesses. — DONE.
+- The `export * as ns` operation (M7). — DONE.
+- The `seo:false` relaxed-order oracle (#9998 isolation) — the wave's live catch (RED on both npm
+  1.1.5 and the final snapshot). — DONE.

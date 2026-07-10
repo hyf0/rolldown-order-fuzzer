@@ -1,0 +1,113 @@
+{
+  "proof": "W14c 6-cell seo:true reacceptance vs the frozen buggy snapshot",
+  "generatedAt": "2026-07-10T23:32:31.853Z",
+  "head": "f0b15b4e1ddfe5caa987e6bf1289d4fa05745fc8",
+  "dirty": true,
+  "node": "v24.18.0",
+  "casesPerCell": 300,
+  "snapshot": {
+    "path": "/tmp/rolldown-strict-order-study/pr10104-runtime-snapshot/rolldown/dist/index.mjs",
+    "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+  },
+  "knownReasons": ["bundle-only-crash", "events-reordered"],
+  "accepted": true,
+  "cells": [
+    {
+      "name": "mixed-od",
+      "regime": "mixed",
+      "onDemandWrapping": true,
+      "cases": 300,
+      "red": 74,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 68,
+        "events-reordered:source=[[\"psib10\",\"evaluate\",926258],[\"psib10\",\"evaluate-1\",968572],[\"pconsA10\",\"evaluate\",1508783],[\"@schedule\",5,\"entry\"],[\"@schedule\",6,\"dynamic\"]]": 1,
+        "events-reordered:source=[[\"psib7\",\"evaluate\",265365],[\"psib7\",\"evaluate-1\",393955],[\"pconsA7\",\"evaluate\",1552463],[\"pconsA7\",\"evaluate-1\",847299],[\"@schedule\",0,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib20\",\"evaluate\",430988],[\"pconsA20\",\"evaluate\",1164864],[\"@schedule\",5,\"entry\"],[\"m7\",\"evaluate\",1695653],[\"m7\",\"evaluate-1\",362144],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"],[\"@schedule\",9,\"dynamic\"],[\"@schedule\",10,\"dynamic\"],[\"@schedule\",11,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib19\",\"evaluate\",356875],[\"psib19\",\"evaluate-1\",671647],[\"pconsA19\",\"evaluate\",1435545],[\"pconsA19\",\"evaluate-1\",506822],[\"@schedule\",15,\"entry\"],[\"coscA24\",\"evaluate\",1658579],[\"@schedule\",16,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib9\",\"evaluate\",254489],[\"pconsA9\",\"evaluate\",131657],[\"pconsA9\",\"evaluate-1\",1282417],[\"@schedule\",0,\"entry\"],[\"cos15\",\"evaluate\",253083],[\"cossib15\",\"evaluate\",581015],[\"cossib15\",\"evaluate-1\",20263],[\"coscB15\",\"evaluate\",804215],[\"@schedule\",1,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1
+      },
+      "reasonHistogram": {
+        "bundle-only-crash": 68,
+        "events-reordered": 6
+      },
+      "unknownReasons": []
+    },
+    {
+      "name": "mixed-wa",
+      "regime": "mixed",
+      "onDemandWrapping": false,
+      "cases": 300,
+      "red": 63,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 55,
+        "events-reordered:source=[[\"psib10\",\"evaluate\",26813],[\"psib10\",\"evaluate-1\",15256],[\"pconsA10\",\"evaluate\",1332984],[\"@schedule\",1,\"entry\"],[\"m2\",\"evaluate\",770334],[\"m4\",\"evaluate\",383358],[\"m9\",\"evaluate\",667370],[\"m9\",\"evaluate-1\",734496],[\"m8\",\"evaluate\",1214522],[\"m7\",\"evaluate\",634263],[\"m5\",\"evaluate\",1206747],[\"m5\",\"evaluate-1\",1559255],[\"m3\",\"evaluate\",1224494],[\"m3\",\"evaluate-1\",565639],[\"m6\",\"evaluate\",947528],[\"m1\",\"evaluate\",836786],[\"m1\",\"evaluate-1\",2289349],[\"@schedule\",2,\"dynamic\"],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"]]": 1,
+        "events-reordered:source=[[\"psib10\",\"evaluate\",926258],[\"psib10\",\"evaluate-1\",968572],[\"pconsA10\",\"evaluate\",1508783],[\"@schedule\",5,\"entry\"],[\"@schedule\",6,\"dynamic\"]]": 1,
+        "events-reordered:source=[[\"psib7\",\"evaluate\",265365],[\"psib7\",\"evaluate-1\",393955],[\"pconsA7\",\"evaluate\",1552463],[\"pconsA7\",\"evaluate-1\",847299],[\"@schedule\",0,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib20\",\"evaluate\",430988],[\"pconsA20\",\"evaluate\",1164864],[\"@schedule\",5,\"entry\"],[\"m7\",\"evaluate\",1695653],[\"m7\",\"evaluate-1\",362144],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"],[\"@schedule\",9,\"dynamic\"],[\"@schedule\",10,\"dynamic\"],[\"@schedule\",11,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib3\",\"evaluate\",82124],[\"psib3\",\"evaluate-1\",929785],[\"pconsA3\",\"evaluate\",981042],[\"pconsA3\",\"evaluate-1\",967776],[\"@schedule\",1,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib19\",\"evaluate\",356875],[\"psib19\",\"evaluate-1\",671647],[\"pconsA19\",\"evaluate\",1435545],[\"pconsA19\",\"evaluate-1\",506822],[\"@schedule\",15,\"entry\"],[\"coscA24\",\"evaluate\",1658579],[\"@schedule\",16,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib9\",\"evaluate\",254489],[\"pconsA9\",\"evaluate\",131657],[\"pconsA9\",\"evaluate-1\",1282417],[\"@schedule\",0,\"entry\"],[\"cos15\",\"evaluate\",253083],[\"cossib15\",\"evaluate\",581015],[\"cossib15\",\"evaluate-1\",20263],[\"coscB15\",\"evaluate\",804215],[\"@schedule\",1,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1
+      },
+      "reasonHistogram": {
+        "bundle-only-crash": 55,
+        "events-reordered": 8
+      },
+      "unknownReasons": []
+    },
+    {
+      "name": "pure-esm-od",
+      "regime": "pure-esm",
+      "onDemandWrapping": true,
+      "cases": 300,
+      "red": 75,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 74,
+        "events-reordered:source=[[\"psib7\",\"evaluate\",616422],[\"pconsA7\",\"evaluate\",879200],[\"pconsA7\",\"evaluate-1\",845082],[\"@schedule\",1,\"entry\"],[\"m1\",\"evaluate\",652010],[\"m3\",\"evaluate\",122694],[\"m0\",\"evaluate\",741579],[\"@schedule\",2,\"entry\"],[\"m2\",\"evaluate\",405637],[\"m2\",\"evaluate-1\",169801],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"entry\"],[\"@schedule\",7,\"entry\"]]": 1
+      },
+      "reasonHistogram": {
+        "bundle-only-crash": 74,
+        "events-reordered": 1
+      },
+      "unknownReasons": []
+    },
+    {
+      "name": "pure-esm-wa",
+      "regime": "pure-esm",
+      "onDemandWrapping": false,
+      "cases": 300,
+      "red": 58,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 56,
+        "events-reordered:source=[[\"psib15\",\"evaluate\",106713],[\"psib15\",\"evaluate-1\",874962],[\"pconsA15\",\"evaluate\",945978],[\"pconsA15\",\"evaluate-1\",1150279],[\"@schedule\",0,\"entry\"]]": 1,
+        "events-reordered:source=[[\"psib7\",\"evaluate\",616422],[\"pconsA7\",\"evaluate\",879200],[\"pconsA7\",\"evaluate-1\",845082],[\"@schedule\",1,\"entry\"],[\"m1\",\"evaluate\",652010],[\"m3\",\"evaluate\",122694],[\"m0\",\"evaluate\",741579],[\"@schedule\",2,\"entry\"],[\"m2\",\"evaluate\",405637],[\"m2\",\"evaluate-1\",169801],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"entry\"],[\"@schedule\",7,\"entry\"]]": 1
+      },
+      "reasonHistogram": {
+        "bundle-only-crash": 56,
+        "events-reordered": 2
+      },
+      "unknownReasons": []
+    },
+    {
+      "name": "pure-cjs-od",
+      "regime": "pure-cjs",
+      "onDemandWrapping": true,
+      "cases": 300,
+      "red": 0,
+      "signatureHistogram": {},
+      "reasonHistogram": {},
+      "unknownReasons": []
+    },
+    {
+      "name": "pure-cjs-wa",
+      "regime": "pure-cjs",
+      "onDemandWrapping": false,
+      "cases": 300,
+      "red": 0,
+      "signatureHistogram": {},
+      "reasonHistogram": {},
+      "unknownReasons": []
+    }
+  ]
+}

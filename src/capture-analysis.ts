@@ -21,6 +21,6 @@ export function canonicalReadFlags(
   return flags;
 }
 
-export function readKey(read: Pick<ValueRead, "binding" | "member">): string {
-  return `${read.binding}\0${read.member ?? ""}`;
+export function readKey(read: Pick<ValueRead, "binding" | "memberPath">): string {
+  return `${read.binding}\0${(read.memberPath ?? []).join("\0")}`;
 }

@@ -83,6 +83,27 @@
         "greenAtOrAbove": "1.1.5",
         "miningDocRef": "section 4 RED-3"
       }
+    },
+    {
+      "id": "RED-9998",
+      "issue": 9998,
+      "cluster": "chunking — manual codeSplitting cross-entry execution leak (seo:false)",
+      "title": "cross-entry execution leak without strictExecutionOrder",
+      "form": "generator",
+      "generator": "generateCrossEntryLeakCase",
+      "seed": 0,
+      "onDemandWrapping": true,
+      "redTarget": { "kind": "npm", "version": "1.1.5" },
+      "greenTarget": { "kind": "snapshot" },
+      "bracketPending": true,
+      "expectedRedSignature": "reachability-isolation:[le-a]",
+      "provenance": {
+        "fixPr": "OPEN — no fix released; #9997 fixed only the strictExecutionOrder:true path, the seo:false leak is still open",
+        "fixCommit": "none — bracket-pending: the bug is RED on BOTH npm 1.1.5 AND the final-snapshot-42628c18b (open everywhere at seo:false), so there is no green target yet; the entry graduates to a normal bracket when a fix lands and the green target flips",
+        "redBelow": "1.1.5 and final-snapshot-42628c18b (both red at seo:false)",
+        "greenAtOrAbove": "none yet (bracket-pending)",
+        "note": "The fuzzer-model translation of the issue's verified repro (buildCrossEntryLeakCase, src/generate.ts), caught by the reachability-isolation oracle the persisted seo:false axis selects. Live-catch acceptance: scripts/cross-entry-leak-catch.ts + .agents/evidence/9998-cross-entry-leak.json."
+      }
     }
   ]
 }

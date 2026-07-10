@@ -106,17 +106,25 @@ describe("parseManifest", () => {
     expect(() => parseManifest(manifest)).toThrow(/duplicate entry id "RED-0"/);
   });
 
-  test("parses the committed regression/index.json and pins its four brackets", () => {
+  test("parses the committed regression/index.json and pins its brackets", () => {
     const raw = JSON.parse(
       readFileSync(resolve(REPO_ROOT, "regression/index.json"), "utf8"),
     ) as unknown;
     const manifest: RedsetManifest = parseManifest(raw);
     const ids = manifest.entries.map((entry) => entry.id).sort();
-    expect(ids).toEqual(["RED-0", "RED-1", "RED-2", "RED-3"]);
-    // Exactly one generator-form bracket (RED-0), three raw brackets.
-    expect(manifest.entries.filter((entry) => entry.form === "generator").map((e) => e.id)).toEqual(
-      ["RED-0"],
-    );
+    // RED-0..RED-3 (the four fix-history brackets) plus RED-9998 (the W14c bracket-PENDING #9998 catch).
+    expect(ids).toEqual(["RED-0", "RED-1", "RED-2", "RED-3", "RED-9998"]);
+    // Two generator-form brackets (RED-0, RED-9998); the other three are raw.
+    expect(
+      manifest.entries
+        .filter((entry) => entry.form === "generator")
+        .map((e) => e.id)
+        .sort(),
+    ).toEqual(["RED-0", "RED-9998"]);
+    // RED-9998 is the only bracket-pending entry (bug open on both targets, no green yet).
+    expect(
+      manifest.entries.filter((entry) => entry.bracketPending === true).map((e) => e.id),
+    ).toEqual(["RED-9998"]);
     // Every expected red signature is already in its normalized form (idempotent under normalize).
     for (const entry of manifest.entries) {
       expect(normalizeSignature(entry.expectedRedSignature)).toBe(entry.expectedRedSignature);

@@ -112,15 +112,21 @@ export const INVALID_MODULE_BINDING_IDENTIFIERS = new Set([
 const RENDERER_RESERVED_BINDING_IDENTIFIERS = new Set(["globalThis"]);
 
 /// How a local binding may be read by an event's `reads`: an ESM value import is read directly (no
-/// member), a CJS readable require reads exactly one member, an ESM namespace import reads any of a
-/// declared member set (`localName.member`).
+/// member), a CJS readable require reads exactly one member (a length-1 `memberPath`), an ESM namespace
+/// import reads any of a declared set of member PATHS (`localName.p0.p1…`, keyed by `memberPathKey`).
 type ReadableBinding =
   | { readonly kind: "direct" }
   | { readonly kind: "require"; readonly member: string }
-  | { readonly kind: "namespace"; readonly members: ReadonlySet<string> }
+  | { readonly kind: "namespace"; readonly memberPaths: ReadonlySet<string> }
   // An `objectRef` value import: an object reference, never a folded number. It may only be referenced
   // by an event's `identityCheck`, never a numeric read.
   | { readonly kind: "object" };
+
+/// The canonical key for a read's member path (the same join `readKey` uses), so the namespace binding's
+/// declared paths and an event read's path compare identically.
+function memberPathKey(memberPath: readonly string[] | undefined): string {
+  return (memberPath ?? []).join("\0");
+}
 
 export function validateProgramModel(analyzed: AnalyzedProgram): readonly string[] {
   const errors: string[] = [];
@@ -156,8 +162,78 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
   validatePackages(program, modulesById, errors);
   validateManualChunkGroups(program, modulesById, errors);
   validateOrganicChunkGroups(program, errors);
+  validateDeadHopContract(program, modulesById, plan, errors);
 
   return errors;
+}
+
+/// The DEAD-barrel-hop LEGALITY CONTRACT (M5, W14c). A MIXED barrel — a module with a DECLARED local
+/// export (`localExports`) beside an `export * from target` — can be consumed by an importer that reads
+/// ONLY the local export, leaving the star hop DEAD for that importer: the bundle legally TREE-SHAKES
+/// the star target for it, while SOURCE ESM still evaluates the re-export target (ESM evaluates all
+/// static imports). If the star target carried EVENTS, that source-vs-bundle divergence (source runs
+/// the target, the bundle drops it) would FALSE-POSITIVE the standard event oracle on a LEGAL
+/// tree-shake. So a dead-hop target MUST be event-free — the divergence is then unobservable in events
+/// and the witness is the object-identity side only.
+///
+/// The check is PER-CONSUMPTION over the ONE plan (no new route walk, W14b.1): the star hop is DEAD for
+/// an importer only when that importer routes NO live consumption THROUGH the barrel's star (the
+/// enriched `RouteHop` records `via:"star"` + `through`). A barrel whose sole importer DOES read a
+/// star-forwarded value (the vben `index.js` shape) keeps its star hop LIVE for that importer, so an
+/// eventful target there is not a dead hop and is accepted. Only when an importer imports the barrel yet
+/// skips the star does an eventful target become the illegal shape.
+function validateDeadHopContract(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  plan: ExportDemandPlan,
+  errors: string[],
+): void {
+  // Per barrel id, the set of consumer modules that route a live consumption through THIS barrel's star
+  // hop (so the star is live for them). Read from the plan's enriched route hops — no new walk.
+  const starUsersByBarrel = new Map<string, Set<string>>();
+  for (const consumption of plan.consumptions) {
+    if (consumption.purpose !== "live" || consumption.supply.status !== "supplied") {
+      continue;
+    }
+    for (const hop of consumption.supply.hops) {
+      if (hop.via === "star") {
+        const users = starUsersByBarrel.get(hop.through) ?? new Set<string>();
+        users.add(consumption.consumerModuleId);
+        starUsersByBarrel.set(hop.through, users);
+      }
+    }
+  }
+
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.format !== "esm" || (module.localExports?.length ?? 0) === 0) {
+      continue;
+    }
+    const starUsers = starUsersByBarrel.get(module.id) ?? new Set<string>();
+    // Every module that imports this barrel (any dependency targeting it).
+    const importers = program.modules.filter((candidate) =>
+      candidate.dependencies.some((dependency) => dependency.target === module.id),
+    );
+    // An importer that imports the barrel but routes NO live consumption through its star skips the
+    // star — the star hop is DEAD for it.
+    const someImporterSkipsStar = importers.some((importer) => !starUsers.has(importer.id));
+    if (!someImporterSkipsStar) {
+      continue;
+    }
+    for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
+      if (dependency.kind !== "esm-reexport-star") {
+        continue;
+      }
+      const target = modulesById.get(dependency.target);
+      if (target !== undefined && target.events.length > 0) {
+        errors.push(
+          `modules[${moduleIndex}].dependencies[${dependencyIndex}]: a mixed barrel's ` +
+            `\`export * from ${quote(dependency.target)}\` is a DEAD hop for an importer that reads only ` +
+            `the barrel's local export, so its target must be event-free; ${quote(dependency.target)} ` +
+            `carries ${String(target.events.length)} event(s)`,
+        );
+      }
+    }
+  }
 }
 
 /// The package/layout model (W14b, schema 18). Beyond well-formedness (unique npm-safe names,
@@ -449,6 +525,15 @@ function validateCycleValueFlow(
             `${path}: an ESM local re-export cannot close a cycle; its imported binding would hit TDZ`,
           );
         }
+      } else if (dependency.kind === "esm-reexport-namespace") {
+        // `export * as ns from target` materializes the target's namespace object; a downstream
+        // `outer.ns.member` read would hit TDZ across a cycle-closing edge exactly like a namespace
+        // import, so it stays forward-only.
+        if (closesCycle) {
+          errors.push(
+            `${path}: an ESM namespace re-export cannot close a cycle; a member read through it would hit TDZ`,
+          );
+        }
       } else if (
         dependency.kind === "cjs-require" &&
         dependency.resultBinding !== undefined &&
@@ -542,10 +627,14 @@ function validateModules(
       validateDependencyBinding(operation, path, localBindings, readableBindings, errors);
       validatePairSlot(operation, path, pairSlots, errors);
 
-      if (operation.kind === "esm-reexport-named" || operation.kind === "esm-local-reexport") {
-        // Named and LOCAL re-exports share one per-module exported-name space: ESM permits one
-        // binding per exported name, so a second `export { … as X }` of either form is a Node
-        // SyntaxError (Duplicate export of 'X').
+      if (
+        operation.kind === "esm-reexport-named" ||
+        operation.kind === "esm-local-reexport" ||
+        operation.kind === "esm-reexport-namespace"
+      ) {
+        // Named, LOCAL, and NAMESPACE re-exports share one per-module exported-name space: ESM permits
+        // one binding per exported name, so a second `export { … as X }` / `export * as X from` of any
+        // form is a Node SyntaxError (Duplicate export of 'X').
         if (explicitReexportNames.has(operation.exportedName)) {
           errors.push(
             `${path}.exportedName: duplicate named re-export of ${quote(operation.exportedName)}; a module may export a name at most once (Node: Duplicate export)`,
@@ -685,6 +774,7 @@ const SIDE_EFFECT_FREE_DEPENDENCY_KINDS = new Set([
   "esm-namespace-import",
   "esm-reexport-named",
   "esm-reexport-star",
+  "esm-reexport-namespace",
   "esm-local-reexport",
 ]);
 
@@ -883,9 +973,10 @@ function validateEventReads(
       continue;
     }
     if (binding.kind === "namespace") {
-      if (read.member === undefined || !binding.members.has(read.member)) {
+      const key = memberPathKey(read.memberPath);
+      if ((read.memberPath?.length ?? 0) === 0 || !binding.memberPaths.has(key)) {
         errors.push(
-          `${readPath}.member: expected a namespace member for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
+          `${readPath}.memberPath: expected a declared namespace member path for binding ${quote(read.binding)}, received ${(read.memberPath?.length ?? 0) === 0 ? "no member" : quote((read.memberPath ?? []).join("."))}`,
         );
       } else {
         validateReadCapability(read, readPath, readFlags, errors);
@@ -899,10 +990,10 @@ function validateEventReads(
         `${readPath}.computed: a computed member read is only valid on a namespace import binding, ${quote(read.binding)} is a ${binding.kind} binding`,
       );
     }
-    const expectedMember = binding.kind === "require" ? binding.member : undefined;
-    if (read.member !== expectedMember) {
+    const expectedPath = binding.kind === "require" ? [binding.member] : [];
+    if (memberPathKey(read.memberPath) !== memberPathKey(expectedPath)) {
       errors.push(
-        `${readPath}.member: expected ${expectedMember === undefined ? "no member" : quote(expectedMember)} for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
+        `${readPath}.memberPath: expected ${expectedPath.length === 0 ? "no member" : quote(expectedPath.join("."))} for binding ${quote(read.binding)}, received ${(read.memberPath?.length ?? 0) === 0 ? "no member" : quote((read.memberPath ?? []).join("."))}`,
       );
     } else {
       validateReadCapability(read, readPath, readFlags, errors);
@@ -925,14 +1016,15 @@ function validateReadCapability(
   if (canonical === undefined) {
     return;
   }
+  const memberSuffix = (read.memberPath ?? []).map((member) => `.${member}`).join("");
   if ((read.call === true) !== canonical.call) {
     errors.push(
-      `${readPath}.call: read of ${quote(read.binding)}${read.member === undefined ? "" : `.${read.member}`} must ${canonical.call ? "be a call (call: true)" : "not be a call"} to match its binding's capability`,
+      `${readPath}.call: read of ${quote(read.binding)}${memberSuffix} must ${canonical.call ? "be a call (call: true)" : "not be a call"} to match its binding's capability`,
     );
   }
   if ((read.guard === true) !== canonical.guard) {
     errors.push(
-      `${readPath}.guard: read of ${quote(read.binding)}${read.member === undefined ? "" : `.${read.member}`} must ${canonical.guard ? "be guarded (guard: true)" : "not be guarded"} to match its binding's capability`,
+      `${readPath}.guard: read of ${quote(read.binding)}${memberSuffix} must ${canonical.guard ? "be guarded (guard: true)" : "not be guarded"} to match its binding's capability`,
     );
   }
 }
@@ -965,26 +1057,38 @@ function validateDependencyBinding(
   }
 
   if (dependency.kind === "esm-namespace-import") {
-    for (const [memberIndex, member] of dependency.readMembers.entries()) {
-      if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(member)) {
-        errors.push(
-          `${path}.readMembers[${memberIndex}]: invalid JavaScript identifier ${quote(member)}`,
-        );
+    // Each read member is a PATH `localName.p0.p1…` (W14c); every component must be a valid identifier,
+    // and a length-≥2 path is a nested read through a re-exported namespace.
+    const deepestMembers = new Set<string>();
+    for (const [memberIndex, memberPath] of dependency.readMembers.entries()) {
+      if (memberPath.length === 0) {
+        errors.push(`${path}.readMembers[${memberIndex}]: a member path must be non-empty`);
+        continue;
+      }
+      for (const [componentIndex, component] of memberPath.entries()) {
+        if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(component)) {
+          errors.push(
+            `${path}.readMembers[${memberIndex}][${componentIndex}]: invalid JavaScript identifier ${quote(component)}`,
+          );
+        }
+      }
+      const deepest = memberPath[memberPath.length - 1];
+      if (deepest !== undefined) {
+        deepestMembers.add(deepest);
       }
     }
-    // A call member (`ns.member()`) must name a member the namespace actually reads.
-    const readMemberSet = new Set(dependency.readMembers);
+    // A call member (`ns.….member()`) must name the DEEPEST member of some read path.
     for (const [callIndex, callMember] of (dependency.callMembers ?? []).entries()) {
-      if (!readMemberSet.has(callMember)) {
+      if (!deepestMembers.has(callMember)) {
         errors.push(
-          `${path}.callMembers[${callIndex}]: ${quote(callMember)} must be one of readMembers`,
+          `${path}.callMembers[${callIndex}]: ${quote(callMember)} must be the deepest member of a readMembers path`,
         );
       }
     }
     if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
       readableBindings.set(dependency.localName, {
         kind: "namespace",
-        members: new Set(dependency.readMembers),
+        memberPaths: new Set(dependency.readMembers.map((memberPath) => memberPathKey(memberPath))),
       });
     }
     return;
@@ -1020,6 +1124,18 @@ function validateDependencyBinding(
     }
     if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
       readableBindings.set(dependency.localName, { kind: "direct" });
+    }
+    return;
+  }
+
+  if (dependency.kind === "esm-reexport-namespace") {
+    // `export * as ns from target` binds nothing locally — it synthesizes ONE named namespace-object
+    // export. Only its exported name is validated (the duplicate-export-name space is shared with the
+    // other re-export forms in `validateModules`).
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(dependency.exportedName)) {
+      errors.push(
+        `${path}.exportedName: invalid JavaScript identifier ${quote(dependency.exportedName)}`,
+      );
     }
     return;
   }
@@ -1236,21 +1352,19 @@ function validateSchedule(
   }
 }
 
-/// The persisted BuildConfig axes (W14a). `strictExecutionOrder` must be `true` in W14a: every generated
-/// case keeps strict order, and a hand-crafted `seo:false` model is REJECTED here (the full-order oracle
-/// would false-positive on the accepted relaxed-order divergences a `seo:false` cell exhibits — that cell
-/// needs the weaker order oracle that lands in W14c, so `seo:false` is unrepresentable until then).
-/// `preserveEntrySignatures` must be one of rolldown's accepted values; the two rolled boolean axes must
-/// be booleans. Legacy (schema-16) models carry no `build` and resolve to defaults, so they pass.
+/// The persisted BuildConfig axes. `strictExecutionOrder` is a ROLLABLE boolean axis as of W14c: a
+/// `seo:false` case is now REPRESENTABLE, tied to the reachability-isolation oracle in `program-run.ts`
+/// (`executeProgram` derives the order oracle from THIS axis, so a `seo:false` case never uses the
+/// full-order oracle that would false-positive on legal relaxed-order divergences). `preserveEntrySignatures`
+/// must be one of rolldown's accepted values; the rolled boolean axes must be booleans. Legacy
+/// (schema-16) models carry no `build` and resolve to defaults, so they pass.
 function validateBuildConfig(program: ProgramModel, errors: string[]): void {
   const build = program.build;
   if (build === undefined) {
     return;
   }
-  if (build.strictExecutionOrder !== true) {
-    errors.push(
-      `build.strictExecutionOrder: must be true (a seo:false case needs the W14c relaxed-order oracle), received ${String(build.strictExecutionOrder)}`,
-    );
+  if (typeof build.strictExecutionOrder !== "boolean") {
+    errors.push("build.strictExecutionOrder: must be a boolean");
   }
   if (!VALID_PRESERVE_ENTRY_SIGNATURES.has(build.preserveEntrySignatures)) {
     errors.push(
@@ -1348,7 +1462,13 @@ function validateOrganicChunkGroups(program: ProgramModel, errors: string[]): vo
       }
     }
 
-    for (const field of ["minSize", "maxSize", "minShareCount", "priority"] as const) {
+    for (const field of [
+      "minSize",
+      "maxSize",
+      "minShareCount",
+      "priority",
+      "entriesAwareMergeThreshold",
+    ] as const) {
       const value = group[field];
       if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
         errors.push(`${path}.${field}: must be a finite non-negative number`);
@@ -1356,6 +1476,9 @@ function validateOrganicChunkGroups(program: ProgramModel, errors: string[]): vo
     }
     if (group.minShareCount !== undefined && !Number.isInteger(group.minShareCount)) {
       errors.push(`${path}.minShareCount: must be an integer`);
+    }
+    if (group.entriesAware !== undefined && typeof group.entriesAware !== "boolean") {
+      errors.push(`${path}.entriesAware: must be a boolean`);
     }
   }
 }

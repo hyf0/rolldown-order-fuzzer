@@ -53,7 +53,7 @@ function callableOwnStateProgram(inferredPure: boolean): ProgramModel {
             module: "e1",
             phase: "evaluate",
             value: 100,
-            reads: [{ binding: "ns1", member: "vdef", call: true }],
+            reads: [{ binding: "ns1", memberPath: ["vdef"], call: true }],
           },
         ],
         dependencies: [
@@ -61,7 +61,7 @@ function callableOwnStateProgram(inferredPure: boolean): ProgramModel {
             kind: "esm-namespace-import",
             target: "bar",
             localName: "ns1",
-            readMembers: ["vdef"],
+            readMembers: [["vdef"]],
             callMembers: ["vdef"],
           },
         ],
@@ -74,7 +74,7 @@ function callableOwnStateProgram(inferredPure: boolean): ProgramModel {
             module: "e2",
             phase: "evaluate",
             value: 200,
-            reads: [{ binding: "ns2", member: "vdef", call: true }],
+            reads: [{ binding: "ns2", memberPath: ["vdef"], call: true }],
             hiddenReadFn: true,
           },
         ],
@@ -83,7 +83,7 @@ function callableOwnStateProgram(inferredPure: boolean): ProgramModel {
             kind: "esm-namespace-import",
             target: "bar",
             localName: "ns2",
-            readMembers: ["vdef"],
+            readMembers: [["vdef"]],
             callMembers: ["vdef"],
           },
         ],
@@ -366,7 +366,7 @@ describe("wave-8 model validation", () => {
               phase: "evaluate",
               value: 1,
               identityCheck: { leftBinding: "x", rightBinding: "x" },
-              reads: [{ binding: "ns", member: "vdef" }],
+              reads: [{ binding: "ns", memberPath: ["vdef"] }],
             },
           ],
           dependencies: [
@@ -374,7 +374,7 @@ describe("wave-8 model validation", () => {
               kind: "esm-namespace-import",
               target: "def",
               localName: "ns",
-              readMembers: ["vdef"],
+              readMembers: [["vdef"]],
               callMembers: ["notARead"],
             },
           ],
@@ -386,7 +386,9 @@ describe("wave-8 model validation", () => {
     const errors = validateProgramModel(analyzeProgram(invalid));
     expect(
       errors.some(
-        (error) => error.includes("callMembers") && error.includes("must be one of readMembers"),
+        (error) =>
+          error.includes("callMembers") &&
+          error.includes("must be the deepest member of a readMembers path"),
       ),
     ).toBe(true);
     expect(errors).toContain(

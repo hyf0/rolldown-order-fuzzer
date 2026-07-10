@@ -16,13 +16,20 @@ export interface ModuleLike {
 }
 
 /// The export names a module's re-exports PROVIDE by FORWARDING (never by its own star): a named
-/// re-export's `exportedName` (`export { s as e } from`) and a LOCAL re-export's `exportedName`
-/// (`import { s as l } from …; export { l as e };`). Demand for one of these resolves at the
-/// re-export target, so a star re-export on the same module is never walked for it.
+/// re-export's `exportedName` (`export { s as e } from`), a LOCAL re-export's `exportedName`
+/// (`import { s as l } from …; export { l as e };`), and a NAMESPACE re-export's `exportedName`
+/// (`export * as ns from …` — W14c, which synthesizes ONE named namespace-object export). Demand for
+/// one of these resolves at (or, for a namespace re-export, materializes from) the re-export target, so
+/// a star re-export on the same module is never walked for it. This is the ONE place the
+/// `export * as ns` name provision lives (W14b.1 blocker 4: one name-providing surface, edited once).
 export function providedExportNames(module: ModuleLike): ReadonlySet<string> {
   const provided = new Set<string>();
   for (const dependency of module.dependencies) {
-    if (dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport") {
+    if (
+      dependency.kind === "esm-reexport-named" ||
+      dependency.kind === "esm-local-reexport" ||
+      dependency.kind === "esm-reexport-namespace"
+    ) {
       provided.add(dependency.exportedName);
     }
   }
@@ -73,10 +80,19 @@ export interface ExportOrigin {
 
 /// One re-export hop a demanded name travels through on its way to a definer: a named re-export
 /// (`export { s as e } from`), a star re-export (`export * from`), or a LOCAL re-export
-/// (`import { s as l } from …; export { l as e };`), and the barrel module doing it.
+/// (`import { s as l } from …; export { l as e };`). Each hop carries the barrel doing it (`through`),
+/// the module it routes TO (`target`), the name exposed on `through` (`exportedName`), and the name
+/// demanded on `target` (`importedName`) — the ENRICHMENT (W14c) that lets `shrink.rewireReadPastBarrel`
+/// skip ANY hop uniformly (rewire a read to `target` under `importedName`) instead of a named/star-only
+/// switch, and lets the plan's route provenance and the family-A tag / validator capability walks read
+/// the hop directly. For a star hop `exportedName === importedName` (a star forwards a name unchanged);
+/// for a named/local hop `importedName` is the source name, `exportedName` the re-exported name.
 export interface RouteHop {
   readonly via: "named" | "star" | "local";
   readonly through: string;
+  readonly target: string;
+  readonly exportedName: string;
+  readonly importedName: string;
 }
 
 /// The SUPPLY resolution of a demanded `(module, exportName)` — the supply-aware sibling of
@@ -116,6 +132,17 @@ function syncTargetsOf(module: ModuleLike | undefined): string[] {
   return module.dependencies.flatMap((dependency) =>
     dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
   );
+}
+
+/// Every dependency target of a module — static AND dynamic. Used for the reachability-isolation
+/// oracle (`reachableAllFrom`): a module a dynamic import can reach IS legally reachable from an entry,
+/// so it may execute when that entry loads; only a module NO loaded entry can reach (statically or
+/// dynamically) executing is a cross-entry leak.
+function allTargetsOf(module: ModuleLike | undefined): string[] {
+  if (module === undefined) {
+    return [];
+  }
+  return module.dependencies.map((dependency) => dependency.target);
 }
 
 /// A pure graph/facts service over a set of modules. Every fact is derived from the final graph, so a
@@ -194,6 +221,30 @@ export class ProgramFacts {
       closure.add(reached);
     }
     return closure;
+  }
+
+  /// The modules reachable from `id` through STATIC AND DYNAMIC edges, INCLUDING `id` itself — the full
+  /// set of modules that could legally execute as a consequence of loading `id` (whatever the schedule
+  /// eventually triggers). This is the reachability the isolation oracle (`seo:false`) checks the
+  /// bundle's executed set against: a module outside the union of loaded entries' `reachableAllFrom`
+  /// sets that executed is a cross-entry leak (the #9998 class). Not memoized — used only by the
+  /// per-run isolation oracle, over the bounded fuzzer graph.
+  reachableAllFrom(id: string): ReadonlySet<string> {
+    const reached = new Set<string>([id]);
+    const pending: string[] = [id];
+    while (pending.length > 0) {
+      const moduleId = pending.pop();
+      if (moduleId === undefined) {
+        continue;
+      }
+      for (const target of allTargetsOf(this.#modulesById.get(moduleId))) {
+        if (!reached.has(target)) {
+          reached.add(target);
+          pending.push(target);
+        }
+      }
+    }
+    return reached;
   }
 
   /// Whether the edge `fromId -> toId` closes a synchronous cycle. Every caller passes an EXISTING
@@ -394,6 +445,9 @@ export class ProgramFacts {
             {
               via: dependency.kind === "esm-local-reexport" ? "local" : "named",
               through: moduleId,
+              target: dependency.target,
+              exportedName: exportName,
+              importedName: dependency.sourceName,
             },
           ],
           visited,
@@ -415,7 +469,16 @@ export class ProgramFacts {
             this.#collectDefiners(
               dependency.target,
               exportName,
-              [...hops, { via: "star", through: moduleId }],
+              [
+                ...hops,
+                {
+                  via: "star",
+                  through: moduleId,
+                  target: dependency.target,
+                  exportedName: exportName,
+                  importedName: exportName,
+                },
+              ],
               visited,
               out,
             );

@@ -1,0 +1,326 @@
+{
+  "proof": "rolldown#9998 cross-entry-leak live catch (seo:false isolation oracle)",
+  "generatedAt": "2026-07-10T23:36:10.320Z",
+  "head": "fad62ab62ebe274b9a1d0d792ccfde02ed3beaa0",
+  "dirty": false,
+  "node": "v24.18.0",
+  "cases": 20,
+  "catchTag": "mechanism:cross-entry-leak",
+  "note": "Bug OPEN on both targets at seo:false (no green target) — a bracket-pending regression entry.",
+  "targets": {
+    "npm": {
+      "path": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+      "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+    },
+    "snapshot": {
+      "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    }
+  },
+  "seoTrueControl": {
+    "green": true,
+    "kind": "pass",
+    "signature": "pass"
+  },
+  "accepted": true,
+  "cells": {
+    "npm": {
+      "redIsolation": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "reachability-isolation:[le-a]": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        }
+      ]
+    },
+    "snapshot": {
+      "redIsolation": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "reachability-isolation:[le-a]": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "mismatch",
+          "reason": "reachability-isolation",
+          "signature": "reachability-isolation:[le-a]",
+          "tagged": true
+        }
+      ]
+    }
+  }
+}

@@ -256,14 +256,20 @@ W14b ([w14b-package-realism](./w14b-package-realism.md)):
   **HELD** (the new local re-export records a LIVE demand on the one plan; no validator-side walk was
   added).
 - Don't extend shrink's manual barrel switch (shrink.ts rewireReadPastBarrel); enrich canonical
-  RouteHop (program-facts.ts) with target + name mapping. — **HELD / deferred**: the barrel switch
-  was NOT extended for the new op (shrink downgrades a local re-export to the named form instead);
-  the full RouteHop target+name enrichment remains W14c scope (W14b only added the `local` hop kind).
+  RouteHop (program-facts.ts) with target + name mapping. — **DONE in W14c**: `RouteHop` gained
+  `target` + `exportedName` + `importedName`; `rewireReadPastBarrel` now reads the enriched hop and
+  rewires uniformly (the named/star-only switch was DELETED), so named / star / local barrels collapse
+  through one path. See [w14c-demand-and-flagoff](./w14c-demand-and-flagoff.md).
 - No parallel namespace-member representation for `export * as ns` — extend ValueRead to ONE
-  canonical member path. — **untouched** (the `export * as ns` operation is still W14c scope).
+  canonical member path. — **DONE in W14c**: `ValueRead.member` became the canonical `memberPath`
+  (subsuming the single-member read); `export * as ns from` is the `esm-reexport-namespace` op whose
+  name provision lives in the ONE `starShadowedNames` rule; a nested `outer.ns.member` demand routes
+  through `resolveNamespaceReadPath` (one owner). See [w14c](./w14c-demand-and-flagoff.md).
 - No second CLI/evaluator switch for seo:false — one relaxed-order oracle policy derived from
-  persisted BuildConfig. — **untouched** (`seo:false` stays unrepresentable; the relaxed-order oracle
-  is still deferred).
+  persisted BuildConfig. — **DONE in W14c**: `strictExecutionOrder` is rollable; `executeProgram`
+  derives the reachability-isolation oracle from the persisted `BuildConfig` and threads it as the ONE
+  event comparator (identical in campaign / replay / shrink / identity). The #9998 flag-off leak is the
+  live catch. See [w14c](./w14c-demand-and-flagoff.md).
 - Package model replaces (migrates) module-level sideEffectFree + synthetic directory via one
   legacy-normalization seam — never two live representations; package sideEffects metadata belongs to
   the package/layout model, NOT BuildConfig. — **CONSUMED in W14b**: `packagesOf` (model.ts) is the

@@ -57,7 +57,7 @@ function conjunctionProgram(): ProgramModel {
             module: "m_e1",
             phase: "evaluate",
             value: 100,
-            reads: [{ binding: "ns1", member: "vm_def" }],
+            reads: [{ binding: "ns1", memberPath: ["vm_def"] }],
           },
         ],
         dependencies: [
@@ -65,7 +65,7 @@ function conjunctionProgram(): ProgramModel {
             kind: "esm-namespace-import",
             target: "m_bar",
             localName: "ns1",
-            readMembers: ["vm_def"],
+            readMembers: [["vm_def"]],
           },
         ],
       },
@@ -77,7 +77,7 @@ function conjunctionProgram(): ProgramModel {
             module: "m_e2",
             phase: "evaluate",
             value: 200,
-            reads: [{ binding: "ns2", member: "vm_sib" }],
+            reads: [{ binding: "ns2", memberPath: ["vm_sib"] }],
           },
         ],
         dependencies: [
@@ -85,7 +85,7 @@ function conjunctionProgram(): ProgramModel {
             kind: "esm-namespace-import",
             target: "m_bar",
             localName: "ns2",
-            readMembers: ["vm_sib"],
+            readMembers: [["vm_sib"]],
           },
         ],
       },
@@ -209,7 +209,7 @@ describe("function-hidden and computed-member read rendering", () => {
               module: "entry",
               phase: "evaluate",
               value: 30,
-              reads: [{ binding: "ns", member: "vleaf", computed: true }],
+              reads: [{ binding: "ns", memberPath: ["vleaf"], computed: true }],
             },
           ],
           dependencies: [
@@ -217,7 +217,7 @@ describe("function-hidden and computed-member read rendering", () => {
               kind: "esm-namespace-import",
               target: "leaf",
               localName: "ns",
-              readMembers: ["vleaf"],
+              readMembers: [["vleaf"]],
             },
           ],
         },
@@ -379,7 +379,7 @@ describe("family-A conjunction coverage tag", () => {
               module: "e1",
               phase: "evaluate",
               value: 10,
-              reads: [{ binding: "n1", member: "vpdefB" }],
+              reads: [{ binding: "n1", memberPath: ["vpdefB"] }],
             },
           ],
           dependencies: [
@@ -387,7 +387,7 @@ describe("family-A conjunction coverage tag", () => {
               kind: "esm-namespace-import",
               target: "bar",
               localName: "n1",
-              readMembers: ["vpdefB"],
+              readMembers: [["vpdefB"]],
             },
           ],
         },
@@ -399,11 +399,16 @@ describe("family-A conjunction coverage tag", () => {
               module: "e2",
               phase: "evaluate",
               value: 20,
-              reads: [{ binding: "n2", member: "vsib" }],
+              reads: [{ binding: "n2", memberPath: ["vsib"] }],
             },
           ],
           dependencies: [
-            { kind: "esm-namespace-import", target: "bar", localName: "n2", readMembers: ["vsib"] },
+            {
+              kind: "esm-namespace-import",
+              target: "bar",
+              localName: "n2",
+              readMembers: [["vsib"]],
+            },
           ],
         },
       ],
@@ -447,7 +452,7 @@ describe("family-A/B generation", () => {
           module.dependencies.some(
             (dependency) =>
               (dependency.kind === "esm-namespace-import" &&
-                dependency.readMembers.includes(exportName)) ||
+                dependency.readMembers.some((path) => path.includes(exportName))) ||
               (dependency.kind === "esm-value-import" &&
                 dependency.target === definer.id &&
                 dependency.importedName === exportName),

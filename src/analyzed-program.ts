@@ -224,8 +224,74 @@ function directDemandOf(
   return undefined;
 }
 
+/// Follow the module that a re-exported NAMESPACE name resolves to: `export * as name from inner` on
+/// `moduleId` routes to `inner`; a named re-export forwarding `name` (`export { s as name } from mid`)
+/// is followed to `mid`'s `s`. Returns the target module whose namespace `name` denotes, or `undefined`
+/// when `name` is not a namespace re-export here (a malformed nested read the validator rejects). The
+/// visited guard tolerates a pathological re-export cycle in a hand-crafted model.
+function namespaceReexportTarget(
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  moduleId: string,
+  name: string,
+  visited: Set<string> = new Set<string>(),
+): string | undefined {
+  const module = modulesById.get(moduleId);
+  const key = `${moduleId}\0${name}`;
+  if (module === undefined || visited.has(key)) {
+    return undefined;
+  }
+  visited.add(key);
+  for (const dependency of module.dependencies) {
+    if (dependency.kind === "esm-reexport-namespace" && dependency.exportedName === name) {
+      return dependency.target;
+    }
+    if (dependency.kind === "esm-reexport-named" && dependency.exportedName === name) {
+      return namespaceReexportTarget(
+        modulesById,
+        dependency.target,
+        dependency.sourceName,
+        visited,
+      );
+    }
+  }
+  return undefined;
+}
+
+/// Resolve a namespace member READ PATH (`localName.p0.p1.…`) into the per-component demands it makes
+/// and the LIVE consumption at its deepest member. The first component is demanded on the namespace's
+/// direct `target`; each intermediate component must be a re-exported namespace, followed to the module
+/// whose namespace it denotes (so `outer.ns.member`'s `member` demand lands on `ns`'s origin). A path
+/// that cannot follow (a non-namespace intermediate) stops early — the validator rejects it — so this
+/// stays total. Both the requested-name fixpoint and the consumption builder read THIS one walk, so the
+/// nested-demand routing has a single owner.
+function resolveNamespaceReadPath(
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  directTarget: string,
+  path: readonly string[],
+): { readonly steps: readonly { readonly target: string; readonly name: string }[] } {
+  const steps: { target: string; name: string }[] = [];
+  let currentTarget = directTarget;
+  for (let index = 0; index < path.length; index += 1) {
+    const name = path[index];
+    if (name === undefined) {
+      break;
+    }
+    steps.push({ target: currentTarget, name });
+    if (index === path.length - 1) {
+      break;
+    }
+    const inner = namespaceReexportTarget(modulesById, currentTarget, name);
+    if (inner === undefined) {
+      break;
+    }
+    currentTarget = inner;
+  }
+  return { steps };
+}
+
 function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): ExportDemandPlan {
-  const { requestedNames, callableNames } = collectRequestedExports(program);
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  const { requestedNames, callableNames } = collectRequestedExports(program, modulesById);
 
   const consumptions: ConsumptionRecord[] = [];
   const push = (
@@ -251,13 +317,23 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
     for (const dependency of module.dependencies) {
       if (dependency.kind === "esm-namespace-import") {
         const callMembers = new Set(dependency.callMembers ?? []);
-        for (const member of dependency.readMembers) {
+        for (const memberPath of dependency.readMembers) {
+          // The LIVE value read is the DEEPEST member of the path, on the module its namespace chain
+          // resolves to (`outer.ns.member` reads `member` on `ns`'s origin, not `ns` on the barrel).
+          // Intermediate namespace-object hops are navigation, not value reads, so they record no
+          // consumption; the requested-name fixpoint still demands each so every hop's export exists.
+          const { steps } = resolveNamespaceReadPath(modulesById, dependency.target, memberPath);
+          const deepest = steps[steps.length - 1];
+          const deepestName = memberPath[memberPath.length - 1];
+          if (deepest === undefined || deepestName === undefined) {
+            continue;
+          }
           push(
             module.id,
             dependency,
-            dependency.target,
-            member,
-            callMembers.has(member) ? "callable" : "numeric",
+            deepest.target,
+            deepest.name,
+            callMembers.has(deepestName) ? "callable" : "numeric",
             "live",
           );
         }
@@ -285,7 +361,6 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
     }
   }
 
-  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
   const resolvedDemands = new Map<string, ResolvedExportDemand>();
   for (const consumption of consumptions) {
     // Only LIVE consumptions aggregate a rendered-form / shape here — a link-required named re-export
@@ -369,7 +444,10 @@ export function renderedFormOf(
 /// PRIVATE to the boundary: the renderer no longer runs this fixpoint itself — it reads the plan's
 /// `requestedNames` / `callableNames` — so demand analysis has ONE owner (a no-parallel-projection grep
 /// test asserts it is not referenced outside this module).
-function collectRequestedExports(program: ProgramModel): {
+function collectRequestedExports(
+  program: ProgramModel,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+): {
   readonly requestedNames: ReadonlyMap<string, readonly string[]>;
   readonly callableNames: ReadonlyMap<string, ReadonlySet<string>>;
 } {
@@ -405,10 +483,21 @@ function collectRequestedExports(program: ProgramModel): {
         }
       } else if (dependency.kind === "esm-namespace-import") {
         const callMembers = new Set(dependency.callMembers ?? []);
-        for (const member of dependency.readMembers) {
-          demand(dependency.target, member);
-          if (callMembers.has(member)) {
-            markCallable(dependency.target, member);
+        for (const memberPath of dependency.readMembers) {
+          // Demand every component along the path (`outer.ns` on the barrel, then `member` on `ns`'s
+          // origin) so each hop's export is synthesized; callability marks the DEEPEST member on the
+          // module it actually resolves to.
+          const { steps } = resolveNamespaceReadPath(modulesById, dependency.target, memberPath);
+          const deepestName = memberPath[memberPath.length - 1];
+          for (const [stepIndex, step] of steps.entries()) {
+            demand(step.target, step.name);
+            if (
+              stepIndex === steps.length - 1 &&
+              deepestName !== undefined &&
+              callMembers.has(deepestName)
+            ) {
+              markCallable(step.target, step.name);
+            }
           }
         }
       } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {

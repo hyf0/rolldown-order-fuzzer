@@ -721,6 +721,10 @@ async function buildWithChild(
       ...(group.includeDependenciesRecursively === undefined
         ? {}
         : { includeDependenciesRecursively: group.includeDependenciesRecursively }),
+      ...(group.entriesAware === undefined ? {} : { entriesAware: group.entriesAware }),
+      ...(group.entriesAwareMergeThreshold === undefined
+        ? {}
+        : { entriesAwareMergeThreshold: group.entriesAwareMergeThreshold }),
     })),
     output: {
       format: ROLLDOWN_BUILD_OPTIONS.format,

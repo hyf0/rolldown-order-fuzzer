@@ -44,7 +44,11 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { generateCrossChunkInitCycleCase, type GeneratedCase } from "../src/generate.ts";
+import {
+  generateCrossChunkInitCycleCase,
+  generateCrossEntryLeakCase,
+  type GeneratedCase,
+} from "../src/generate.ts";
 import { executeProgram } from "../src/program-run.ts";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -62,6 +66,7 @@ const RAW_SPAWN_TIMEOUT_MS = 120_000;
 /// needs no registration.
 const GENERATORS: Readonly<Record<string, (seed: number) => GeneratedCase>> = {
   generateCrossChunkInitCycleCase,
+  generateCrossEntryLeakCase,
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -88,6 +93,10 @@ export interface RedsetEntry {
   readonly redTarget: TargetRef;
   readonly greenTarget: TargetRef;
   readonly expectedRedSignature: string;
+  /// When true, the bug is still OPEN on the green target too (no fixed build exists YET): the bracket
+  /// HOLDs when the RED reproduces on BOTH targets, and the green target is NOT required to pass. When a
+  /// fix lands the green target flips and `bracketPending` is dropped, graduating it to a normal bracket.
+  readonly bracketPending?: boolean;
   readonly provenance: Readonly<Record<string, string>>;
 }
 
@@ -168,6 +177,9 @@ function parseEntry(value: unknown, index: number): RedsetEntry {
     redTarget: parseTargetRef(record.redTarget, `${path}.redTarget`),
     greenTarget: parseTargetRef(record.greenTarget, `${path}.greenTarget`),
     expectedRedSignature: asString(record.expectedRedSignature, `${path}.expectedRedSignature`),
+    ...(record.bracketPending === undefined
+      ? {}
+      : { bracketPending: asBoolean(record.bracketPending, `${path}.bracketPending`) }),
     provenance: parseProvenance(record.provenance, `${path}.provenance`),
   } as const;
   if (form === "generator") {
@@ -573,7 +585,10 @@ async function main(): Promise<number> {
 
       const observedRed = normalizeSignature(redRun.signature);
       const redMatches = !redRun.green && observedRed === expectedRed;
-      const greenPassed = greenRun.green;
+      // A BRACKET-PENDING entry (bug open everywhere, no fixed build yet) HOLDs when the RED reproduces
+      // on the red target; its "green" target is expected to be RED too, so it is not required to pass.
+      // A normal bracket requires the green target to pass.
+      const greenPassed = entry.bracketPending === true ? true : greenRun.green;
       const verdict: "hold" | "violation" = redMatches && greenPassed ? "hold" : "violation";
 
       results.push({

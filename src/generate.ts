@@ -85,10 +85,21 @@ export function sampleCaseSize(rng: SeededRng): number {
   return 32 + rng.integer(17); // large: 32..48
 }
 
+/// Opt-in generation levers threaded from a campaign (never rolled, so the default corpus is
+/// byte-identical): `strictExecutionOrder:false` produces a `seo:false` case tied to the
+/// reachability-isolation oracle; `crossEntryGroupBias` (only meaningful with `seo:false`) appends an
+/// `entriesAware` co-locating group over the case's modules — the #9998 cross-entry-leak config. A
+/// `seo:false` cell with NO bias is the SANITY cell (ordinary shapes, must stay green).
+export interface GenerationOptions {
+  readonly strictExecutionOrder?: boolean;
+  readonly crossEntryGroupBias?: boolean;
+}
+
 export function generateCase(
   seed: number,
   size: number,
   forcedRegime?: FormatRegime,
+  options: GenerationOptions = {},
 ): GeneratedCase {
   const rng = new SeededRng(seed);
   if (!Number.isInteger(size) || size < 1 || size > MAX_CASE_SIZE) {
@@ -97,16 +108,19 @@ export function generateCase(
 
   // Half the campaign explores random graphs; the other half keeps the audited fixed shapes.
   // A forced regime pins every case to the random generator: the fixed templates carry their
-  // own inherent formats and would dilute a pure-format campaign.
+  // own inherent formats and would dilute a pure-format campaign. A seo:false / cross-entry cell also
+  // pins the random generator (the fixed templates are seo:true audited shapes).
+  const usesRandomOptions =
+    options.strictExecutionOrder === false || options.crossEntryGroupBias === true;
   const template =
-    forcedRegime !== undefined
+    forcedRegime !== undefined || usesRandomOptions
       ? "random-mixed"
       : rng.boolean()
         ? "random-mixed"
         : rng.pick(FIXED_TEMPLATE_NAMES);
   const built =
     template === "random-mixed"
-      ? buildRandomMixed(rng, size, forcedRegime)
+      ? buildRandomMixed(rng, size, forcedRegime, options)
       : TEMPLATE_BUILDERS[template](rng, size);
   // The ONE AnalyzedProgram for the case: finalizeProgram already produced it (and deep-froze its program)
   // for random-mixed; a fixed template's program is a plain literal, so it is routed through the SAME
@@ -378,6 +392,7 @@ function buildRandomMixed(
   rng: SeededRng,
   size: number,
   forcedRegime?: FormatRegime,
+  options: GenerationOptions = {},
 ): TemplateResult {
   const regimeRoll = rng.integer(5);
   const regime: FormatRegime =
@@ -455,7 +470,7 @@ function buildRandomMixed(
           kind: "esm-namespace-import",
           target: target.id,
           localName: `ns_${importer.id}_${target.id}`,
-          readMembers: [`v${target.id}`],
+          readMembers: [[`v${target.id}`]],
         });
       } else {
         importer.dependencies.push({
@@ -708,6 +723,7 @@ function buildRandomMixed(
       registrations,
       conjunctionConsumerIds,
       regime,
+      options,
       ...(conjunction.cluster === undefined ? {} : { conjunctionCluster: conjunction.cluster }),
     },
     rng,
@@ -979,6 +995,112 @@ export function buildFamilyBEagerBarrel(
   return { program, analyzed: analyzeProgram(program) };
 }
 
+/// The #9998 cross-entry-leak shape as a DIRECTED `seo:false` program — the fuzzer-model translation of
+/// the upstream issue's verified repro (two entries; `b` dynamically imports `shared`; `a` statically
+/// imports it and runs its own top-level effect; a manual `entriesAware` codeSplitting group with a
+/// large `entriesAwareMergeThreshold` — the config that, at `strictExecutionOrder:false`, co-locates
+/// modules of DISJOINT entry reachability into one eager chunk):
+///
+/// - `le-shared`: a callable-constant definer exporting `foo` (the shared function both entries reach);
+/// - `le-a` (entry): value-imports `foo` from `le-shared` (a call) and folds it into its OWN top-level
+///   event — so `le-a`'s execution is VISIBLE (the isolation oracle observes only event-emitting
+///   modules), and `le-a` statically depends on `le-shared`;
+/// - `le-b` (entry): emits its own top-level event and DYNAMICALLY imports `le-shared`.
+///
+/// `le-a` is NOT reachable from `le-b` (nor vice versa) — each entry reaches only itself and
+/// `le-shared`. At `seo:false` the co-locating group runs the OTHER entry's top-level when either loads,
+/// so the reachability-isolation oracle reds with signature `reachability-isolation:[le-a]` (loading
+/// `le-b` first ran `le-a`). Bug OPEN on both npm rolldown@1.1.5 and the final snapshot (a
+/// bracket-pending entry). The seed only varies the cosmetic fold values.
+export function buildCrossEntryLeakCase(rng: SeededRng): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const sharedBase = 1 + rng.integer(900_000);
+  const aBase = 1 + rng.integer(900_000);
+  const bBase = 1 + rng.integer(900_000);
+  const modules: readonly ModuleModel[] = [
+    {
+      id: "le-a",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "le-shared",
+          importedName: "foo",
+          localName: "fa",
+          call: true,
+        },
+      ],
+      events: [
+        { module: "le-a", phase: "evaluate", value: aBase, reads: [{ binding: "fa", call: true }] },
+      ],
+    },
+    {
+      id: "le-b",
+      format: "esm",
+      dependencies: [{ kind: "esm-dynamic-import", target: "le-shared", registration: "le-dyn" }],
+      events: [{ module: "le-b", phase: "evaluate", value: bBase }],
+    },
+    {
+      id: "le-shared",
+      format: "esm",
+      dependencies: [],
+      events: [{ module: "le-shared", phase: "evaluate", value: sharedBase }],
+    },
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [
+      { name: "entry-le-a", moduleId: "le-a" },
+      { name: "entry-le-b", moduleId: "le-b" },
+    ],
+    // Load `le-b` FIRST: at seo:false the co-located chunk runs `le-a`'s top-level too, and `le-a` is
+    // not reachable from `le-b` — the isolation violation. The dynamic trigger then runs `le-shared`.
+    schedule: [
+      { kind: "import-entry", entry: "entry-le-b" },
+      { kind: "trigger-dynamic-import", registration: "le-dyn" },
+      { kind: "import-entry", entry: "entry-le-a" },
+    ],
+    build: {
+      // A single entriesAware group with a large merge threshold — the #9998 config. `test` matches
+      // every generated module file, so the group captures a, b, and shared; the merge co-locates them.
+      chunking: {
+        kind: "organic",
+        groups: [
+          {
+            name: "le-common",
+            test: "module-",
+            entriesAware: true,
+            entriesAwareMergeThreshold: 10_000,
+          },
+        ],
+      },
+      includeDependenciesRecursively: true,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      // The whole point: the leak exists ONLY at seo:false (seo:true is the #9997-fixed control).
+      strictExecutionOrder: false,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the directed #9998 cross-entry-leak campaign. Tagged `mechanism:cross-entry-leak`.
+export function generateCrossEntryLeakCase(seed: number): GeneratedCase {
+  const { program, analyzed } = buildCrossEntryLeakCase(new SeededRng(seed));
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// A generated case for the directed family-B campaign. The seed only varies the cosmetic fold
 /// values, so the structural shape — and its od-red/wa-green verdict split — is identical across
 /// seeds. Tagged `mechanism:family-b-eager-barrel` (asserted by the campaign script).
@@ -1015,6 +1137,9 @@ interface GenerationContext {
   readonly conjunctionConsumerIds: ReadonlySet<string>;
   /// The case's format regime — the W14b end-stage enrichment is ESM-only, so pure-cjs skips it.
   readonly regime: FormatRegime;
+  /// The opt-in generation levers (seo axis, cross-entry bias) — never rolled, so the default corpus
+  /// is byte-identical.
+  readonly options: GenerationOptions;
   /// The injected family-A conjunction cluster's member roles, when the case rolled one — the W14b
   /// packaging variant wraps exactly this cluster.
   readonly conjunctionCluster?: ConjunctionClusterInfo;
@@ -1204,12 +1329,34 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
       : { conjunctionCluster: context.conjunctionCluster }),
   });
 
+  // The strictExecutionOrder axis is NOT rolled (a naive 50/50 would dilute catching power and move the
+  // golden's buildAxes); it defaults to true and is flipped to false ONLY by an explicit generation
+  // option (the seo:false sanity cell and cross-entry cells), so the default corpus is byte-identical.
+  const strictExecutionOrder = context.options.strictExecutionOrder ?? true;
+  // A cross-entry cell (seo:false + bias) OVERRIDES the rolled chunking with a single entriesAware
+  // co-locating group over every module — the #9998 config, which at seo:false runs one entry's
+  // top-level when a disjoint-reachability entry loads. Only fires under the opt-in option, so it never
+  // touches the corpus.
+  const resolvedChunking: Chunking =
+    context.options.crossEntryGroupBias === true && strictExecutionOrder === false
+      ? {
+          kind: "organic",
+          groups: [
+            {
+              name: "cross-entry-common",
+              test: "module-",
+              entriesAware: true,
+              entriesAwareMergeThreshold: 10_000,
+            },
+          ],
+        }
+      : chunkingUnionOf(enriched.chunking);
   const build: BuildConfig = {
-    chunking: chunkingUnionOf(enriched.chunking),
+    chunking: resolvedChunking,
     includeDependenciesRecursively,
     preserveEntrySignatures: "allow-extension",
     lazyBarrel,
-    strictExecutionOrder: true,
+    strictExecutionOrder,
   };
 
   const program: ProgramModel = {
@@ -1283,6 +1430,11 @@ const RETAINED_REFERENCE_PROBABILITY_PERCENT = 10;
 const CONJUNCTION_PACKAGING_PROBABILITY_PERCENT = 25;
 const PLAIN_PACKAGING_PROBABILITY_PERCENT = 8;
 const CAMUNDA_REWRITE_PROBABILITY_PERCENT = 10;
+/// W14c end-stage injectors (drawn AFTER every W14b draw, so a case where neither fires is
+/// byte-identical to the W14b corpus; a case where one fires is the labeled golden delta — a new
+/// operation, accounted for by `explain-delta`'s new-op category).
+const NAMESPACE_REEXPORT_PROBABILITY_PERCENT = 12;
+const DEAD_HOP_PROBABILITY_PERCENT = 8;
 
 /// The W14b END-STAGE enrichment: the package/metadata realism cluster. Sub-steps in fixed order —
 /// (1) the family-B eager-barrel conjunction (the vben shape), (2) the retained-reference witness,
@@ -1304,7 +1456,15 @@ function applyW14bEnrichment(rng: SeededRng, input: W14bEnrichmentInput): W14bEn
   applyPlainPackaging(rng, modules, entries, packages);
   const rewritten = applyCamundaRewrite(rng, modules, entries, schedule, packages);
 
-  return { modules: rewritten, entries, schedule, chunking, packages };
+  // W14c injectors — the `export * as ns from` namespace-reexport witness and the dead-barrel-hop
+  // witness. ESM-only, drawn LAST so a non-firing case stays byte-identical to the W14b corpus.
+  const w14cModules = [...rewritten];
+  if (input.regime !== "pure-cjs") {
+    injectNamespaceReexport(rng, w14cModules, entries, schedule);
+    injectDeadBarrelHop(rng, w14cModules, entries, schedule);
+  }
+
+  return { modules: w14cModules, entries, schedule, chunking, packages };
 }
 
 /// Inject the family-B eager-barrel conjunction — the vben `initPreferences is not a function` shape,
@@ -1625,6 +1785,188 @@ function injectRetainedReference(
     sideEffects: false,
     moduleIds: [barrelId, middleId, ...(definerInPackage ? [definerId] : [])],
   });
+}
+
+/// Inject the `export * as ns from` namespace-reexport witness (M7): a barrel re-exports an inner
+/// definer's whole namespace under one name, and an entry reads a NESTED member through it
+/// (`outer.ns.member`, folded numerically). The inner definer is inferred-pure (a non-inlinable value,
+/// so a mis-populated namespace surfaces as a wrong/undefined fold), the barrel's `export * as ns`
+/// synthesizes the namespace-object export, and the consumer's demand for the member routes through the
+/// namespace re-export to the inner definer (the one canonical member-path representation). A minority
+/// make the DEEPEST access COMPUTED (`outer.ns[k]`) — the statically-invisible nested read.
+function injectNamespaceReexport(
+  rng: SeededRng,
+  modules: ModuleModel[],
+  entries: EntryModel[],
+  schedule: ScheduleOperation[],
+): void {
+  if (rng.integer(100) >= NAMESPACE_REEXPORT_PROBABILITY_PERCENT) {
+    return;
+  }
+  if (MAX_RANDOM_MODULES - modules.length < 3) {
+    return;
+  }
+  const counter = modules.length;
+  const innerId = `nrin${counter}`;
+  const barrelId = `nrbar${counter}`;
+  const consumerId = `nrcon${counter}`;
+  const nsName = `nsx${counter}`;
+  const innerExport = `v${innerId}`;
+  const localName = `outer_${consumerId}`;
+  const computed = rng.integer(3) === 0;
+
+  modules.push(
+    {
+      id: innerId,
+      format: "esm",
+      dependencies: [],
+      events: [],
+      inferredPure: true,
+      pureBase: 1 + rng.integer(900_000),
+    },
+    {
+      id: barrelId,
+      format: "esm",
+      dependencies: [{ kind: "esm-reexport-namespace", target: innerId, exportedName: nsName }],
+      events: [],
+    },
+    {
+      id: consumerId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-namespace-import",
+          target: barrelId,
+          localName,
+          readMembers: [[nsName, innerExport]],
+        },
+      ],
+      events: [
+        {
+          module: consumerId,
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          reads: [
+            {
+              binding: localName,
+              memberPath: [nsName, innerExport],
+              ...(computed ? { computed: true as const } : {}),
+            },
+          ],
+        },
+      ],
+    },
+  );
+  entries.push({ name: `entry-${consumerId}`, moduleId: consumerId });
+  schedule.push({ kind: "import-entry", entry: `entry-${consumerId}` });
+}
+
+/// Inject the DEAD-barrel-hop witness (M5, the `dead_barrel_reexport` negative the fix-arc had to
+/// preserve): a MIXED barrel (a declared local export `own` PLUS `export * from common`) shared by two
+/// entries with SPLIT demand — the DEMANDING entry consumes `common`'s value through the barrel star
+/// (the hop is LIVE), the NON-DEMANDING entry consumes ONLY `own` (the star hop is DEAD for it, legally
+/// tree-shakeable). `common` is an `objectExport` definer — EVENT-FREE, the LEGALITY CONTRACT: source
+/// ESM evaluates the barrel's re-export target for BOTH entries, but the bundle legally tree-shakes it
+/// for the non-demanding entry; if `common` carried events that source-vs-bundle divergence would
+/// false-positive the event oracle, so a dead-hop target MUST be event-free (the divergence is then
+/// unobservable in events) and the witness is the OBJECT-IDENTITY side only. The demanding entry
+/// captures `common`'s object TWO ways — directly and through the barrel — and compares identity: a
+/// bundler that re-runs `common` per chunk group yields a NEW object on the late capture (double-init),
+/// which the identity fold catches; a correct build inits `common` EXACTLY ONCE (identity preserved).
+/// A regression guard (the historical bug is fixed): green on the snapshot, and a validator rule
+/// rejects a dead hop whose target carries events.
+function injectDeadBarrelHop(
+  rng: SeededRng,
+  modules: ModuleModel[],
+  entries: EntryModel[],
+  schedule: ScheduleOperation[],
+): void {
+  if (rng.integer(100) >= DEAD_HOP_PROBABILITY_PERCENT) {
+    return;
+  }
+  if (MAX_RANDOM_MODULES - modules.length < 4) {
+    return;
+  }
+  const counter = modules.length;
+  const commonId = `dhcom${counter}`;
+  const bridgeId = `dhbar${counter}`;
+  const pageAId = `dhpa${counter}`;
+  const pageBId = `dhpb${counter}`;
+  const ownName = `vown${counter}`;
+  const commonExport = `v${commonId}`;
+
+  modules.push(
+    // The dead-hop target: an objectExport definer, EVENT-FREE (the contract — its tree-shake for the
+    // non-demanding entry is then unobservable in events).
+    { id: commonId, format: "esm", dependencies: [], events: [], objectExport: true },
+    // The MIXED barrel: a declared local export beside `export * from common`.
+    {
+      id: bridgeId,
+      format: "esm",
+      localExports: [ownName],
+      dependencies: [{ kind: "esm-reexport-star", target: commonId }],
+      events: [],
+    },
+    // The DEMANDING entry: captures common's object directly AND through the barrel, comparing identity.
+    {
+      id: pageAId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: commonId,
+          importedName: commonExport,
+          localName: `da_${pageAId}`,
+          objectRef: true,
+        },
+        {
+          kind: "esm-value-import",
+          target: bridgeId,
+          importedName: commonExport,
+          localName: `db_${pageAId}`,
+          objectRef: true,
+        },
+      ],
+      events: [
+        {
+          module: pageAId,
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          identityCheck: { leftBinding: `da_${pageAId}`, rightBinding: `db_${pageAId}` },
+        },
+      ],
+    },
+    // The NON-DEMANDING entry: reads ONLY the barrel's own local export — the star hop is DEAD for it.
+    {
+      id: pageBId,
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: bridgeId,
+          importedName: ownName,
+          localName: `pb_${pageBId}`,
+        },
+      ],
+      events: [
+        {
+          module: pageBId,
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: `pb_${pageBId}` }],
+        },
+      ],
+    },
+  );
+  entries.push(
+    { name: `entry-${pageAId}`, moduleId: pageAId },
+    { name: `entry-${pageBId}`, moduleId: pageBId },
+  );
+  // Load the NON-DEMANDING entry FIRST so the dead hop's silence is exercised before the live path.
+  schedule.push(
+    { kind: "import-entry", entry: `entry-${pageBId}` },
+    { kind: "import-entry", entry: `entry-${pageAId}` },
+  );
 }
 
 /// Package an injected family-A conjunction cluster (compose family A BEHIND a package boundary):
@@ -1959,8 +2301,12 @@ function barrelForwardedName(dependency: DependencyOperation): string | null {
   if (dependency.kind === "esm-value-import") {
     return dependency.importedName;
   }
-  if (dependency.kind === "esm-namespace-import" && dependency.readMembers.length === 1) {
-    return dependency.readMembers[0] ?? null;
+  if (
+    dependency.kind === "esm-namespace-import" &&
+    dependency.readMembers.length === 1 &&
+    dependency.readMembers[0]?.length === 1
+  ) {
+    return dependency.readMembers[0]?.[0] ?? null;
   }
   return null;
 }
@@ -2193,7 +2539,7 @@ function buildPureDefinerConjunction(
         kind: "esm-namespace-import",
         target: outerBarrelId,
         localName: `ns_${consumerAId}`,
-        readMembers: [definerName],
+        readMembers: [[definerName]],
       },
     ],
     forceEntry: true,
@@ -2206,7 +2552,7 @@ function buildPureDefinerConjunction(
         kind: "esm-namespace-import",
         target: outerBarrelId,
         localName: `ns_${consumerBId}`,
-        readMembers: [siblingName],
+        readMembers: [[siblingName]],
       },
     ],
     forceEntry: true,
@@ -2327,7 +2673,7 @@ function buildCallableOwnStateCluster(
         kind: "esm-namespace-import",
         target: barrelId,
         localName: `ns_${id}`,
-        readMembers: [definerName],
+        readMembers: [[definerName]],
         callMembers: [definerName],
       },
     ],
@@ -2341,7 +2687,7 @@ function buildCallableOwnStateCluster(
         kind: "esm-namespace-import",
         target: barrelId,
         localName: `ns_${id}`,
-        readMembers: [siblingName],
+        readMembers: [[siblingName]],
       },
     ],
     forceEntry: true,
@@ -2839,6 +3185,55 @@ function buildRandomManualGroups(
   return groups;
 }
 
+/// The #9998 cross-entry-leak STRUCTURAL predicate: the program carries a codeSplitting group (so
+/// modules are co-located into shared chunks) AND at least two entries are MUTUALLY UNREACHABLE
+/// (neither entry's module reaches the other's, statically or dynamically). At `seo:false` such a group
+/// can run one entry's top-level when a disjoint entry loads — the leak the reachability-isolation
+/// oracle catches. Purely structural over the analyzed program, so any model carrying the shape is
+/// tagged whatever its provenance (the directed builder or a random cross-entry cell).
+function hasCrossEntryColocatingGroup(analyzed: AnalyzedProgram): boolean {
+  const { program, facts } = analyzed;
+  if (programChunking(program).kind === "automatic") {
+    return false;
+  }
+  const entryModuleIds = program.entries.map((entry) => entry.moduleId);
+  for (let i = 0; i < entryModuleIds.length; i += 1) {
+    for (let j = i + 1; j < entryModuleIds.length; j += 1) {
+      const a = entryModuleIds[i];
+      const b = entryModuleIds[j];
+      if (a === undefined || b === undefined) {
+        continue;
+      }
+      if (!facts.reachableAllFrom(a).has(b) && !facts.reachableAllFrom(b).has(a)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/// The DEAD-barrel-hop STRUCTURAL predicate (M5): a MIXED barrel — a module with a DECLARED local
+/// export (`localExports`) beside an `export * from common` — whose star target is an EVENT-FREE
+/// objectExport definer (the once-vs-double identity-witness target). The local export is what a
+/// non-demanding entry consumes while the star hop stays dead for it. Purely structural.
+function hasDeadBarrelHopShape(program: ProgramModel): boolean {
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  return program.modules.some((bridge) => {
+    if (bridge.format !== "esm" || (bridge.localExports?.length ?? 0) === 0) {
+      return false;
+    }
+    return bridge.dependencies.some((dependency) => {
+      if (dependency.kind !== "esm-reexport-star") {
+        return false;
+      }
+      const target = modulesById.get(dependency.target);
+      // Route the export-shape read through `moduleProfile` (the single flag interpreter), never the
+      // raw `objectExport` flag.
+      return target !== undefined && moduleProfile(target).exportShape.kind === "fresh-object";
+    });
+  });
+}
+
 export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[] {
   const tags = new Set<string>();
   // The consumer takes ONLY the AnalyzedProgram and reads the program from it (no separate program
@@ -2922,13 +3317,21 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     tags.add("chunking:default");
   }
 
-  // The persisted BuildConfig axes (W14a): one tag per rolled value so a density scan sees both settings
-  // of each axis. `includeDependenciesRecursively` (the global codeSplitting fallback, `false` an
+  // The persisted BuildConfig axes: one tag per rolled value so a density scan sees both settings of
+  // each axis. `includeDependenciesRecursively` (the global codeSplitting fallback, `false` an
   // ingredient of the #9887 catch) and `lazyBarrel` (rolldown's barrel-pruning optimization) are rolled;
-  // `preserveEntrySignatures` / `strictExecutionOrder` are fixed, so they carry no per-value axis tag.
+  // `strictExecutionOrder` (W14c) is not rolled in random-mixed but IS a per-value axis now (a seo:false
+  // cell / the directed cross-entry-leak builder flips it), so a density scan can see both settings.
   const build = buildConfigOf(program);
   tags.add(`axis:include-dependencies-recursively:${String(build.includeDependenciesRecursively)}`);
   tags.add(`axis:lazy-barrel:${String(build.lazyBarrel)}`);
+  tags.add(`axis:strict-execution-order:${String(build.strictExecutionOrder)}`);
+  // The #9998 cross-entry-leak structural signature (W14c): a seo:false program with a codeSplitting
+  // group whose reach spans DISJOINT entry-reachability sets — the config that runs one entry's
+  // top-level when a disjoint entry loads, caught by the reachability-isolation oracle.
+  if (build.strictExecutionOrder === false && hasCrossEntryColocatingGroup(analyzed)) {
+    tags.add("mechanism:cross-entry-leak");
+  }
 
   // The #9887 cross-chunk init-cycle structural signature (W14-10 / ingredient D4): a manual chunk split
   // where a cross-group CJS-requires-ESM edge CLOSES an actual chunk cycle rolldown mis-orders
@@ -3234,6 +3637,30 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   if (dependencyKinds.has("esm-reexport-star")) {
     tags.add("variation:reexport-star");
   }
+  // The `export * as ns from` namespace re-export (M7, W14c): a barrel re-exporting a whole namespace
+  // object under a name, read as a nested `outer.ns.member`.
+  if (dependencyKinds.has("esm-reexport-namespace")) {
+    tags.add("variation:reexport-namespace");
+  }
+  // A nested namespace member read (`outer.ns.member`, W14c): a namespace import whose read path has
+  // depth ≥ 2 — it routes through a re-exported namespace to the origin.
+  if (
+    program.modules.some((module) =>
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-namespace-import" &&
+          dependency.readMembers.some((path) => path.length >= 2),
+      ),
+    )
+  ) {
+    tags.add("variation:nested-namespace-read");
+  }
+  // The DEAD-barrel-hop witness (M5, W14c): a MIXED barrel (a declared local export beside
+  // `export * from common`) whose star target is an event-free objectExport captured by identity — the
+  // split-demand dead-hop shape.
+  if (hasDeadBarrelHopShape(program)) {
+    tags.add("mechanism:dead-reexport-hop");
+  }
   if (
     program.modules.some((module) =>
       module.dependencies.some(
@@ -3406,8 +3833,12 @@ function hasCompletePureDefinerConjunction(
           (dependency) =>
             dependency.kind === "esm-namespace-import" &&
             dependency.target === barrel.id &&
-            dependency.readMembers.some((member) => {
-              const supply = routeByTargetName.get(`${barrel.id}\0${member}`);
+            dependency.readMembers.some((memberPath) => {
+              // The name demanded ON THE BARREL is the FIRST path component (a nested read routes its
+              // deeper components onward from a re-exported namespace, not from the barrel).
+              const member = memberPath[0];
+              const supply =
+                member === undefined ? undefined : routeByTargetName.get(`${barrel.id}\0${member}`);
               return (
                 supply !== undefined &&
                 supply.status === "supplied" &&
@@ -3880,7 +4311,7 @@ function applyStaticallyInvisibleReads(
       if (namespaceBindings.size > 0) {
         const rewritten = reads.map(
           (read): ValueRead =>
-            read.member !== undefined &&
+            (read.memberPath?.length ?? 0) > 0 &&
             read.computed !== true &&
             namespaceBindings.has(read.binding) &&
             rng.integer(3) === 0

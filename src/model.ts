@@ -3,7 +3,7 @@ export type ModuleFormat = "esm" | "cjs";
 export type EventValue = string | number | boolean | null;
 
 /// Reads the value carried by a dependency binding in the reading module's scope: an ESM
-/// value-import's `localName`, or a CJS require-result binding (then `member` names the exported
+/// value-import's `localName`, or a CJS require-result binding (then `memberPath` names the exported
 /// property read off the required module's exports). Most reads cross forward-only edges (the target
 /// is fully evaluated before the reader). The two flags below make a read TOTAL across a cycle edge,
 /// where the target may still be evaluating when the read runs, so cycle value flow never hits TDZ
@@ -21,16 +21,26 @@ export type EventValue = string | number | boolean | null;
 ///   so a mis-timed export assignment diverges visibly instead of crashing identically on both sides.
 export interface ValueRead {
   readonly binding: string;
-  readonly member?: string;
+  /// The CANONICAL member-path representation (W14c): the chain of property accesses applied to
+  /// `binding`, rendered `binding.p0.p1.…`. A plain value binding read carries no `memberPath` (or an
+  /// empty one). A single-member namespace read (`ns.foo`) or a CJS readable-require member
+  /// (`req.name`) is a LENGTH-1 path `["foo"]` / `["name"]`. A LENGTH-≥2 path is a NESTED namespace
+  /// member read (`outer.ns.member`), where `binding` is a namespace import, `p0` names a re-exported
+  /// namespace (`export * as p0 from …` on the target), and the tail reads through it — the demand for
+  /// the deepest member routes to the namespace re-export's origin (see `analyzed-program.ts`). This
+  /// ONE representation SUBSUMES the former single-member `member` field: nothing carries a bare
+  /// `member` any more.
+  readonly memberPath?: readonly string[];
   readonly call?: true;
   readonly guard?: true;
-  /// When `true`, a namespace member read renders as a COMPUTED access `binding[<runtime key>]`
-  /// instead of `binding.member`, where the key is a module-level string built at runtime so the
-  /// bundler's static analysis cannot see which export is used (the shadcn `ns[k]` consumer shape).
-  /// The observed value is identical to the plain member read; only the syntactic visibility differs.
-  /// Valid only on a namespace member read (a read with a `member` whose binding is a namespace
-  /// import) — see `validate-model.ts`. A statically-invisible use is what family B needs to slip past
-  /// on-demand wrapping's per-export liveness (see `.agents/docs/real-app-bug-families.md`).
+  /// When `true`, the DEEPEST member of a namespace member read renders as a COMPUTED access
+  /// `…[<runtime key>]` instead of `….member`, where the key is a module-level string built at runtime
+  /// so the bundler's static analysis cannot see which export is used (the shadcn `ns[k]` consumer
+  /// shape). Intermediate namespace hops (`outer.ns`) stay static; only the final export access is
+  /// hidden. The observed value is identical to the plain member read; only the syntactic visibility
+  /// differs. Valid only on a namespace member read (a non-empty `memberPath` whose binding is a
+  /// namespace import) — see `validate-model.ts`. A statically-invisible use is what family B needs to
+  /// slip past on-demand wrapping's per-export liveness (see `.agents/docs/real-app-bug-families.md`).
   readonly computed?: true;
 }
 
@@ -110,14 +120,21 @@ export interface EsmNamespaceImportOperation {
   readonly kind: "esm-namespace-import";
   readonly target: string;
   readonly localName: string;
-  readonly readMembers: readonly string[];
-  /// The subset of `readMembers` read as CALLS (`localName.member()`), folding the callable export's
+  /// The member PATHS read off the namespace binding (W14c). Each entry is a path `localName.p0.p1.…`:
+  /// a LENGTH-1 path `[foo]` is a plain `ns.foo`; a LENGTH-≥2 path `[ns, foo]` reads a member through a
+  /// re-exported namespace (`export * as ns from …` on the target — the M7 shape), so `ns.foo`'s demand
+  /// routes to the namespace re-export's origin. The demand fixpoint / consumption builder in
+  /// `analyzed-program.ts` walks each path; `readableBindingsOf` turns each into a `ValueRead` with the
+  /// SAME `memberPath`.
+  readonly readMembers: readonly (readonly string[])[];
+  /// The DEEPEST member names read as CALLS (`localName.….member()`), folding the callable export's
   /// RETURN value instead of the binding itself. A call member targets a `callableOwnState` definer's
   /// function export (reached directly or forwarded through a barrel), so the read witnesses the
   /// definer's own-state read through a function call rather than a direct value read — the exact
   /// shape (callable export + own-state read) the shadcn breakage manifested in. Forward-only like any
-  /// namespace read (a namespace import may not close a cycle). Must be a subset of `readMembers`;
-  /// `validate-model.ts` enforces it. See `.agents/docs/object-identity-and-callable-own-state.md`.
+  /// namespace read (a namespace import may not close a cycle). Must name deepest members of
+  /// `readMembers`; `validate-model.ts` enforces it. See
+  /// `.agents/docs/object-identity-and-callable-own-state.md`.
   readonly callMembers?: readonly string[];
 }
 
@@ -146,6 +163,21 @@ export interface EsmReexportNamedOperation {
 export interface EsmReexportStarOperation {
   readonly kind: "esm-reexport-star";
   readonly target: string;
+}
+
+/// `export * as <exportedName> from "..."` — re-exports the target's whole NAMESPACE OBJECT under one
+/// named export (the M7 shape). Unlike `export *` (which spreads the target's names into the barrel's
+/// own namespace), this synthesizes ONE new export whose value is the target's namespace object. So the
+/// barrel is a LOCAL DEFINER of `exportedName` (it shadows any `export *` on the same module — the ONE
+/// `starShadowedNames` rule gains this provision), and a downstream `outer.exportedName.member` read
+/// routes the member demand to the target (the namespace's origin). Forward-only; the barrel emits no
+/// events. Consumed two ways: a NESTED member read (`outer.ns.member`, folded numerically) or a
+/// namespace-object IDENTITY capture (`outer.ns` as an `objectRef`, composing with the object-identity
+/// witness where legal). See `.agents/docs/namespace-and-barrel-reexports.md`.
+export interface EsmReexportNamespaceOperation {
+  readonly kind: "esm-reexport-namespace";
+  readonly target: string;
+  readonly exportedName: string;
 }
 
 /// `import { <sourceName> as <localName> } from "..."; export { <localName> as <exportedName> };` —
@@ -191,6 +223,7 @@ export type EsmDependencyOperation =
   | EsmDynamicImportOperation
   | EsmReexportNamedOperation
   | EsmReexportStarOperation
+  | EsmReexportNamespaceOperation
   | EsmLocalReexportOperation;
 
 export type DependencyOperation = EsmDependencyOperation | CjsRequireOperation;
@@ -411,6 +444,16 @@ export interface OrganicChunkGroupConfig {
   readonly minShareCount?: number;
   readonly priority?: number;
   readonly includeDependenciesRecursively?: boolean;
+  /// `CodeSplittingGroup.entriesAware` (W14c) — split the group's modules into per-entry-reachability
+  /// subgroups instead of one shared chunk. Paired with `entriesAwareMergeThreshold` it is the exact
+  /// #9998 config: at `strictExecutionOrder:false` the merged subgroup co-locates modules of DISJOINT
+  /// entry reachability into one eager chunk, so loading one entry runs another's top-level (the
+  /// cross-entry leak the reachability-isolation oracle catches). Bundle-side only.
+  readonly entriesAware?: boolean;
+  /// `CodeSplittingGroup.entriesAwareMergeThreshold` — the byte size below which `entriesAware`
+  /// subgroups merge back into one chunk (only meaningful with `entriesAware:true`). A large threshold
+  /// forces the merge that manufactures the #9998 cross-entry co-location.
+  readonly entriesAwareMergeThreshold?: number;
 }
 
 /// A program carries at most ONE chunking config (`Chunking`), plus the other bundle-side build axes,
@@ -647,12 +690,13 @@ export function metadataPureModuleIds(program: ProgramModel): ReadonlySet<string
 
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an
 /// ESM value-import contributes its `localName`; an ESM namespace-import contributes one read per
-/// `readMembers` entry (`localName.member`); a CJS readable require contributes its `resultBinding`
-/// plus the `readName` member read off the required module's exports; an ESM LOCAL re-export
-/// contributes its `localName` (the binding is genuinely imported into scope, unlike a source-form
-/// re-export). Pure re-export dependencies (`export … from`) bind nothing locally and contribute no
-/// readable value (a barrel forwards, it does not read). This is a pure model fact shared by the
-/// generator (choosing event reads), the renderer (folding exports), and validation.
+/// `readMembers` PATH (`localName.p0.p1…`, W14c); a CJS readable require contributes its
+/// `resultBinding` plus the `readName` member read (a length-1 `memberPath`) off the required module's
+/// exports; an ESM LOCAL re-export contributes its `localName` (the binding is genuinely imported into
+/// scope, unlike a source-form re-export). Pure re-export dependencies (`export … from`, `export * as
+/// ns from`) bind nothing locally and contribute no readable value (a barrel forwards, it does not
+/// read). This is a pure model fact shared by the generator (choosing event reads), the renderer
+/// (folding exports), and validation.
 export function readableBindingsOf(
   dependencies: readonly DependencyOperation[],
 ): readonly ValueRead[] {
@@ -674,13 +718,16 @@ export function readableBindingsOf(
       );
     } else if (dependency.kind === "esm-namespace-import") {
       // A member in `callMembers` reads a callable export's RETURN value (`localName.member()`); the
-      // rest read the member directly.
+      // rest read the member directly. `readMembers` entries are member PATHS (W14c): a length-1 path
+      // is a plain `ns.foo`, a longer one a nested `ns.re.foo` through a re-exported namespace. A call
+      // member matches by its DEEPEST name (what `callMembers` records).
       const callMembers = new Set(dependency.callMembers ?? []);
-      for (const member of dependency.readMembers) {
+      for (const memberPath of dependency.readMembers) {
+        const deepest = memberPath[memberPath.length - 1];
         reads.push(
-          callMembers.has(member)
-            ? { binding: dependency.localName, member, call: true }
-            : { binding: dependency.localName, member },
+          deepest !== undefined && callMembers.has(deepest)
+            ? { binding: dependency.localName, memberPath, call: true }
+            : { binding: dependency.localName, memberPath },
         );
       }
     } else if (
@@ -691,10 +738,61 @@ export function readableBindingsOf(
       // A guarded require reads a possibly-partial cyclic export; keep the read total.
       reads.push(
         dependency.guard === true
-          ? { binding: dependency.resultBinding, member: dependency.readName, guard: true }
-          : { binding: dependency.resultBinding, member: dependency.readName },
+          ? { binding: dependency.resultBinding, memberPath: [dependency.readName], guard: true }
+          : { binding: dependency.resultBinding, memberPath: [dependency.readName] },
       );
     }
   }
   return reads;
+}
+
+/// The deepest member name a read names (the actual export it observes), or `undefined` for a plain
+/// binding read (no `memberPath`). This is what callability / call-membership keys off, and the name a
+/// namespace member read demands at the end of its path.
+export function readDeepestMember(read: ValueRead): string | undefined {
+  const path = read.memberPath;
+  if (path === undefined || path.length === 0) {
+    return undefined;
+  }
+  return path[path.length - 1];
+}
+
+/// Migrate a LEGACY (schema ≤18) program's reads onto the canonical member-PATH representation (W14c),
+/// following the `buildConfigOf` / `packagesOf` legacy-reader pattern so an old failure artifact still
+/// replays. A v18 namespace read carried a bare `member: string`; a v18 namespace import carried
+/// `readMembers: string[]`. Both become the length-1 `memberPath` / path-array shape the current code
+/// reads. A program already in the new shape (every namespace `readMembers` entry an array, no read
+/// carrying `member`) passes through untouched. Applied ONCE at an artifact load boundary (shrink /
+/// replay); freshly generated programs are already canonical.
+export function normalizeLegacyReads(program: ProgramModel): ProgramModel {
+  let changed = false;
+  const migrateRead = (read: ValueRead): ValueRead => {
+    const legacyMember = (read as { readonly member?: string }).member;
+    if (legacyMember === undefined) {
+      return read;
+    }
+    changed = true;
+    const { member: _dropped, ...rest } = read as ValueRead & { member?: string };
+    return { ...rest, memberPath: [legacyMember] };
+  };
+  const modules = program.modules.map((module): ModuleModel => {
+    const dependencies = module.dependencies.map((dependency): DependencyOperation => {
+      if (dependency.kind !== "esm-namespace-import") {
+        return dependency;
+      }
+      const readMembers = dependency.readMembers.map((entry) => {
+        if (typeof entry === "string") {
+          changed = true;
+          return [entry];
+        }
+        return entry;
+      });
+      return { ...dependency, readMembers } as DependencyOperation;
+    });
+    const events = module.events.map((event) =>
+      event.reads === undefined ? event : { ...event, reads: event.reads.map(migrateRead) },
+    );
+    return { ...module, dependencies, events } as ModuleModel;
+  });
+  return changed ? ({ ...program, modules } as ProgramModel) : program;
 }

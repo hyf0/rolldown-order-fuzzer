@@ -26,7 +26,10 @@ export type MismatchReason =
   | "events-reordered"
   | "events-missing"
   | "events-extra"
-  | "events-mismatch";
+  | "events-mismatch"
+  // The reachability-isolation oracle's verdict (W14c, `seo:false`): the bundle executed a module
+  // outside the reachability of the entries loaded so far — a cross-entry leak (the #9998 class).
+  | "reachability-isolation";
 
 export interface MismatchVerdict {
   readonly kind: "mismatch";
@@ -42,7 +45,22 @@ export type Verdict =
 
 const PASS = { kind: "pass", signature: "pass" } as const satisfies PassingVerdict;
 
-export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutcome): Verdict {
+/// How the two event streams are compared. The DEFAULT (`compareEvents`) is the full-order oracle: the
+/// bundle must reproduce the source's event sequence exactly (phase-marker aware). A `seo:false` case
+/// swaps in the reachability-isolation oracle (`src/isolation-oracle.ts`), which checks a set-based
+/// invariant instead — legal relaxed-order reshuffles do not red it, only cross-entry leaks do. This is
+/// the ONE seam the order policy plugs into, so campaign / replay / shrink / identity all inherit it by
+/// passing the SAME comparator derived from the persisted `BuildConfig`.
+export type EventComparator = (
+  expected: readonly ExecutionEvent[],
+  actual: readonly ExecutionEvent[],
+) => PassingVerdict | MismatchVerdict;
+
+export function classifyVerdict(
+  source: ExecutionOutcome,
+  bundle: ExecutionOutcome,
+  compareEventsFn: EventComparator = compareEvents,
+): Verdict {
   if (source.status === "harness-error") {
     return invalidHarness("source-harness-error", "source", source.error);
   }
@@ -77,7 +95,7 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
         `error-mismatch:source=${serializeError(source.error)}:bundle=${serializeError(bundle.error)}`,
       );
     }
-    const eventVerdict = compareEvents(source.events, bundle.events);
+    const eventVerdict = compareEventsFn(source.events, bundle.events);
     if (eventVerdict.kind === "pass") {
       return eventVerdict;
     }
@@ -94,7 +112,7 @@ export function classifyVerdict(source: ExecutionOutcome, bundle: ExecutionOutco
     return mismatch("bundle-only-crash", `bundle-only-crash:${serializeError(bundle.error)}`);
   }
 
-  return compareEvents(source.events, bundle.events);
+  return compareEventsFn(source.events, bundle.events);
 }
 
 function compareEvents(

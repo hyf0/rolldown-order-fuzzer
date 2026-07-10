@@ -46,6 +46,12 @@ export {
 
 const UINT32_RANGE = 0x1_0000_0000;
 
+// 19: W14c — the canonical member-PATH `ValueRead` (subsuming the single-member namespace read), the
+// `export * as ns from` namespace re-export operation, the enriched canonical `RouteHop`
+// (target + exported/imported name), `strictExecutionOrder` becomes a rollable axis tied to the
+// reachability-isolation oracle at `seo:false`, and the `entriesAware`/`entriesAwareMergeThreshold`
+// organic-group fields (the #9998 cross-entry-leak config). Backward compatible: a v18 namespace read
+// carried a bare `member`, migrated to a length-1 `memberPath` on read.
 // 18: W14b — the package/layout model (`ProgramModel.packages`: fixture-local node_modules packages
 // with boolean/array `sideEffects` metadata and bare-specifier imports), declared `localExports`
 // beside a star, and the source-less local re-export operation. The module-level `sideEffectFree`
@@ -61,7 +67,7 @@ const UINT32_RANGE = 0x1_0000_0000;
 // per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 18 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 19 as const;
 
 export interface CampaignSummary {
   readonly casesRun: number;

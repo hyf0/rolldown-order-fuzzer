@@ -119,7 +119,7 @@ describe("validateProgramModel", () => {
               module: "cjs-reader",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "targetExports", member: "vt" }],
+              reads: [{ binding: "targetExports", memberPath: ["vt"] }],
             },
           ],
         },
@@ -191,13 +191,13 @@ describe("validateProgramModel", () => {
               kind: "esm-namespace-import",
               target: "esm-target",
               localName: "ns0",
-              readMembers: ["a", "b"],
+              readMembers: [["a"], ["b"]],
             },
             {
               kind: "esm-namespace-import",
               target: "cjs-target",
               localName: "ns1",
-              readMembers: ["c"],
+              readMembers: [["c"]],
             },
           ],
           events: [
@@ -206,9 +206,9 @@ describe("validateProgramModel", () => {
               phase: "evaluate",
               value: 1,
               reads: [
-                { binding: "ns0", member: "a" },
-                { binding: "ns0", member: "b" },
-                { binding: "ns1", member: "c" },
+                { binding: "ns0", memberPath: ["a"] },
+                { binding: "ns0", memberPath: ["b"] },
+                { binding: "ns1", memberPath: ["c"] },
               ],
             },
           ],
@@ -234,7 +234,7 @@ describe("validateProgramModel", () => {
               kind: "esm-namespace-import",
               target: "target",
               localName: "ns0",
-              readMembers: ["a"],
+              readMembers: [["a"]],
             },
           ],
           events: [
@@ -242,7 +242,7 @@ describe("validateProgramModel", () => {
               module: "reader",
               phase: "evaluate",
               value: 0,
-              reads: [{ binding: "ns0", member: "b" }, { binding: "ns0" }],
+              reads: [{ binding: "ns0", memberPath: ["b"] }, { binding: "ns0" }],
             },
           ],
         },
@@ -253,8 +253,8 @@ describe("validateProgramModel", () => {
     } satisfies ProgramModel;
 
     expect(validateProgramModel(analyzeProgram(program))).toEqual([
-      'modules[0].events[0].reads[0].member: expected a namespace member for binding "ns0", received "b"',
-      'modules[0].events[0].reads[1].member: expected a namespace member for binding "ns0", received no member',
+      'modules[0].events[0].reads[0].memberPath: expected a declared namespace member path for binding "ns0", received "b"',
+      'modules[0].events[0].reads[1].memberPath: expected a declared namespace member path for binding "ns0", received no member',
     ]);
   });
 
@@ -369,7 +369,12 @@ describe("validateProgramModel", () => {
           id: "cjs-reader",
           format: "cjs",
           dependencies: [
-            { kind: "esm-namespace-import", target: "target", localName: "ns", readMembers: ["a"] },
+            {
+              kind: "esm-namespace-import",
+              target: "target",
+              localName: "ns",
+              readMembers: [["a"]],
+            },
             { kind: "esm-reexport-star", target: "target" },
           ],
           events: [],
@@ -405,7 +410,10 @@ describe("validateProgramModel", () => {
               module: "entry",
               phase: "evaluate",
               value: 0,
-              reads: [{ binding: "missing" }, { binding: "sourceValue", member: "notAMember" }],
+              reads: [
+                { binding: "missing" },
+                { binding: "sourceValue", memberPath: ["notAMember"] },
+              ],
             },
             {
               module: "entry",
@@ -428,7 +436,7 @@ describe("validateProgramModel", () => {
 
     expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].events[0].reads[0].binding: unknown readable binding "missing" in this module',
-      'modules[0].events[0].reads[1].member: expected no member for binding "sourceValue", received "notAMember"',
+      'modules[0].events[0].reads[1].memberPath: expected no member for binding "sourceValue", received "notAMember"',
       "modules[0].events[1].value: expected a finite JSON number when the event carries reads",
     ]);
   });
@@ -463,7 +471,7 @@ describe("validateProgramModel", () => {
     } satisfies ProgramModel;
 
     expect(validateProgramModel(analyzeProgram(program))).toEqual([
-      'modules[0].events[0].reads[0].member: expected "vt" for binding "targetExports", received no member',
+      'modules[0].events[0].reads[0].memberPath: expected "vt" for binding "targetExports", received no member',
     ]);
   });
 
@@ -1041,7 +1049,7 @@ describe("validateProgramModel", () => {
               module: "a",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "a_b", member: "vb", guard: true }],
+              reads: [{ binding: "a_b", memberPath: ["vb"], guard: true }],
             },
           ],
         },
@@ -1056,7 +1064,7 @@ describe("validateProgramModel", () => {
               module: "b",
               phase: "evaluate",
               value: 2,
-              reads: [{ binding: "b_a", member: "va", guard: true }],
+              reads: [{ binding: "b_a", memberPath: ["va"], guard: true }],
             },
           ],
         },
@@ -1108,14 +1116,14 @@ describe("validateProgramModel", () => {
           id: "a",
           format: "esm",
           dependencies: [
-            { kind: "esm-namespace-import", target: "b", localName: "a_ns", readMembers: ["vb"] },
+            { kind: "esm-namespace-import", target: "b", localName: "a_ns", readMembers: [["vb"]] },
           ],
           events: [
             {
               module: "a",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "a_ns", member: "vb" }],
+              reads: [{ binding: "a_ns", memberPath: ["vb"] }],
             },
           ],
         },
@@ -1142,7 +1150,12 @@ describe("validateProgramModel", () => {
             { kind: "cjs-require", target: "b", resultBinding: "a_b", readName: "vb" },
           ],
           events: [
-            { module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_b", member: "vb" }] },
+            {
+              module: "a",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "a_b", memberPath: ["vb"] }],
+            },
           ],
         },
         {
@@ -1236,7 +1249,7 @@ describe("validateProgramModel", () => {
               module: "entry",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "t", member: "v" }],
+              reads: [{ binding: "t", memberPath: ["v"] }],
             },
           ],
         },
@@ -1406,7 +1419,7 @@ describe("validateProgramModel", () => {
               kind: "esm-namespace-import",
               target: "barrel",
               localName: "ns",
-              readMembers: ["vdef"],
+              readMembers: [["vdef"]],
             },
           ],
           events: [],
@@ -1485,7 +1498,7 @@ describe("validateProgramModel", () => {
               module: "a",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "r", member: "default" }],
+              reads: [{ binding: "r", memberPath: ["default"] }],
             },
           ],
         },
@@ -1716,7 +1729,7 @@ describe("validateProgramModel", () => {
                 kind: "esm-namespace-import",
                 target: "barrel",
                 localName: "ns",
-                readMembers: ["vx"],
+                readMembers: [["vx"]],
                 callMembers: ["vx"],
               },
             ],
@@ -1725,7 +1738,7 @@ describe("validateProgramModel", () => {
                 module: "consumer",
                 phase: "evaluate",
                 value: 1,
-                reads: [{ binding: "ns", member: "vx", call: true }],
+                reads: [{ binding: "ns", memberPath: ["vx"], call: true }],
               },
             ],
           },
@@ -1804,7 +1817,7 @@ describe("validateProgramModel", () => {
                 kind: "esm-namespace-import",
                 target: "cjsdef",
                 localName: "ns",
-                readMembers: ["vx"],
+                readMembers: [["vx"]],
                 callMembers: ["vx"],
               },
             ],
@@ -1813,7 +1826,7 @@ describe("validateProgramModel", () => {
                 module: "consumer",
                 phase: "evaluate",
                 value: 1,
-                reads: [{ binding: "ns", member: "vx", call: true }],
+                reads: [{ binding: "ns", memberPath: ["vx"], call: true }],
               },
             ],
           },
@@ -2171,16 +2184,23 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     );
   });
 
-  test("accepts a valid build config, rejects strictExecutionOrder:false (W14a policy)", () => {
+  test("accepts a valid build config, including strictExecutionOrder:false (W14c rollable axis)", () => {
     expect(validateProgramModel(analyzeProgram({ ...baseModules(), build }))).toEqual([]);
-    // seo:false is unrepresentable until the relaxed-order oracle (W14c) — it needs that weaker oracle,
-    // so the validator rejects a hand-crafted seo:false model BEFORE the full-order oracle sees it.
+    // seo:false is REPRESENTABLE as of W14c — it is tied to the reachability-isolation oracle in
+    // program-run, so the validator accepts a seo:false model rather than rejecting it.
     const seoFalse: ProgramModel = {
       ...baseModules(),
       build: { ...build, chunking: { kind: "automatic" }, strictExecutionOrder: false },
     };
-    expect(validateProgramModel(analyzeProgram(seoFalse))).toContain(
-      "build.strictExecutionOrder: must be true (a seo:false case needs the W14c relaxed-order oracle), received false",
+    expect(validateProgramModel(analyzeProgram(seoFalse))).toEqual([]);
+    // A NON-boolean strictExecutionOrder is still rejected.
+    const seoBogus: ProgramModel = {
+      ...baseModules(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      build: { ...build, chunking: { kind: "automatic" }, strictExecutionOrder: "yes" as any },
+    };
+    expect(validateProgramModel(analyzeProgram(seoBogus))).toContain(
+      "build.strictExecutionOrder: must be a boolean",
     );
   });
 

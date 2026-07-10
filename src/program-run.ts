@@ -15,7 +15,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { analyzeProgram, type AnalyzedProgram } from "./analyzed-program.ts";
 import { executeManifest } from "./execute.ts";
 import type { FormatRegime, GeneratedCase } from "./generate.ts";
-import type { ProgramModel } from "./model.ts";
+import { makeReachabilityIsolationOracle } from "./isolation-oracle.ts";
+import { buildConfigOf, type ProgramModel } from "./model.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -28,7 +29,7 @@ import {
   type FailedRolldownAdapterResult,
   type ObservedRuntimeIdentity,
 } from "./rolldown-adapter.ts";
-import { classifyVerdict, type Verdict } from "./verdict.ts";
+import { classifyVerdict, type EventComparator, type Verdict } from "./verdict.ts";
 
 const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
   /(?:file:\/\/\/|(?:[A-Za-z]:)?[\\/])(?:[^\s"'`]*[\\/])?rolldown-order-fuzzer-[A-Za-z0-9]{6}/g;
@@ -174,6 +175,13 @@ export async function executeProgram(
       "executeProgram: the supplied analysis is for a different program than the one being run",
     );
   }
+  // The ORDER ORACLE, derived ONCE from the persisted BuildConfig: a `seo:false` case uses the
+  // reachability-isolation oracle (a relaxed-order case never uses the full-order oracle, which would
+  // false-positive on legal reorderings); a `seo:true` case uses the default full-order comparison.
+  const orderOracle: EventComparator | undefined =
+    buildConfigOf(program).strictExecutionOrder === false
+      ? makeReachabilityIsolationOracle(analysis)
+      : undefined;
   const rendered = renderProgram(analysis);
   const sourceOutcome = await dependencies.executeSource(rendered);
   if (sourceOutcome.status === "timeout" || sourceOutcome.status === "harness-error") {
@@ -189,7 +197,7 @@ export async function executeProgram(
       bundleManifest: null,
       bundleFiles: [],
       runtimeIdentity,
-      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
+      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome, orderOracle),
     };
   }
 
@@ -210,7 +218,7 @@ export async function executeProgram(
       bundleManifest: built.bundleManifest,
       bundleFiles: built.bundleFiles,
       runtimeIdentity,
-      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome),
+      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome, orderOracle),
     };
   }
 
@@ -224,7 +232,7 @@ export async function executeProgram(
     bundleManifest: built.value.bundleManifest,
     bundleFiles: built.value.bundleFiles,
     runtimeIdentity,
-    verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome),
+    verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome, orderOracle),
   };
 }
 
@@ -244,19 +252,29 @@ export async function executeGeneratedCase(
   return { generated, options, ...run };
 }
 
+/// Classify a campaign verdict. `compareEventsFn` is the ORDER ORACLE — omitted (full-order) for a
+/// `seo:true` case, and the reachability-isolation comparator for a `seo:false` case (derived from the
+/// persisted `BuildConfig`, so every caller that passes it uses the SAME policy). Crash / error /
+/// build-failure classification is order-independent and unchanged; only the event-sequence comparison
+/// swaps.
 export function classifyCampaignVerdict(
   sourceOutcome: ExecutionOutcome,
   bundleOutcome: CampaignBundleOutcome,
+  compareEventsFn?: EventComparator,
 ): CampaignVerdict {
   if (sourceOutcome.status === "harness-error" || sourceOutcome.status === "timeout") {
-    return classifyVerdict(sourceOutcome, {
-      version: EXECUTION_PROTOCOL_VERSION,
-      status: "timeout",
-      events: [],
-    });
+    return classifyVerdict(
+      sourceOutcome,
+      {
+        version: EXECUTION_PROTOCOL_VERSION,
+        status: "timeout",
+        events: [],
+      },
+      compareEventsFn,
+    );
   }
   if (bundleOutcome.status !== "not-run") {
-    return classifyVerdict(sourceOutcome, bundleOutcome);
+    return classifyVerdict(sourceOutcome, bundleOutcome, compareEventsFn);
   }
   if (bundleOutcome.reason === "adapter-failure") {
     return buildFailureVerdict(bundleOutcome.adapterFailure);

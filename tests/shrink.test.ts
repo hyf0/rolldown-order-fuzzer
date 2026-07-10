@@ -67,7 +67,7 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
               kind: "esm-namespace-import",
               target: "def",
               localName: "ns",
-              readMembers: ["vd1", "vd2"],
+              readMembers: [["vd1"], ["vd2"]],
               callMembers: ["vd1", "vd2"],
             },
           ],
@@ -77,8 +77,8 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
               phase: "evaluate",
               value: 1,
               reads: [
-                { binding: "ns", member: "vd1", call: true },
-                { binding: "ns", member: "vd2", call: true },
+                { binding: "ns", memberPath: ["vd1"], call: true },
+                { binding: "ns", memberPath: ["vd2"], call: true },
               ],
             },
           ],
@@ -108,7 +108,7 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
               kind: "esm-namespace-import",
               target: "barrel",
               localName: "ns",
-              readMembers: ["outer"],
+              readMembers: [["outer"]],
             },
           ],
           events: [
@@ -116,7 +116,7 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
               module: "consumer",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "ns", member: "outer" }],
+              reads: [{ binding: "ns", memberPath: ["outer"] }],
             },
           ],
         },
@@ -152,8 +152,8 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       return (
         dep?.kind === "esm-namespace-import" &&
         dep.target === "def" &&
-        dep.readMembers[0] === "inner" &&
-        read?.member === "inner"
+        dep.readMembers[0]?.[0] === "inner" &&
+        read?.memberPath?.[0] === "inner"
       );
     });
     expect(rewired).toBeDefined();
@@ -329,7 +329,7 @@ describe("shrink candidate fixes (finding E)", () => {
               kind: "esm-namespace-import",
               target: "barrel",
               localName: "ns",
-              readMembers: ["outer"],
+              readMembers: [["outer"]],
               callMembers: ["outer"],
             },
           ],
@@ -338,7 +338,7 @@ describe("shrink candidate fixes (finding E)", () => {
               module: "consumer",
               phase: "evaluate",
               value: 1,
-              reads: [{ binding: "ns", member: "outer", call: true }],
+              reads: [{ binding: "ns", memberPath: ["outer"], call: true }],
             },
           ],
         },
@@ -368,7 +368,7 @@ describe("shrink candidate fixes (finding E)", () => {
       return (
         dep?.kind === "esm-namespace-import" &&
         dep.target === "def" &&
-        dep.readMembers[0] === "inner" &&
+        dep.readMembers[0]?.[0] === "inner" &&
         dep.callMembers?.[0] === "inner"
       );
     });
