@@ -13,6 +13,7 @@ import type {
   ScheduleOperation,
   ValueRead,
 } from "./model.ts";
+import { analyzeProgram, type AnalyzedProgram } from "./analyzed-program.ts";
 import { moduleProfile, programChunking, readableBindingsOf } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
@@ -636,6 +637,37 @@ function buildRandomMixed(
   drafts.push(...injectCallableOwnStateClusters(rng, drafts, regime));
   drafts.push(...injectObjectIdentityClusters(rng, drafts, regime));
 
+  return {
+    program: finalizeProgram({ drafts, cycleMemberIds, registrations, conjunctionConsumerIds }, rng)
+      .program,
+  };
+}
+
+/// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
+/// has been wired — the mutable graph the random generator built, ready to be FROZEN. `finalizeProgram`
+/// is the single point that consumes it.
+interface GenerationContext {
+  /// The module drafts in creation order (DAG, then cycle cluster, then barrels, then witness clusters).
+  readonly drafts: readonly RandomModuleDraft[];
+  /// The ids of the single-format cycle cluster's members (empty when the case has no cycle).
+  readonly cycleMemberIds: ReadonlySet<string>;
+  /// Dynamic-import registrations in CREATION order — the transient ordinals the schedule RNG iterates.
+  /// Kept as a creation-ordered side list (not re-derived by a module scan) precisely so that order,
+  /// and thus the seeded schedule, stays byte-identical; membership/owner/target already match the final
+  /// graph because each entry was recorded as its dynamic edge was added.
+  readonly registrations: readonly { readonly owner: string; readonly registration: string }[];
+  /// The family-A conjunction consumers, left untouched by the statically-invisible-read rewrite.
+  readonly conjunctionConsumerIds: ReadonlySet<string>;
+}
+
+/// Freeze a generation context into a finalized, ANALYZED program: turn each draft into a module
+/// (asserting special-role drafts, folding value reads), choose entries, build the schedule from the
+/// creation-ordered registrations, roll the chunking config, flag side-effect-free modules, and rewrite
+/// some reads statically-invisible — then build the ProgramFacts + one canonical ExportDemandPlan over
+/// the frozen graph. This is the single finalization point; it consumes the SAME generation RNG in the
+/// SAME order the inline tail did, so the corpus is byte-identical, and analysis is pure (no RNG).
+function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedProgram {
+  const { drafts, cycleMemberIds, registrations, conjunctionConsumerIds } = context;
   const modules = drafts.map((draft): ModuleModel => {
     // Finalization ASSERTS a draft's dependencies are already legal for its format rather than silently
     // filtering illegal kinds away — a bad future transform then fails loudly at generation instead of
@@ -765,19 +797,18 @@ function buildRandomMixed(
     conjunctionConsumerIds,
   );
 
-  return {
-    program: {
-      modules: finalModules,
-      entries,
-      schedule,
-      ...(chunking.manualChunkGroups !== undefined
-        ? { manualChunkGroups: chunking.manualChunkGroups }
-        : {}),
-      ...(chunking.organicChunkGroups !== undefined
-        ? { organicChunkGroups: chunking.organicChunkGroups }
-        : {}),
-    },
+  const program: ProgramModel = {
+    modules: finalModules,
+    entries,
+    schedule,
+    ...(chunking.manualChunkGroups !== undefined
+      ? { manualChunkGroups: chunking.manualChunkGroups }
+      : {}),
+    ...(chunking.organicChunkGroups !== undefined
+      ? { organicChunkGroups: chunking.organicChunkGroups }
+      : {}),
   };
+  return analyzeProgram(program);
 }
 
 /// The per-case chunking-config axis (wave 6): roll one of three modes and produce the matching
