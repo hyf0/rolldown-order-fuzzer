@@ -2173,14 +2173,14 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
 
   test("accepts a valid build config, rejects strictExecutionOrder:false (W14a policy)", () => {
     expect(validateProgramModel(analyzeProgram({ ...baseModules(), build }))).toEqual([]);
-    // seo:false is unrepresentable in W14a — it needs the W14b relaxed-order oracle, so the validator
-    // rejects a hand-crafted seo:false model BEFORE it can be compared with the full-order oracle.
+    // seo:false is unrepresentable until the relaxed-order oracle (W14c) — it needs that weaker oracle,
+    // so the validator rejects a hand-crafted seo:false model BEFORE the full-order oracle sees it.
     const seoFalse: ProgramModel = {
       ...baseModules(),
       build: { ...build, chunking: { kind: "automatic" }, strictExecutionOrder: false },
     };
     expect(validateProgramModel(analyzeProgram(seoFalse))).toContain(
-      "build.strictExecutionOrder: must be true in W14a (a seo:false case needs the W14b relaxed-order oracle), received false",
+      "build.strictExecutionOrder: must be true (a seo:false case needs the W14c relaxed-order oracle), received false",
     );
   });
 

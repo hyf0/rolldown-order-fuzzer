@@ -1,7 +1,7 @@
 import type { DependencyOperation, ModuleExportShape, ModuleModel, ProgramModel } from "./model.ts";
 import { moduleProfile } from "./model.ts";
 import type { ExportOrigin, ExportSupply } from "./program-facts.ts";
-import { ProgramFacts } from "./program-facts.ts";
+import { ProgramFacts, providedExportNames, starShadowedNames } from "./program-facts.ts";
 
 /// The finalized, frozen view of ONE program that every downstream layer consumes: the graph facts and
 /// the single canonical export-demand plan. Renderer planning, validation, coverage tags, and shrinking
@@ -459,39 +459,14 @@ function collectRequestedExports(program: ProgramModel): {
   return { requestedNames: requestedExports, callableNames: callableExports };
 }
 
-/// The export names a module's dependencies PROVIDE without local synthesis: a named re-export's
-/// `exportedName` (forwarded from its target) and a LOCAL re-export's `exportedName` (bound to its
-/// imported binding). Shared by the demand fixpoint (such names never forward through a star) and the
-/// renderer's local-synthesis subtraction.
-function providedExportNames(module: ModuleModel): ReadonlySet<string> {
-  return new Set(
-    module.dependencies.flatMap((dependency) =>
-      dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport"
-        ? [dependency.exportedName]
-        : [],
-    ),
-  );
-}
-
-/// The names a module's own surface SHADOWS from its star re-export (ES: a local export wins over
-/// `export *`): re-export-provided names plus DECLARED local exports (`localExports` — the vben
-/// own-helper-next-to-a-star shape). Demand for a shadowed name never forwards through the star.
-function starShadowedNames(module: ModuleModel): ReadonlySet<string> {
-  const shadowed = new Set(providedExportNames(module));
-  if (module.format === "esm") {
-    for (const name of module.localExports ?? []) {
-      shadowed.add(name);
-    }
-  }
-  return shadowed;
-}
-
 /// The subset of a module's requested exports it must synthesize LOCALLY (a state-derived value):
 /// everything a re-export (named, star, or local) does not provide. CJS synthesizes all; an ESM barrel
 /// forwards names via named/local re-exports or a star (which forwards everything else), leaving a
 /// pure barrel with no local exports — EXCEPT names the module DECLARES in `localExports`, which
-/// synthesize locally even beside a star (a local export shadows `export *`). RELOCATED verbatim from
-/// the renderer; the declared-names extension is additive (no existing model carries `localExports`).
+/// synthesize locally even beside a star (a local export shadows `export *`). Reads the SAME shadowing
+/// rule as the supply routing (`starShadowedNames`) — never `localExports` directly — so the demand
+/// and supply projections agree by construction (W14b.1 blocker 4): a name is synthesized locally when
+/// it is not re-export-provided AND either there is no star to suppress it or it is star-shadowed here.
 export function localExportsFor(
   module: ModuleModel,
   requested: readonly string[],
@@ -500,7 +475,7 @@ export function localExportsFor(
     return requested;
   }
   const namedProvided = providedExportNames(module);
-  const declared = new Set(module.localExports ?? []);
+  const shadowed = starShadowedNames(module);
   const hasStar = module.dependencies.some((dependency) => dependency.kind === "esm-reexport-star");
-  return requested.filter((name) => !namedProvided.has(name) && (!hasStar || declared.has(name)));
+  return requested.filter((name) => !namedProvided.has(name) && (!hasStar || shadowed.has(name)));
 }

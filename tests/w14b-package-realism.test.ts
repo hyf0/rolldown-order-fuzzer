@@ -47,10 +47,17 @@ describe("the directed family-B eager-barrel builder", () => {
     expect(entry).toContain("__hiddenRead0");
   });
 
-  test("removing any conjunction ingredient un-tags it (the tag marks COMPLETE conjunctions)", () => {
+  test("removing a CAUSAL ingredient un-tags it; revealing the hidden read does NOT", () => {
     const base = buildFamilyBEagerBarrel(new SeededRng(1)).program;
     const retag = (mutate: (program: ProgramModel) => ProgramModel): readonly string[] =>
       deriveCoverageTags(analyzeProgram(mutate(structuredClone(base) as ProgramModel)));
+    const mutateEntry = (
+      program: ProgramModel,
+      mutate: (module: ModuleModel) => ModuleModel,
+    ): ProgramModel => ({
+      ...program,
+      modules: program.modules.map((module) => (module.id === "fb-ent" ? mutate(module) : module)),
+    });
 
     // Control: the unmodified program is tagged.
     expect(deriveCoverageTags(analyzeProgram(base))).toContain("mechanism:family-b-eager-barrel");
@@ -68,42 +75,62 @@ describe("the directed family-B eager-barrel builder", () => {
         build: { ...program.build!, chunking: { kind: "automatic" } },
       })),
     ).not.toContain("mechanism:family-b-eager-barrel");
-    // The hidden read revealed (no hiddenReadFn).
-    expect(
-      retag((program) => ({
-        ...program,
-        modules: program.modules.map((module): ModuleModel => {
-          if (module.id !== "fb-ent") {
-            return module;
-          }
-          return {
-            ...module,
-            events: module.events.map((event) => {
-              const revealed = { ...event };
-              delete (revealed as { hiddenReadFn?: true }).hiddenReadFn;
-              return revealed;
-            }),
-          } as ModuleModel;
-        }),
-      })),
-    ).not.toContain("mechanism:family-b-eager-barrel");
     // The effectful first import dropped.
     expect(
+      retag((program) =>
+        mutateEntry(
+          program,
+          (module) =>
+            ({
+              ...module,
+              dependencies: module.dependencies.filter(
+                (dependency) => dependency.kind !== "esm-side-effect-import",
+              ),
+            }) as ModuleModel,
+        ),
+      ),
+    ).not.toContain("mechanism:family-b-eager-barrel");
+    // The reviewer's DECOY: the `helper` import stays `call:true`, but the entry never INVOKES it in
+    // an event (the `vb` call read is dropped) — a call-marked import that is never called runs no
+    // forwarder, so the causal predicate must NOT tag it.
+    expect(
+      retag((program) =>
+        mutateEntry(program, (module) => ({
+          ...module,
+          events: module.events.map((event) => ({
+            ...event,
+            reads: (event.reads ?? []).filter(
+              (read) => !(read.binding === "vb" && read.call === true),
+            ),
+          })),
+        })),
+      ),
+    ).not.toContain("mechanism:family-b-eager-barrel");
+    // The barrel is no longer the package MAIN (`moduleIds[0]`): the eager-forwarder bug lives on the
+    // main a bare `import "fbpkg"` resolves, so a demoted barrel is a different resolution surface.
+    expect(
       retag((program) => ({
         ...program,
-        modules: program.modules.map((module): ModuleModel => {
-          if (module.id !== "fb-ent") {
-            return module;
-          }
-          return {
-            ...module,
-            dependencies: module.dependencies.filter(
-              (dependency) => dependency.kind !== "esm-side-effect-import",
-            ),
-          } as ModuleModel;
-        }),
+        packages: program.packages?.map((pkg) =>
+          pkg.name === "fbpkg" ? { ...pkg, moduleIds: ["fb-def", "fb-bar", "fb-sib"] } : pkg,
+        ),
       })),
     ).not.toContain("mechanism:family-b-eager-barrel");
+    // The hidden read REVEALED to a plain visible read STAYS tagged — `hiddenReadFn` is not causal
+    // (the snapshot fails a visible read too), so the shrunken repro's plain top-level read is still
+    // the conjunction. This is the honest reconciliation of the tag with the shrunken model.
+    expect(
+      retag((program) =>
+        mutateEntry(program, (module) => ({
+          ...module,
+          events: module.events.map((event) => {
+            const revealed = { ...event };
+            delete (revealed as { hiddenReadFn?: true }).hiddenReadFn;
+            return revealed;
+          }),
+        })),
+      ),
+    ).toContain("mechanism:family-b-eager-barrel");
   });
 });
 

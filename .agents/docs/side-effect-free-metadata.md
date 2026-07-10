@@ -36,10 +36,15 @@ folded numbers downstream), and the bundler's legal DCE cannot change it:
 Any divergence that remains is a real bug: a dropped-but-referenced binding (crash), over-aggressive
 DCE removing needed value code, or a wrong/reordered initialization changing a folded number.
 
-`validate-model.ts` enforces the invariant: a `sideEffectFree` module that **emits events**, is
-**not ESM**, or carries any dependency **other than an `esm-value-import`** (a side-effect import,
-dynamic-import registration, or interop require would all be droppable under the flag and could drop
-or reorder another module's events) is an invalid model.
+`validate-model.ts` enforces the invariant on the RESOLVED metadata-pure members
+(`metadataPureModuleIds` over the `packagesOf` view — the legacy flag and the package form share one
+rule): a metadata-pure member that **emits events**, is **not ESM**, or carries any dependency
+**other than a value-only ESM dependency** is invalid. The value-only set is the imports AND
+re-exports that only matter when the pure module's value is used — `esm-value-import`,
+`esm-namespace-import`, and the `esm-reexport-named` / `esm-reexport-star` / `esm-local-reexport`
+forms (this widened from the original `esm-value-import`-only rule when barrels joined the model). A
+side-effect import, dynamic-import registration, or interop require would be droppable under the
+metadata yet could drop or reorder another module's events, so those stay excluded.
 
 ## Empirical basis
 
@@ -49,14 +54,16 @@ Verified against the local rolldown before wiring the generator: a subdir `packa
 module's side effects are **kept**. That both confirms the layout and _is_ the reason flagged
 modules must not emit events.
 
-## Rendering
+## Rendering (HISTORICAL — the shared directory is deleted)
 
-Flagged modules render under a single `side-effect-free/` directory carrying one
-`side-effect-free/package.json` = `{"sideEffects": false}`. Root modules have no `package.json`, so
-the bundler keeps their side effects by default. Cross-boundary imports use relative specifiers
-(`./side-effect-free/module-NNNN.mjs`, `../module-NNNN.mjs`); root-to-root imports keep the historical
-`./module-NNNN.ext` form, so existing rendering is unchanged. `.mjs`/`.cjs` files ignore
-`package.json`, so the source tree still executes identically under Node.
+**This section describes the pre-W14b rendering, kept for provenance.** The single shared
+`side-effect-free/` directory (one `side-effect-free/package.json` = `{"sideEffects": false}`, with
+flagged modules under it) is **gone**. Under the package/layout model
+([w14b-package-realism](./w14b-package-realism.md)) a flagged module resolves through `packagesOf` to
+a single-member `sef-<id>` package and renders under `node_modules/sef-<id>/<id>.<ext>` with its own
+generated `package.json`; the specifier and layout rules are the package model's. Root modules still
+have no `package.json`, and `.mjs`/`.cjs` files still ignore `package.json`, so the source tree
+executes identically under Node.
 
 ## Generation vs. the handwritten test
 
@@ -74,7 +81,10 @@ generator cannot guarantee locally. The model still supports it, and validation 
 
 ## Shrinking
 
-`shrink.ts` adds a candidate that **unflags** a module (drops its `sideEffects: false` metadata).
-When the failure does not depend on the flag, this simplifies the case; the greedy pass keeps it only
-when the failure kind is preserved — which also reveals whether the metadata is load-bearing for the
-bug.
+`shrink.ts` **canonicalizes** a legacy `sideEffectFree`-flag program onto the `packages`
+representation ONCE at shrink entry (`canonicalizeLegacyMetadata`), so there is a SINGLE metadata
+mutation path. The metadata then shrinks through the package candidates — dropping a package
+(members return to root paths), weakening `sideEffects` to `true` (withdraw the purity assertion), or
+dropping a member/array-entry — each keeping the failure kind only when the metadata is not
+load-bearing, which also reveals whether it is. (The old standalone `sideEffectFree`-flag unflag
+candidate is gone with the flag's second representation.)

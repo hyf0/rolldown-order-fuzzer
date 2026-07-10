@@ -238,26 +238,47 @@ describe("local re-export (camunda shape, M4)", () => {
     expect(pure).not.toContain("mechanism:local-reexport-with-own-effect");
   });
 
-  test("shrink offers the named-form downgrade and it validates on its own", () => {
-    const program = camundaProgram({ barrelReads: true });
-    const downgrades = [...candidates(program)].filter((candidate) =>
-      candidate.modules.some((module) =>
-        module.dependencies.some(
-          (dependency) =>
-            dependency.kind === "esm-reexport-named" &&
-            dependency.exportedName === "vx" &&
-            module.id === "barrel",
-        ),
+  const namedDowngradesOf = (program: ProgramModel): ProgramModel[] =>
+    [...candidates(program)].filter((candidate) =>
+      candidate.modules.some(
+        (module) =>
+          module.id === "barrel" &&
+          module.dependencies.some(
+            (dependency) =>
+              dependency.kind === "esm-reexport-named" && dependency.exportedName === "vx",
+          ),
       ),
     );
+
+  test("shrink splits the local re-export into a read-drop and a PURE form downgrade", () => {
+    // When the barrel READS the local binding, shrink offers a READ-DROP (the local form is KEPT, the
+    // event reads removed) — NOT the named downgrade — so a rejection isolates the READ as load-bearing,
+    // never conflating it with the live-import form (SAFE note 4).
+    const withReads = camundaProgram({ barrelReads: true });
+    expect(namedDowngradesOf(withReads).length).toBe(0);
+    const readDrops = [...candidates(withReads)].filter((candidate) => {
+      const barrel = candidate.modules.find((module) => module.id === "barrel");
+      return (
+        barrel !== undefined &&
+        barrel.dependencies.some((dependency) => dependency.kind === "esm-local-reexport") &&
+        barrel.events.every((event) => (event.reads ?? []).length === 0)
+      );
+    });
+    expect(readDrops.length).toBeGreaterThan(0);
+    for (const candidate of readDrops) {
+      expect(validateProgramModel(analyzeProgram(candidate))).toEqual([]);
+    }
+
+    // With NO read of the local binding, shrink offers the PURE named-form downgrade (a form change
+    // only, no read dropped), which validates on its own — a rejection there proves the LIVE-import
+    // form is load-bearing.
+    const noReads = camundaProgram();
+    const downgrades = namedDowngradesOf(noReads);
     expect(downgrades.length).toBe(1);
     const downgraded = downgrades[0];
     expect(downgraded).toBeDefined();
     if (downgraded !== undefined) {
-      // The event read of the dropped local binding is dropped with it, so the candidate is valid.
       expect(validateProgramModel(analyzeProgram(downgraded))).toEqual([]);
-      const barrel = downgraded.modules.find((module) => module.id === "barrel");
-      expect(barrel?.events.every((event) => (event.reads ?? []).length === 0)).toBe(true);
     }
   });
 });

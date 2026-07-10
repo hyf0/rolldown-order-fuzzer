@@ -108,3 +108,31 @@ describe("the analyzer's renderedFormOf is the renderer's SINGLE export-form dis
     expect(readFileSync(join(SRC, "render.ts"), "utf8")).toContain("renderedFormOf");
   });
 });
+
+/// A property READ of a module's `localExports` (`module.localExports`, `barrel.localExports`) — the
+/// declared-local surface that SHADOWS `export *`. It must be interpreted for routing by the ONE rule
+/// `starShadowedNames` (program-facts.ts), consumed by both the demand projection and the supply walks.
+function localExportsReads(source: string): number {
+  return (source.match(/\.localExports\b/g) ?? []).length;
+}
+
+describe("local/star shadowing is ONE centralized rule (W14b.1 blocker 4)", () => {
+  test("the demand projection routes shadowing through the shared rule, not a localExports branch", () => {
+    // `analyzed-program.ts` (the demand fixpoint + `localExportsFor`) reads the shadowed-name set ONLY
+    // via the imported `starShadowedNames` / `providedExportNames` — never `localExports` directly. A
+    // reappearing raw read means a SECOND shadowing rule that could drift from the supply walk.
+    const source = readFileSync(join(SRC, "analyzed-program.ts"), "utf8");
+    expect(localExportsReads(source)).toBe(0);
+    expect(source).toContain("starShadowedNames");
+  });
+
+  test("the supply routing reads localExports ONLY inside the single starShadowedNames rule", () => {
+    // `program-facts.ts` touches `localExports` exactly ONCE — inside `starShadowedNames`. The resolve
+    // walks (`#collectDefiners`, `#resolveExportOrigin`) consult `starShadowedNames(module)`, not their
+    // own `localExports` branch. A count above one means a mirrored shadowing rule reappeared (e.g. a
+    // W14c `export * as ns` surface wired into the walk instead of into the one rule).
+    const source = readFileSync(join(SRC, "program-facts.ts"), "utf8");
+    expect(localExportsReads(source)).toBe(1);
+    expect(source).toContain("export function starShadowedNames");
+  });
+});

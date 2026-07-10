@@ -648,8 +648,17 @@ async function materializeRenderedProgram(
   sourceDirectory: string,
 ): Promise<void> {
   await mkdir(sourceDirectory, { recursive: true });
+  const rootResolved = resolve(sourceDirectory);
   for (const file of rendered.files) {
+    // Defense-in-depth join-containment guard (W14b.1 blocker 1): a validated program never emits an
+    // escaping path, but a materializer must not write outside its build dir for an unvalidated model
+    // (a `../../../x` package member id would otherwise `join` above the root).
     const filePath = join(sourceDirectory, file.path);
+    if (resolve(filePath) !== rootResolved && !resolve(filePath).startsWith(rootResolved + sep)) {
+      throw new Error(
+        `rendered file path ${JSON.stringify(file.path)} escapes the build root ${JSON.stringify(sourceDirectory)}`,
+      );
+    }
     await mkdir(dirname(filePath), { recursive: true });
     await writeFile(filePath, file.contents);
   }

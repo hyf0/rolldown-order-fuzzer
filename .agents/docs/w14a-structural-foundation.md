@@ -40,9 +40,9 @@ the differential oracle stays valid.
 
 - **`strictExecutionOrder` is NOT rolled in W14a.** Every case keeps strict order, and the validator
   REJECTS a hand-crafted `seo:false` model. A `seo:false` cell needs a weaker order oracle that lands in
-  W14b: upstream #9998 is a cross-entry leak that only exists at `seo:false`, and the full-order oracle
+  W14c: upstream #9998 is a cross-entry leak that only exists at `seo:false`, and the full-order oracle
   would false-positive on the accepted relaxed-order divergences there. So `seo:false` is unrepresentable
-  until W14b supplies that oracle.
+  until W14c supplies that oracle.
 - **Backward compatible (the v16-artifact reader).** `build` is OPTIONAL; `buildConfigOf(program)`
   resolves a legacy (schema-16) model's config from its top-level chunk arrays + rolldown/fuzzer defaults,
   so an old failure artifact still replays. The schema version is only written, never gated on read, and

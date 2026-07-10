@@ -464,7 +464,7 @@ export type PreserveEntrySignatures = false | "strict" | "allow-extension" | "ex
 /// - `lazyBarrel` — `experimental.lazyBarrel`, rolldown's barrel-pruning optimization (default `false`);
 ///   the W14-9 axis the generator rolls (smoke-verified honored by the frozen snapshot under strict order).
 /// - `strictExecutionOrder` — `OutputOptions.strictExecutionOrder` (default `true`; NOT rolled in W14a —
-///   every case keeps `true`, because a `seo:false` cell needs a weaker order oracle that lands in W14b).
+///   every case keeps `true`, because a `seo:false` cell needs a weaker order oracle that lands in W14c).
 export interface BuildConfig {
   readonly chunking: Chunking;
   readonly includeDependenciesRecursively: boolean;

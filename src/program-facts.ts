@@ -15,6 +15,39 @@ export interface ModuleLike {
   readonly localExports?: readonly string[];
 }
 
+/// The export names a module's re-exports PROVIDE by FORWARDING (never by its own star): a named
+/// re-export's `exportedName` (`export { s as e } from`) and a LOCAL re-export's `exportedName`
+/// (`import { s as l } from …; export { l as e };`). Demand for one of these resolves at the
+/// re-export target, so a star re-export on the same module is never walked for it.
+export function providedExportNames(module: ModuleLike): ReadonlySet<string> {
+  const provided = new Set<string>();
+  for (const dependency of module.dependencies) {
+    if (dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport") {
+      provided.add(dependency.exportedName);
+    }
+  }
+  return provided;
+}
+
+/// THE ONE rule for "names this module explicitly provides or shadows over `export *`" — the ES
+/// semantics that a local definer wins over a star re-export. It is re-export-provided names
+/// (`providedExportNames`) PLUS declared `localExports` (the vben own-helper-next-to-a-star shape).
+/// Demand for a shadowed name is NEVER forwarded through the star. BOTH projections read THIS ONE
+/// function — the demand fixpoint / local-synthesis subtraction in `analyzed-program.ts`
+/// (`starShadowedNames` re-exported there, `localExportsFor`) AND the supply walks here
+/// (`resolveExportRoute` / `resolveExportOrigin`) — so a NEW name-providing surface (W14c's
+/// `export * as ns`) is taught to the router by editing this rule ONCE, never two mirrored branches
+/// that could drift out of agreement (W14b.1 blocker 4). A grep guard in
+/// `tests/module-profile-guard.test.ts` fails if a second `localExports`-shadowing branch reappears
+/// outside this module.
+export function starShadowedNames(module: ModuleLike): ReadonlySet<string> {
+  const shadowed = new Set(providedExportNames(module));
+  for (const name of module.localExports ?? []) {
+    shadowed.add(name);
+  }
+  return shadowed;
+}
+
 /// The synchronous cycle structure of a program: which modules sit on a cycle, their clusters (SCCs),
 /// the formats present among cyclic members (a mixed-format synchronous SCC is Node-illegal), and the
 /// richer topologies coverage certifies (a chord, an interlocking figure-eight, multiple entry members).
@@ -280,8 +313,10 @@ export class ProgramFacts {
         return this.#resolveExportOrigin(dependency.target, dependency.sourceName, visited);
       }
     }
-    // A DECLARED local export shadows `export *` (ES semantics), so the origin is this module.
-    if (module.localExports?.includes(exportName) === true) {
+    // A name this module explicitly provides/shadows over `export *` is defined HERE — a re-export was
+    // already forwarded above, so this reaches exactly the declared `localExports` (the ONE
+    // `starShadowedNames` rule, ES semantics), and the origin is this module.
+    if (starShadowedNames(module).has(exportName)) {
       return { moduleId, exportName };
     }
     // A star re-export never forwards `default`.
@@ -367,9 +402,12 @@ export class ProgramFacts {
       }
     }
     if (!matchedNamed) {
-      // A DECLARED local export (`localExports`) shadows `export *` (ES semantics): the name is a
-      // LOCAL definer and the star is never walked for it — the vben own-helper-next-to-a-star shape.
-      const declaredLocal = module.localExports?.includes(exportName) === true;
+      // A name this module explicitly provides/shadows over `export *` (ES semantics) is a LOCAL
+      // definer and the star is never walked for it — the vben own-helper-next-to-a-star shape. A
+      // re-export was already forwarded above, so `starShadowedNames` here reaches exactly the
+      // declared `localExports`; consuming the ONE shared rule keeps this supply walk and the demand
+      // projection from drifting (W14b.1 blocker 4).
+      const declaredLocal = starShadowedNames(module).has(exportName);
       // A star re-export never forwards `default`.
       if (!declaredLocal && exportName !== "default") {
         for (const dependency of module.dependencies) {

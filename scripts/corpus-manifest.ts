@@ -33,10 +33,15 @@
 ///   node scripts/corpus-manifest.ts write <path>          # write the manifest to <path>
 ///   node scripts/corpus-manifest.ts check <path>          # regenerate and diff against <path>
 ///   node scripts/corpus-manifest.ts explain-delta <path>  # diff against an OLD golden and PROVE the
-///                                                         # delta: every changed case must carry
-///                                                         # packages or a new W14b operation; every
-///                                                         # package-free, new-op-free case must be
-///                                                         # byte-identical (exit 1 otherwise)
+///                                                         # delta CAUSALLY: each changed case's delta
+///                                                         # must be accounted for by the allowed W14b
+///                                                         # transformations only (package
+///                                                         # path/specifier/package.json additions, a
+///                                                         # new-operation file, an appended package
+///                                                         # chunk group) — a render error, a buildAxes
+///                                                         # drift, a non-package codeSplitting move, or
+///                                                         # an unexplained root-file change fails it
+///                                                         # (exit 1)
 ///   node scripts/corpus-manifest.ts                       # print the manifest to stdout
 
 import { createHash } from "node:crypto";
@@ -51,7 +56,15 @@ import {
   type MixedTemplateName,
 } from "../src/generate.ts";
 import { analyzeProgram } from "../src/analyzed-program.ts";
-import { buildConfigOf, packagesOf, programChunking, type ProgramModel } from "../src/model.ts";
+import {
+  buildConfigOf,
+  packageMembershipOf,
+  packageMemberFileName,
+  packagesOf,
+  programChunking,
+  type ModuleModel,
+  type ProgramModel,
+} from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 
@@ -141,6 +154,148 @@ function carriesNewOperation(program: ProgramModel): boolean {
       module.dependencies.some((dependency) => dependency.kind === "esm-local-reexport") ||
       (module.format === "esm" && (module.localExports?.length ?? 0) > 0),
   );
+}
+
+interface CodeSplittingGroup {
+  readonly name?: string;
+  readonly moduleIds?: readonly string[];
+  readonly test?: string;
+}
+
+/// The chunk groups of an `effectiveCodeSplitting` descriptor (`{groups}` manual / `{organicGroups}`
+/// organic / `true` automatic) as a flat list — empty for automatic.
+function codeSplittingGroups(codeSplitting: unknown): readonly CodeSplittingGroup[] {
+  if (typeof codeSplitting !== "object" || codeSplitting === null) {
+    return [];
+  }
+  const record = codeSplitting as { groups?: unknown; organicGroups?: unknown };
+  const groups = record.groups ?? record.organicGroups;
+  return Array.isArray(groups) ? (groups as CodeSplittingGroup[]) : [];
+}
+
+/// A chunk group introduced by the package enrichment (the family-B `{facade, sibling}` cluster): a
+/// MANUAL group whose members are all package members, or an ORGANIC group whose regex targets a
+/// `node_modules/` package path. Any other group is a rolled base group, not a package artifact.
+function isPackageChunkGroup(group: CodeSplittingGroup, memberIds: ReadonlySet<string>): boolean {
+  if (group.moduleIds !== undefined) {
+    return group.moduleIds.length > 0 && group.moduleIds.every((id) => memberIds.has(id));
+  }
+  if (group.test !== undefined) {
+    return group.test.includes("node_modules");
+  }
+  return false;
+}
+
+/// PROVE a codeSplitting change is caused ONLY by the package enrichment: every group the OLD case had
+/// must survive (none dropped), and every group the NEW case ADDED must be a package chunk group. A
+/// dropped base group or an added NON-package group is an unexplained chunking change (the reviewer's
+/// concern — a codeSplitting move inside the package bucket that was never proven package-caused).
+/// Returns an unexplained-reason string, or `undefined` when fully package-attributable.
+function unexplainedCodeSplitting(
+  before: unknown,
+  after: unknown,
+  memberIds: ReadonlySet<string>,
+): string | undefined {
+  const remainingNew = codeSplittingGroups(after).map((group) => canonicalJson(group));
+  for (const oldGroup of codeSplittingGroups(before)) {
+    const oldJson = canonicalJson(oldGroup);
+    const index = remainingNew.indexOf(oldJson);
+    if (index < 0) {
+      return "codeSplitting changed: a base chunk group was dropped";
+    }
+    remainingNew.splice(index, 1);
+  }
+  const addedNonPackage = codeSplittingGroups(after).filter(
+    (group) =>
+      remainingNew.includes(canonicalJson(group)) && !isPackageChunkGroup(group, memberIds),
+  );
+  return addedNonPackage.length > 0
+    ? "codeSplitting changed by a non-package chunk group"
+    : undefined;
+}
+
+/// The reasons a changed case is NOT fully explained by the allowed W14b transformations (package
+/// path/specifier/package.json additions, identified new-operation files, an appended package chunk
+/// group). An empty list means the change is causally accounted for. Deliberately does NOT trust
+/// `packages.length > 0` alone: it PROVES the structural axes did not drift (`buildAxes`), the chunking
+/// change is a package chunk group, and every in-place root-file change is a package specifier update
+/// or a new-operation file — so a codeSplitting/schedule/render drift the old feature-presence check
+/// would have waved through fails here.
+function unexplainedChangeReasons(
+  before: CaseManifest,
+  after: CaseManifest,
+  program: ProgramModel | undefined,
+): string[] {
+  const reasons: string[] = [];
+  // (1) The package enrichment is END-STAGE (drawn after the BuildConfig axes are rolled), so it can
+  // never move includeDependenciesRecursively / lazyBarrel / preserveEntrySignatures /
+  // strictExecutionOrder. A buildAxes move is a real drift, not a package effect.
+  if (canonicalJson(before.buildAxes) !== canonicalJson(after.buildAxes)) {
+    reasons.push("buildAxes drifted (the end-stage enrichment cannot move a pre-enrichment axis)");
+  }
+  const membership = program === undefined ? undefined : packageMembershipOf(program);
+  const memberIds = new Set(membership?.keys() ?? []);
+  // (2) A codeSplitting change must be ONLY appended package chunk groups.
+  if (canonicalJson(before.codeSplitting) !== canonicalJson(after.codeSplitting)) {
+    const codeSplitReason = unexplainedCodeSplitting(
+      before.codeSplitting,
+      after.codeSplitting,
+      memberIds,
+    );
+    if (codeSplitReason !== undefined) {
+      reasons.push(codeSplitReason);
+    }
+  }
+  // (3) The case must actually carry a W14b feature (packages or a new operation) — otherwise a moved
+  // package-free, new-op-free case is an unexplained regression.
+  const carriesPackages = (after.packages?.length ?? 0) > 0;
+  const newOp = program !== undefined && carriesNewOperation(program);
+  if (!carriesPackages && !newOp) {
+    reasons.push("changed without packages or a new operation");
+    return reasons;
+  }
+  if (program === undefined) {
+    reasons.push("no program available to attribute the file changes");
+    return reasons;
+  }
+  // (4) Every root file that changed IN PLACE (`module-NNNN.ext`) must have changed because its import
+  // specifier now targets a package member, or because it carries a new operation — a root file whose
+  // bytes moved for neither reason is unexplained. Package files (`node_modules/`) are package layout;
+  // `schedule.json` reflects the cluster's added entry. Added / removed files (a member moving into
+  // node_modules, a cluster's new root module) are covered by (2)/(3) plus the package view.
+  const pathToModule = new Map<string, ModuleModel>();
+  program.modules.forEach((module, index) => {
+    const member = membership?.get(module.id);
+    const path =
+      member === undefined
+        ? `module-${String(index).padStart(4, "0")}.${module.format === "esm" ? "mjs" : "cjs"}`
+        : `node_modules/${member.package.name}/${packageMemberFileName(module)}`;
+    pathToModule.set(path, module);
+  });
+  const importsPackageMember = (module: ModuleModel): boolean =>
+    module.dependencies.some((dependency) => memberIds.has(dependency.target));
+  const carriesModuleNewOp = (module: ModuleModel): boolean =>
+    module.dependencies.some((dependency) => dependency.kind === "esm-local-reexport") ||
+    (module.format === "esm" && (module.localExports?.length ?? 0) > 0);
+  const afterFiles = new Map(after.files.map((file) => [file.path, file.sha256]));
+  for (const beforeFile of before.files) {
+    const afterHash = afterFiles.get(beforeFile.path);
+    if (afterHash === undefined || afterHash === beforeFile.sha256) {
+      continue;
+    }
+    if (beforeFile.path.startsWith("node_modules/") || beforeFile.path === "schedule.json") {
+      continue;
+    }
+    const module = pathToModule.get(beforeFile.path);
+    if (module === undefined) {
+      reasons.push(`changed file ${beforeFile.path} maps to no current module`);
+    } else if (!importsPackageMember(module) && !carriesModuleNewOp(module)) {
+      reasons.push(
+        `root file ${beforeFile.path} changed but imports no package member and carries no new operation`,
+      );
+    }
+  }
+  return reasons;
 }
 
 function renderCase(
@@ -371,10 +526,18 @@ function main(argv: readonly string[]): number {
       process.stderr.write("usage: corpus-manifest.ts explain-delta <old-golden-path>\n");
       return 2;
     }
-    // PROVE the labeled golden delta: regenerate against an OLD golden and require every changed
-    // case to be explained by the W14b additions — it now carries packages, or a new operation
-    // (local re-export / declared local exports). A package-free, new-op-free case whose bytes moved
-    // is an UNEXPLAINED regression and fails the proof, as does any removed/added case.
+    // PROVE the labeled golden delta CAUSALLY: regenerate against an OLD golden and require every
+    // changed case's delta to be accounted for by the ALLOWED W14b transformations (package
+    // path/specifier/package.json additions, identified new-operation files, an appended package
+    // chunk group) — not merely to CARRY packages. A buildAxes drift, a non-package codeSplitting
+    // move, a root file that changed for no package/new-op reason, or a render failure fails the
+    // proof; so does any removed/added case. See `unexplainedChangeReasons`.
+    if (errors.length > 0) {
+      process.stderr.write(
+        `explain-delta: FAIL — ${errors.length} case(s) failed to render; a delta with render errors is not proven\n`,
+      );
+      return 1;
+    }
     const baselineCases = JSON.parse(readFileSync(path, "utf8")) as CaseManifest[];
     const baselineByKey = new Map(
       baselineCases.map((entry) => [caseKey(entry.group, entry.seed), entry]),
@@ -397,12 +560,15 @@ function main(argv: readonly string[]): number {
         continue;
       }
       const program = programsByKey.get(key);
+      const reasons = unexplainedChangeReasons(before, after, program);
+      if (reasons.length > 0) {
+        unexplained.push(`${key}: ${reasons.join("; ")}`);
+        continue;
+      }
       if ((after.packages?.length ?? 0) > 0) {
         changedWithPackages += 1;
-      } else if (program !== undefined && carriesNewOperation(program)) {
-        changedNewOpOnly += 1;
       } else {
-        unexplained.push(`${key}: changed without packages or a new operation`);
+        changedNewOpOnly += 1;
       }
     }
     for (const key of currentByKey.keys()) {
@@ -410,12 +576,17 @@ function main(argv: readonly string[]): number {
         unexplained.push(`${key}: ADDED`);
       }
     }
+    // "package-free" = the cases carrying NO packages: the byte-identical ones plus the new-op-only
+    // changes. (The old wording called the byte-identical count "the package-free corpus", which
+    // under-counts by the new-op-only cases.)
+    const packageFree = unchanged + changedNewOpOnly;
     process.stdout.write(
       `explain-delta: ${baselineByKey.size} baseline cases — ${unchanged} byte-identical, ` +
         `${changedWithPackages} changed with packages, ${changedNewOpOnly} changed by a new operation only, ` +
-        `${unexplained.length} unexplained\n`,
+        `${unexplained.length} unexplained ` +
+        `(${packageFree} package-free = ${unchanged} unchanged + ${changedNewOpOnly} new-op)\n`,
     );
-    for (const line of unexplained.slice(0, 20)) {
+    for (const line of unexplained.slice(0, 40)) {
       process.stderr.write(`UNEXPLAINED: ${line}\n`);
     }
     return unexplained.length === 0 ? 0 : 1;

@@ -98,9 +98,10 @@ removing ANY ingredient greens the shape:
 6. a side-effectful root module the entry imports FIRST (source order runs it before the manager,
    predicted chunk order runs the manager's chunk first — the deviation that seeds the wrap plan;
    removing it greens);
-7. the entry reads the facade's value through the barrel inside a hiddenReadFn-invoked function (the
-   brief's shape; the bisection found even a VISIBLE top-level read fails on this build — the shrunken
-   repro below drops the hiddenReadFn and stays red).
+7. the entry reads the facade's value through the barrel in an event so the oracle observes it —
+   HIDDEN (a hiddenReadFn-invoked function, the brief's shape) OR VISIBLE (the bisection found even a
+   plain top-level read fails on this build): the READ is the load-bearing ingredient, not its
+   visibility, so the shrunken repro below reveals the read and stays BOTH red and tagged.
 
 **Generator:** `injectFamilyBEagerBarrel` — part of the W14b END-STAGE enrichment in
 `finalizeProgram`, every roll drawn AFTER the last W14a draw (the lazyBarrel axis), so a case where
@@ -108,9 +109,19 @@ no enrichment fires is byte-identical to the W14a corpus. The cluster merges its
 group into whatever chunking mode the case rolled (manual/default: a manual group; organic: an
 appended organic group whose separator-tolerant regex test selects the two package files, priority
 above every generated flavor). A 35% variant adds the D2 witness (below). Complete conjunctions are
-tagged `mechanism:family-b-eager-barrel` — the tag requires EVERY ingredient (a structural predicate
-over the analyzed program, held by generated, directed, handwritten, and shrunk models alike) — at
-**15.4% of random-mixed** (3000-case scan; the ≥10% double-digit target).
+tagged `mechanism:family-b-eager-barrel` by a CAUSAL structural predicate over the analyzed program
+(`hasCompleteFamilyBConjunction`), requiring EVERY ingredient — and specifically: the barrel is the
+package MAIN (`moduleIds[0]`, what a bare `import … from "P"` resolves — not "any member tried as a
+barrel"); the entry is provably OUTSIDE the `{facade, sibling}` chunk group (the group holds both
+members but not the entry); and the entry ACTUALLY invokes the helper via a `ValueRead.call` in an
+event (a `call:true` import the entry never calls runs no forwarder and is NOT the shape — a decoy
+that keeps the call-marked import but drops the event call is correctly rejected). The entry's facade
+read is counted whether HIDDEN or VISIBLE
+(the snapshot fails both, so the read is the ingredient, not its visibility), so the tag holds for
+generated, directed, handwritten, and shrunk models alike. Recomputed with the causal predicate:
+**15.4% of random-mixed** (3000-case scan; the ≥10% double-digit target) — unchanged, because the
+injector already emits the full causal shape, so the tightened predicate rejects only hand-crafted
+decoys, never a random case.
 
 **Directed acceptance** (`buildFamilyBEagerBarrel` via the standard freeze/analyze seam;
 `scripts/family-b-catch.ts`, 20 seeds × {od, wa} × {lazyBarrel false, true} against the frozen
@@ -129,7 +140,10 @@ and the package membership of barrel+sibling drop (a root no-events barrel is in
 metadata purity must only cover the FACADE, a single-member `sideEffects: false` package), the
 hiddenReadFn reveals to a plain top-level read, and idr flips to true — while the package on the
 facade, the star hop, the declared call-marked helper, the {facade, sibling} chunk group, and the
-effectful first import all stayed (each was tried and rejected — load-bearing).
+effectful first import all stayed (each was tried and rejected — load-bearing). Because the causal tag
+counts a VISIBLE facade read, the shrunken model is itself `mechanism:family-b-eager-barrel`-tagged:
+the "held by shrunk models" claim is now TRUE by the predicate, not contradicted by the reveal (the
+earlier tag required `hiddenReadFn` and so would have un-tagged this exact repro).
 
 ## 4. Witness shapes (deliverable 3)
 
@@ -154,15 +168,23 @@ plain single-member `sideEffects: true` packaging of ordinary modules (~8% — p
 realism). Package tags: `variation:package` 56.2%, `variation:side-effects-array` 19.1%,
 `variation:side-effect-free-metadata` 51.0% (now the resolved package view).
 
-## 5. Golden discipline — regenerated ONCE, delta PROVEN
+## 5. Golden discipline — regenerated ONCE, delta PROVEN CAUSALLY
 
 `golden: W14b package realism` is the wave's single regeneration. `scripts/corpus-manifest.ts` gained
-an `explain-delta <old-golden>` command that PROVES the label: it regenerates against an old golden
-and requires every changed case to carry packages or a new operation (a local re-export / declared
-local exports), and every package-free, new-op-free case to be byte-identical. Vs the `787d2da`
-golden: **458 cases — 311 byte-identical (the package-free corpus), 143 changed with packages, 4
-changed by a new operation only, 0 unexplained.** The manifest's optional `packages` field appears
-only on package-carrying cases, so the golden is self-explaining going forward.
+an `explain-delta <old-golden>` command that PROVES the label CAUSALLY — not by feature presence
+(the earlier version bucketed any changed case with `packages.length > 0` as package-caused, so a
+codeSplitting or schedule move riding along was never actually proven package-caused). It regenerates
+against an old golden and, for each changed case, requires the delta to be accounted for by the
+ALLOWED W14b transformations ONLY, failing otherwise: a render error fails; a `buildAxes` drift fails
+(the package enrichment is END-STAGE — drawn after the BuildConfig axes are rolled — so it cannot move
+a pre-enrichment axis); a codeSplitting change that is not an appended PACKAGE chunk group fails (the
+family-B `{facade, sibling}` cluster group is verified over package members / a `node_modules` regex,
+and no base group may drop); and an in-place root file whose module imports no package member and
+carries no new operation fails. Vs the `787d2da` golden: **458 cases — 311 byte-identical, 143 changed
+with packages, 4 changed by a new operation only, 0 unexplained; 315 package-free = 311 unchanged + 4
+new-op.** (The 311 byte-identical count is NOT "the package-free corpus" — 315 cases carry no packages,
+4 of them changed by a new operation; the earlier record conflated the two.) The manifest's optional
+`packages` field appears only on package-carrying cases, so the golden stays self-explaining.
 
 ## 6. Reacceptance vs the frozen snapshot
 
@@ -185,16 +207,25 @@ Signature classes enumerated — exactly TWO across all 1800 builds, both classi
    package (or with a camunda-flipped hop) turns the same barrel-init mishandling into an observable
    ORDER deviation instead of a dropped-init crash. Not an oracle artifact: `sideEffects` metadata
    licenses dropping PURE members, never reordering a LISTED (side-effectful) member's events, and
-   `sideEffects: true` licenses nothing. Triaged instance: seed 200063 (mixed) — od-GREEN /
-   wa-RED-reordered on the packaged conjunction; the shrink (under `--wrap-all`, exact-signature
-   preserved, 16→15 modules) makes the mechanism readable: wrap-all DEFERS the packaged cluster's
-   LISTED side-effectful sibling (`psib10`) to the very end of the run — after every other module and
-   every dynamic trigger — while source order runs it first. GREEN on npm rolldown@1.1.5 in both
-   modes, so it is a snapshot-specific expression of the already-known family-A init-ordering arc
-   (the snapshot predates the strict-order fixes); recorded as a triaged finding, not escalated.
+   `sideEffects: true` licenses nothing. Triaged instance: seed 200063 (mixed), reproduced with
+   RETAINED artifacts at `.agents/evidence/seed-200063-reorder.json` (model, both-mode verdicts,
+   source+bundle event arrays, emitted init order, ablations; regenerated by `scripts/seed-200063-catch.ts`).
+   On the frozen buggy snapshot: od-GREEN / wa-RED-`events-reordered` — the source runs the LISTED
+   side-effectful sibling `psib10` third (`… psib10 psib10 pconsA10 …`) while wrap-all DEFERS it to the
+   very end (`… pconsA10 … psib10 psib10 pconsB10`). The family-A root cause is now CAUSALLY tied by
+   ABLATION (not merely by ancestry): dropping the `fa-` package resurfaces the classic family-A NaN
+   `bundle-only-crash` (the same conjunction underneath), and withdrawing the partial `sideEffects`
+   array (→ `true`) GREENS the wa cell — so the partial-metadata packaging is exactly what
+   re-manifests the family-A init mishandling as an order deviation rather than a crash. On the FINAL
+   snapshot (`final-snapshot-42628c18b`, the shipped strict-order fixes) it is GREEN in BOTH modes: a
+   snapshot-specific expression of the already-known family-A init-ordering arc, closed upstream —
+   recorded as a triaged finding, not escalated.
 
-Same-seed od/wa cross-reference: **every od-only red is family-B-tagged** (mixed 14/14, pure-esm
-17/17, zero unexplained od-only reds); wa-only reds are 4 (mixed) — the known W7 "organic chunking
+Same-seed od/wa cross-reference: **every od-only red is family-B-tagged** — the mixed cell
+RE-VERIFIED fresh with the CAUSAL predicate (300 seeds 200000–200299 od+wa against the buggy
+snapshot: 14 od-only reds, 14 family-B-tagged, 0 unexplained; combined 22.7%, family-A red 80.3% of
+tagged), the pure-esm 17/17 from the committed 6-cell campaign; wa-only reds are 4 (mixed) — the known
+W7 "organic chunking
 let od init correctly" family-A class (200213, 200217) plus two packaged-family-A variants (200063
 reorder above, 200165); both-red is family-A + the wave-8 callable-own-state class. Family-B was
 also probed on npm rolldown@1.1.5 (latest release): GREEN both modes — bug B lives in the
@@ -205,10 +236,13 @@ live-release escalation warranted.
 ## Verification
 
 `vp check` + `vp test` green at every commit; `corpus:check` 458 byte-identical to the regenerated
-golden; a 6000-case validate+render sweep across all four regime settings: 0 rejections, 0 render
-failures; the family-B directed campaign od-RED 20/20 / wa-GREEN 20/20 under both lazyBarrel values
-(evidence + shrunken repro committed); tag densities as listed above (family-A conjunction unchanged
-at 22.7%).
+golden; `explain-delta` vs the `787d2da` golden PROVES the delta causally (0 unexplained; buildAxes,
+codeSplitting, and every root-file change accounted for by the allowed W14b transformations); a
+6000-case validate+render sweep across all four regime settings: 0 rejections, 0 render failures; the
+family-B directed campaign od-RED 20/20 / wa-GREEN 20/20 under both lazyBarrel values (evidence +
+shrunken repro committed); the seed-200063 reorder reproduced with retained artifacts and its family-A
+root cause tied by ablation (`.agents/evidence/seed-200063-reorder.json`); tag densities as listed
+above (family-A conjunction unchanged at 22.7%).
 
 ## Residual gaps (W14c scope — deliberately untouched)
 

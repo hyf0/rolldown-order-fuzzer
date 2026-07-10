@@ -8,10 +8,11 @@ import type {
   Chunking,
   DependencyOperation,
   EventRecord,
+  ModuleModel,
   PackageModel,
   ProgramModel,
 } from "./model.ts";
-import { buildConfigOf, programChunking } from "./model.ts";
+import { buildConfigOf, legacySideEffectFreePackage, programChunking } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -56,7 +57,9 @@ async function main(): Promise<void> {
   process.stderr.write(
     `Shrinking under ${onDemandWrapping ? "on-demand" : "wrap-all"} wrapping.\n`,
   );
-  const original = JSON.parse(await readFile(options.modelPath, "utf8")) as ProgramModel;
+  const original = canonicalizeLegacyMetadata(
+    JSON.parse(await readFile(options.modelPath, "utf8")) as ProgramModel,
+  );
   const baseline = await run(original, options);
   if (baseline === undefined) {
     process.stderr.write("Baseline did not fail; nothing to shrink.\n");
@@ -100,6 +103,34 @@ const ORGANIC_OPTIONAL_FIELDS = [
   "priority",
   "includeDependenciesRecursively",
 ] as const;
+
+/// Canonicalize a LEGACY (schema ≤17) program's `sideEffectFree` flags onto the `packages`
+/// representation ONCE at shrink entry (SAFE note: the shrinker had TWO metadata mutation
+/// representations — a raw-flag unflag AND package edits — for equivalent metadata). After this, the
+/// shrinker works in ONE representation: the package candidates below. Semantically identical through
+/// `packagesOf` (each flag becomes the same single-member `sef-<id>` package the seam resolves), so the
+/// rendered bytes and failure signature are unchanged; a program already carrying packages, or with no
+/// flags, is returned untouched.
+function canonicalizeLegacyMetadata(program: ProgramModel): ProgramModel {
+  if (program.packages !== undefined) {
+    return program;
+  }
+  const flaggedIds = program.modules
+    .filter((module) => module.sideEffectFree === true)
+    .map((module) => module.id);
+  if (flaggedIds.length === 0) {
+    return program;
+  }
+  const modules = program.modules.map((module): ModuleModel => {
+    if (module.sideEffectFree !== true) {
+      return module;
+    }
+    const next = { ...module };
+    delete (next as { sideEffectFree?: true }).sideEffectFree;
+    return next as ModuleModel;
+  });
+  return { ...program, modules, packages: flaggedIds.map(legacySideEffectFreePackage) };
+}
 
 /// Replace a program's packages, dropping the field entirely when none remain (the persisted shape
 /// the generator emits — `packages: []` and absence resolve identically through `packagesOf`).
@@ -349,14 +380,29 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
       } as typeof module);
     }
   }
-  // Downgrade a LOCAL re-export (`import { s as l } …; export { l as e };`) to the equivalent
-  // source-form named re-export (`export { s as e } from …`). Supply routing is identical, so the
-  // candidate is valid whenever no event read the local binding (reads of it are dropped with the
-  // binding); if the failure needed the LIVE-import form — the camunda mechanism — it vanishes and
-  // the greedy pass keeps the local form, proving it load-bearing.
+  // A LOCAL re-export (`import { s as l } …; export { l as e };`) shrinks in TWO INDEPENDENT steps so a
+  // rejection is a CLEAN causal proof (SAFE note: the old combined downgrade ALSO dropped the local
+  // binding's event reads, so a rejection could not tell the live-import FORM being load-bearing — the
+  // camunda mechanism — from the READ being load-bearing):
+  //   1. If an event reads the local binding, drop those reads while KEEPING the local form — testing
+  //      whether the read is load-bearing (nothing else changes).
+  //   2. Otherwise downgrade to the source-form named re-export (`export { s as e } from …`) — a PURE
+  //      form change (supply routing is identical; no binding remains to read), so its rejection proves
+  //      the LIVE-import form is load-bearing. Because step 1 lands first, the greedy pass reaches this
+  //      pure downgrade only once the reads are gone.
   for (const [moduleIndex, module] of program.modules.entries()) {
     for (const [depIndex, dependency] of module.dependencies.entries()) {
       if (dependency.kind !== "esm-local-reexport") {
+        continue;
+      }
+      const readsBinding = module.events.some((event) =>
+        (event.reads ?? []).some((read) => read.binding === dependency.localName),
+      );
+      if (readsBinding) {
+        const events = module.events.map((event) =>
+          dropReadsOfBinding(event, dependency.localName),
+        );
+        yield editModule(program, moduleIndex, { ...module, events } as typeof module);
         continue;
       }
       const dependencies = module.dependencies.map((candidate, index) =>
@@ -369,22 +415,11 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
             } as const)
           : candidate,
       );
-      const events = module.events.map((event) => dropReadsOfBinding(event, dependency.localName));
-      yield editModule(program, moduleIndex, { ...module, dependencies, events } as typeof module);
+      yield editModule(program, moduleIndex, { ...module, dependencies } as typeof module);
     }
   }
-  // Unflag a side-effect-free module (drop its legacy `sideEffectFree` flag — a schema ≤17 model;
-  // new models carry `packages` and get the package candidates below). When the failure does not
-  // depend on the metadata this simplifies the case; the greedy pass keeps it only if the failure
-  // kind is preserved, which also tells whether the metadata is load-bearing for the bug.
-  for (const [moduleIndex, module] of program.modules.entries()) {
-    if (module.sideEffectFree !== true) {
-      continue;
-    }
-    const unflagged = { ...module };
-    delete (unflagged as { sideEffectFree?: true }).sideEffectFree;
-    yield editModule(program, moduleIndex, unflagged);
-  }
+  // (The legacy `sideEffectFree`-flag unflag candidate is gone: `canonicalizeLegacyMetadata` normalizes
+  // the flags onto `packages` at shrink entry, so the package candidates below are the ONE metadata path.)
   // Package/layout candidates (W14b), coarsest first. Each reveals a distinct load-bearing question:
   // dropping a whole package (members return to root paths, relative specifiers) asks whether the
   // node_modules boundary matters at all; `sideEffects -> true` keeps the layout but withdraws the

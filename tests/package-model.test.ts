@@ -376,4 +376,195 @@ describe("declared local exports beside a star (the vben index.js shape)", () =>
     expect(errors.some((error) => error.includes("duplicate declared local export"))).toBe(true);
     expect(errors.some((error) => error.includes("collides with a re-export"))).toBe(true);
   });
+
+  // W14b.1 blocker 3: a declared local export whose name an import already binds locally would render
+  // a DUPLICATE lexical binding (`import { … as vbar }; export function vbar(){}`). The validator now
+  // rejects the model.
+  test("rejects a declared local export colliding with an import's local binding", () => {
+    const base = starWithLocalProgram();
+    const collide: ProgramModel = {
+      ...base,
+      modules: base.modules.map(
+        (module): ModuleModel =>
+          module.id === "bar"
+            ? ({
+                ...module,
+                // `vbar` is BOTH a declared local export and the local binding of a value import.
+                dependencies: [
+                  {
+                    kind: "esm-value-import",
+                    target: "fac",
+                    importedName: "vfac",
+                    localName: "vbar",
+                  },
+                  ...module.dependencies,
+                ],
+              } as ModuleModel)
+            : module,
+      ),
+    };
+    const errors = validateProgramModel(analyzeProgram(collide));
+    expect(errors.some((error) => error.includes("collides with an import's local binding"))).toBe(
+      true,
+    );
+  });
+
+  // The renderer (defense-in-depth) never emits a duplicate binding even when a CALL-marked
+  // synthesized export coincides with an import local — a shape the validator's declared-local check
+  // does not reach (no `localExports` here), so the renderer alone guards it: the callable export is
+  // aliased from a fresh binding rather than declared as `function x(){}` beside `import { … as x }`.
+  test("the renderer aliases a call-marked synthesized export that coincides with an import local", () => {
+    const program: ProgramModel = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "def",
+              importedName: "x",
+              localName: "ex",
+              call: true,
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "ex", call: true }],
+            },
+          ],
+        },
+        {
+          id: "def",
+          format: "esm",
+          // `def` imports `w as x` (a local binding `x`) AND is call-demanded to export `x`.
+          dependencies: [
+            { kind: "esm-value-import", target: "src", importedName: "w", localName: "x" },
+          ],
+          events: [{ module: "def", phase: "evaluate", value: 2, reads: [{ binding: "x" }] }],
+        },
+        {
+          id: "src",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "src", phase: "evaluate", value: 3 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const def = fileContents(renderProgram(analyzeProgram(program)).files, "module-0001.mjs");
+    expect(def).toContain('import { w as x } from "./module-0002.mjs";');
+    expect(def).not.toContain("function x(");
+    expect(def).toMatch(/export \{ \w+ as x \};/);
+  });
+
+  // The legal near-variant (a non-colliding import local) validates and renders the direct
+  // declaration form unchanged — the collision fix does not disturb the ordinary shape.
+  test("a non-colliding import local leaves the declared export on the direct declaration path", () => {
+    const base = starWithLocalProgram();
+    const legal: ProgramModel = {
+      ...base,
+      modules: base.modules.map(
+        (module): ModuleModel =>
+          module.id === "bar"
+            ? ({
+                ...module,
+                dependencies: [
+                  {
+                    kind: "esm-value-import",
+                    target: "fac",
+                    importedName: "vfac",
+                    localName: "vimp",
+                  },
+                  ...module.dependencies,
+                ],
+              } as ModuleModel)
+            : module,
+      ),
+    };
+    expect(validateProgramModel(analyzeProgram(legal))).toEqual([]);
+    const barrel = fileContents(renderProgram(analyzeProgram(legal)).files, "module-0001.mjs");
+    expect(barrel).toContain("export function vbar() { return 0; }");
+  });
+});
+
+// W14b.1 blockers 1 & 2: the legacy `sideEffectFree` flag normalizes to a `sef-<id>` package through
+// `packagesOf`, and package names / member ids must survive the SAME structural validation as
+// persisted packages — the flag path used to bypass it entirely.
+describe("resolved-package structural validation (legacy normalization + built-ins)", () => {
+  function importingEntry(targets: readonly string[]): ModuleModel {
+    return {
+      id: "entry",
+      format: "esm",
+      dependencies: targets.map((target, index) => ({
+        kind: "esm-value-import",
+        target,
+        importedName: "v",
+        localName: `v${index}`,
+      })),
+      events: [
+        {
+          module: "entry",
+          phase: "evaluate",
+          value: 1,
+          reads: targets.map((_, index) => ({ binding: `v${index}` })),
+        },
+      ],
+    };
+  }
+
+  test("rejects two case-folding legacy flags that normalize to one sef- package name", () => {
+    // `A` and `a` both normalize to `sef-a`: distinct modules, one package name — a duplicate the
+    // persisted-package path caught but the legacy flag path did not.
+    const program: ProgramModel = {
+      modules: [
+        importingEntry(["A", "a"]),
+        { id: "A", format: "esm", sideEffectFree: true, dependencies: [], events: [] },
+        { id: "a", format: "esm", sideEffectFree: true, dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+    const errors = validateProgramModel(analyzeProgram(program));
+    expect(errors.some((error) => error.includes("duplicate package name"))).toBe(true);
+  });
+
+  test("rejects a legacy flag whose id escapes the source root through the rendered path", () => {
+    // `../../../x` normalizes to a member file `../../../x.mjs` that `join`s ABOVE the source root.
+    const program: ProgramModel = {
+      modules: [
+        importingEntry(["../../../x"]),
+        { id: "../../../x", format: "esm", sideEffectFree: true, dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+    const errors = validateProgramModel(analyzeProgram(program));
+    expect(errors.some((error) => error.includes("not filename-safe"))).toBe(true);
+  });
+
+  test("rejects a package name that collides with a Node built-in module", () => {
+    // A bare `import … from "fs"` of the package main would resolve the CORE module, not the fixture.
+    const program: ProgramModel = {
+      modules: [
+        importingEntry(["member"]),
+        {
+          id: "member",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "member", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      packages: [{ name: "fs", sideEffects: true, moduleIds: ["member"] }],
+    };
+    const errors = validateProgramModel(analyzeProgram(program));
+    expect(errors.some((error) => error.includes("Node built-in module"))).toBe(true);
+  });
 });

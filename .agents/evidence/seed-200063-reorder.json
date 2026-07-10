@@ -1,0 +1,902 @@
+{
+  "proof": "seed 200063 events-reordered triage — retained artifacts, both snapshots, packaging ablation",
+  "seed": 200063,
+  "generatedAt": "2026-07-10T20:46:19.783Z",
+  "head": "a8a525d52d24493d8d10f206328ec85fa3546d74",
+  "dirty": true,
+  "node": "v24.18.0",
+  "coverageTags": [
+    "axis:include-dependencies-recursively:true",
+    "axis:lazy-barrel:false",
+    "chunking:default",
+    "mechanism:cjs-dynamic-import",
+    "mechanism:dynamic-import",
+    "mechanism:entry-also-imported",
+    "mechanism:esm-imports-cjs",
+    "mechanism:mixed-esm-cjs",
+    "mechanism:multiple-entries",
+    "mechanism:multiple-esm-carriers",
+    "mechanism:nested-dynamic",
+    "mechanism:overlapping-dependencies",
+    "mechanism:pure-definer-behind-barrel",
+    "mechanism:shared-cjs",
+    "regime:mixed",
+    "template:overlapping-entries",
+    "variation:barrel-reexport",
+    "variation:inferred-pure-definer",
+    "variation:multi-edge-pair",
+    "variation:namespace-read",
+    "variation:package",
+    "variation:reexport-star",
+    "variation:side-effect-free-metadata",
+    "variation:side-effect-import",
+    "variation:side-effects-array",
+    "variation:value-import",
+    "variation:value-read"
+  ],
+  "model": {
+    "modules": [
+      {
+        "id": "m0",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m1",
+            "registration": "dyn-m0-m1"
+          }
+        ],
+        "events": [
+          {
+            "module": "m0",
+            "phase": "evaluate",
+            "value": 356225
+          },
+          {
+            "module": "m0",
+            "phase": "evaluate-1",
+            "value": 199413
+          }
+        ]
+      },
+      {
+        "id": "m1",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-side-effect-import",
+            "target": "m2"
+          },
+          {
+            "kind": "esm-namespace-import",
+            "target": "m3",
+            "localName": "ns_m1_m3",
+            "readMembers": ["vm3"]
+          },
+          {
+            "kind": "esm-side-effect-import",
+            "target": "m5"
+          },
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m6",
+            "registration": "dyn-m1-m6"
+          },
+          {
+            "kind": "esm-value-import",
+            "target": "m4",
+            "importedName": "vm4",
+            "localName": "m1_vm4"
+          },
+          {
+            "kind": "esm-value-import",
+            "target": "m5",
+            "importedName": "vm5",
+            "localName": "me_m1_m5"
+          },
+          {
+            "kind": "esm-value-import",
+            "target": "m6",
+            "importedName": "vm6",
+            "localName": "me_m1_m6"
+          },
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m4",
+            "registration": "dynm-m1-m4"
+          }
+        ],
+        "events": [
+          {
+            "module": "m1",
+            "phase": "evaluate",
+            "value": 836786
+          },
+          {
+            "module": "m1",
+            "phase": "evaluate-1",
+            "value": 958463,
+            "reads": [
+              {
+                "binding": "m1_vm4"
+              },
+              {
+                "binding": "me_m1_m6"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "m2",
+        "format": "esm",
+        "dependencies": [],
+        "events": [
+          {
+            "module": "m2",
+            "phase": "evaluate",
+            "value": 770334
+          }
+        ]
+      },
+      {
+        "id": "m3",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-side-effect-import",
+            "target": "m4"
+          },
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m9",
+            "registration": "dyn-m3-m9"
+          },
+          {
+            "kind": "esm-side-effect-import",
+            "target": "m5"
+          },
+          {
+            "kind": "esm-value-import",
+            "target": "m4",
+            "importedName": "vm4",
+            "localName": "me_m3_m4"
+          },
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m5",
+            "registration": "dynm-m3-m5"
+          }
+        ],
+        "events": [
+          {
+            "module": "m3",
+            "phase": "evaluate",
+            "value": 841136,
+            "reads": [
+              {
+                "binding": "me_m3_m4"
+              }
+            ]
+          },
+          {
+            "module": "m3",
+            "phase": "evaluate-1",
+            "value": 565639
+          }
+        ]
+      },
+      {
+        "id": "m4",
+        "format": "cjs",
+        "dependencies": [],
+        "events": [
+          {
+            "module": "m4",
+            "phase": "evaluate",
+            "value": 383358
+          }
+        ]
+      },
+      {
+        "id": "m5",
+        "format": "cjs",
+        "dependencies": [
+          {
+            "kind": "cjs-require",
+            "target": "m7",
+            "resultBinding": "r_m5_m7",
+            "readName": "vm7"
+          }
+        ],
+        "events": [
+          {
+            "module": "m5",
+            "phase": "evaluate",
+            "value": 572484,
+            "reads": [
+              {
+                "binding": "r_m5_m7",
+                "member": "vm7"
+              }
+            ]
+          },
+          {
+            "module": "m5",
+            "phase": "evaluate-1",
+            "value": 924992,
+            "reads": [
+              {
+                "binding": "r_m5_m7",
+                "member": "vm7"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "m6",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-value-import",
+            "target": "m7",
+            "importedName": "vm7",
+            "localName": "m6_vm7"
+          }
+        ],
+        "events": [
+          {
+            "module": "m6",
+            "phase": "evaluate",
+            "value": 313265,
+            "reads": [
+              {
+                "binding": "m6_vm7"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "m7",
+        "format": "cjs",
+        "dependencies": [
+          {
+            "kind": "cjs-require",
+            "target": "m8"
+          },
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m9",
+            "registration": "dyn-m7-m9"
+          },
+          {
+            "kind": "esm-dynamic-import",
+            "target": "m8",
+            "registration": "dynm-m7-m8"
+          }
+        ],
+        "events": [
+          {
+            "module": "m7",
+            "phase": "evaluate",
+            "value": 634263
+          }
+        ]
+      },
+      {
+        "id": "m8",
+        "format": "cjs",
+        "dependencies": [
+          {
+            "kind": "cjs-require",
+            "target": "m9",
+            "resultBinding": "r_m8_m9",
+            "readName": "vm9"
+          }
+        ],
+        "events": [
+          {
+            "module": "m8",
+            "phase": "evaluate",
+            "value": 547152,
+            "reads": [
+              {
+                "binding": "r_m8_m9",
+                "member": "vm9"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "m9",
+        "format": "cjs",
+        "dependencies": [],
+        "events": [
+          {
+            "module": "m9",
+            "phase": "evaluate",
+            "value": 667370
+          },
+          {
+            "module": "m9",
+            "phase": "evaluate-1",
+            "value": 734496
+          }
+        ]
+      },
+      {
+        "id": "pdef10",
+        "format": "esm",
+        "dependencies": [],
+        "events": [],
+        "inferredPure": true,
+        "pureBase": 872410
+      },
+      {
+        "id": "psib10",
+        "format": "esm",
+        "dependencies": [],
+        "events": [
+          {
+            "module": "psib10",
+            "phase": "evaluate",
+            "value": 26813
+          },
+          {
+            "module": "psib10",
+            "phase": "evaluate-1",
+            "value": 15256
+          }
+        ]
+      },
+      {
+        "id": "pbarin10",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-reexport-star",
+            "target": "pdef10"
+          },
+          {
+            "kind": "esm-reexport-named",
+            "target": "psib10",
+            "sourceName": "vpsib10",
+            "exportedName": "vpsib10"
+          }
+        ],
+        "events": []
+      },
+      {
+        "id": "pbar10",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-reexport-star",
+            "target": "pbarin10"
+          }
+        ],
+        "events": []
+      },
+      {
+        "id": "pconsA10",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-namespace-import",
+            "target": "pbar10",
+            "localName": "ns_pconsA10",
+            "readMembers": ["vpdef10"]
+          }
+        ],
+        "events": [
+          {
+            "module": "pconsA10",
+            "phase": "evaluate",
+            "value": 460574,
+            "reads": [
+              {
+                "binding": "ns_pconsA10",
+                "member": "vpdef10"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "pconsB10",
+        "format": "esm",
+        "dependencies": [
+          {
+            "kind": "esm-namespace-import",
+            "target": "pbar10",
+            "localName": "ns_pconsB10",
+            "readMembers": ["vpsib10"]
+          }
+        ],
+        "events": [
+          {
+            "module": "pconsB10",
+            "phase": "evaluate",
+            "value": 75520,
+            "reads": [
+              {
+                "binding": "ns_pconsB10",
+                "member": "vpsib10"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "entries": [
+      {
+        "name": "entry-m0",
+        "moduleId": "m0"
+      },
+      {
+        "name": "entry-pbar10",
+        "moduleId": "pbar10"
+      },
+      {
+        "name": "entry-pconsA10",
+        "moduleId": "pconsA10"
+      },
+      {
+        "name": "entry-pconsB10",
+        "moduleId": "pconsB10"
+      }
+    ],
+    "schedule": [
+      {
+        "kind": "import-entry",
+        "entry": "entry-m0"
+      },
+      {
+        "kind": "import-entry",
+        "entry": "entry-pconsA10"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dyn-m0-m1"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dyn-m1-m6"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dyn-m3-m9"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dyn-m7-m9"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dynm-m1-m4"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dynm-m7-m8"
+      },
+      {
+        "kind": "trigger-dynamic-import",
+        "registration": "dynm-m3-m5"
+      },
+      {
+        "kind": "import-entry",
+        "entry": "entry-pconsB10"
+      },
+      {
+        "kind": "import-entry",
+        "entry": "entry-pbar10"
+      }
+    ],
+    "packages": [
+      {
+        "name": "fa-pdef10",
+        "sideEffects": ["./psib10.mjs"],
+        "moduleIds": ["pbar10", "pbarin10", "psib10", "pdef10"]
+      }
+    ],
+    "build": {
+      "chunking": {
+        "kind": "automatic"
+      },
+      "includeDependenciesRecursively": true,
+      "preserveEntrySignatures": "allow-extension",
+      "lazyBarrel": false,
+      "strictExecutionOrder": true
+    }
+  },
+  "snapshots": {
+    "buggy": {
+      "path": "/tmp/rolldown-strict-order-study/pr10104-runtime-snapshot/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    },
+    "final": {
+      "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    }
+  },
+  "cells": {
+    "buggy": {
+      "od": {
+        "verdictKind": "pass",
+        "signature": "pass",
+        "sourceOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleFiles": [
+          "chunks/module-0001.js",
+          "chunks/module-00012.js",
+          "chunks/module-0004.js",
+          "chunks/module-0005.js",
+          "chunks/module-0006.js",
+          "chunks/module-0007.js",
+          "chunks/module-0008.js",
+          "chunks/module-0009.js",
+          "chunks/rolldown-runtime.js",
+          "entries/__entry_0000.js",
+          "entries/__entry_0001.js",
+          "entries/__entry_0002.js",
+          "entries/__entry_0003.js"
+        ]
+      },
+      "wa": {
+        "verdictKind": "mismatch",
+        "signature": "events-reordered:source=[[\"psib10\",\"evaluate\",26813],[\"psib10\",\"evaluate-1\",15256],[\"pconsA10\",\"evaluate\",1332984],[\"@schedule\",1,\"entry\"],[\"m2\",\"evaluate\",770334],[\"m4\",\"evaluate\",383358],[\"m9\",\"evaluate\",667370],[\"m9\",\"evaluate-1\",734496],[\"m8\",\"evaluate\",1214522],[\"m7\",\"evaluate\",634263],[\"m5\",\"evaluate\",1206747],[\"m5\",\"evaluate-1\",1559255],[\"m3\",\"evaluate\",1224494],[\"m3\",\"evaluate-1\",565639],[\"m6\",\"evaluate\",947528],[\"m1\",\"evaluate\",836786],[\"m1\",\"evaluate-1\",2289349],[\"@schedule\",2,\"dynamic\"],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"]]:bundle=[[\"pconsA10\",\"evaluate\",1332984],[\"@schedule\",1,\"entry\"],[\"m2\",\"evaluate\",770334],[\"m4\",\"evaluate\",383358],[\"m9\",\"evaluate\",667370],[\"m9\",\"evaluate-1\",734496],[\"m8\",\"evaluate\",1214522],[\"m7\",\"evaluate\",634263],[\"m5\",\"evaluate\",1206747],[\"m5\",\"evaluate-1\",1559255],[\"m3\",\"evaluate\",1224494],[\"m3\",\"evaluate-1\",565639],[\"m6\",\"evaluate\",947528],[\"m1\",\"evaluate\",836786],[\"m1\",\"evaluate-1\",2289349],[\"@schedule\",2,\"dynamic\"],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"],[\"psib10\",\"evaluate\",26813],[\"psib10\",\"evaluate-1\",15256]]",
+        "sourceOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleOrder": [
+          "m0",
+          "m0",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "psib10",
+          "psib10",
+          "pconsB10"
+        ],
+        "bundleFiles": [
+          "chunks/module-0000.js",
+          "chunks/module-0001.js",
+          "chunks/module-00012.js",
+          "chunks/module-0004.js",
+          "chunks/module-0005.js",
+          "chunks/module-0006.js",
+          "chunks/module-0007.js",
+          "chunks/module-0008.js",
+          "chunks/module-0009.js",
+          "chunks/module-0014.js",
+          "chunks/module-0015.js",
+          "chunks/pbar10.js",
+          "chunks/rolldown-runtime.js",
+          "entries/__entry_0000.js",
+          "entries/__entry_0001.js",
+          "entries/__entry_0002.js",
+          "entries/__entry_0003.js"
+        ]
+      }
+    },
+    "final": {
+      "od": {
+        "verdictKind": "pass",
+        "signature": "pass",
+        "sourceOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleFiles": [
+          "chunks/module-0001.js",
+          "chunks/module-00012.js",
+          "chunks/module-0004.js",
+          "chunks/module-0005.js",
+          "chunks/module-0006.js",
+          "chunks/module-0007.js",
+          "chunks/module-0008.js",
+          "chunks/module-0009.js",
+          "chunks/rolldown-runtime.js",
+          "entries/__entry_0000.js",
+          "entries/__entry_0001.js",
+          "entries/__entry_0002.js",
+          "entries/__entry_0003.js"
+        ]
+      },
+      "wa": {
+        "verdictKind": "pass",
+        "signature": "pass",
+        "sourceOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleFiles": [
+          "chunks/module-0000.js",
+          "chunks/module-0001.js",
+          "chunks/module-00012.js",
+          "chunks/module-0004.js",
+          "chunks/module-0005.js",
+          "chunks/module-0006.js",
+          "chunks/module-0007.js",
+          "chunks/module-0008.js",
+          "chunks/module-0009.js",
+          "chunks/module-0014.js",
+          "chunks/module-0015.js",
+          "chunks/pbar10.js",
+          "chunks/rolldown-runtime.js",
+          "entries/__entry_0000.js",
+          "entries/__entry_0001.js",
+          "entries/__entry_0002.js",
+          "entries/__entry_0003.js"
+        ]
+      }
+    }
+  },
+  "ablations": [
+    {
+      "name": "sideEffects->true (withdraw the partial-array metadata)",
+      "buggyWa": {
+        "verdictKind": "pass",
+        "signature": "pass",
+        "sourceOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleFiles": [
+          "chunks/module-0000.js",
+          "chunks/module-0001.js",
+          "chunks/module-00012.js",
+          "chunks/module-0004.js",
+          "chunks/module-0005.js",
+          "chunks/module-0006.js",
+          "chunks/module-0007.js",
+          "chunks/module-0008.js",
+          "chunks/module-0009.js",
+          "chunks/module-0014.js",
+          "chunks/module-0015.js",
+          "chunks/pbar10.js",
+          "chunks/rolldown-runtime.js",
+          "entries/__entry_0000.js",
+          "entries/__entry_0001.js",
+          "entries/__entry_0002.js",
+          "entries/__entry_0003.js"
+        ]
+      }
+    },
+    {
+      "name": "drop the fa- package (members return to root)",
+      "buggyWa": {
+        "verdictKind": "mismatch",
+        "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+        "sourceOrder": [
+          "m0",
+          "m0",
+          "psib10",
+          "psib10",
+          "pconsA10",
+          "m2",
+          "m4",
+          "m9",
+          "m9",
+          "m8",
+          "m7",
+          "m5",
+          "m5",
+          "m3",
+          "m3",
+          "m6",
+          "m1",
+          "m1",
+          "pconsB10"
+        ],
+        "bundleOrder": ["m0", "m0", "psib10", "psib10"],
+        "bundleFiles": [
+          "chunks/module-0000.js",
+          "chunks/module-0001.js",
+          "chunks/module-00012.js",
+          "chunks/module-0004.js",
+          "chunks/module-0005.js",
+          "chunks/module-0006.js",
+          "chunks/module-0007.js",
+          "chunks/module-0008.js",
+          "chunks/module-0009.js",
+          "chunks/module-0013.js",
+          "chunks/module-0014.js",
+          "chunks/module-0015.js",
+          "chunks/rolldown-runtime.js",
+          "entries/__entry_0000.js",
+          "entries/__entry_0001.js",
+          "entries/__entry_0002.js",
+          "entries/__entry_0003.js"
+        ]
+      }
+    }
+  ],
+  "reorderTiedToPackaging": true
+}

@@ -1183,7 +1183,7 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
   // `includeDependenciesRecursively` (the global codeSplitting fallback) and `lazyBarrel` (the
   // barrel-pruning optimization) are the two W14a axes; `preserveEntrySignatures` and
   // `strictExecutionOrder` are fixed (the latter not rolled — a seo:false cell needs a weaker order
-  // oracle, deferred past W14b).
+  // oracle, deferred to W14c).
   const includeDependenciesRecursively = rng.boolean();
   const lazyBarrel = rng.boolean();
 
@@ -3221,7 +3221,13 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   ) {
     tags.add("variation:namespace-read");
   }
-  if (dependencyKinds.has("esm-reexport-named") || dependencyKinds.has("esm-reexport-star")) {
+  // A LOCAL re-export (`import { s as l } …; export { l as e };`) is a barrel re-export surface too, so
+  // the umbrella tag covers it alongside named/star (SAFE note: the tag omitted `esm-local-reexport`).
+  if (
+    dependencyKinds.has("esm-reexport-named") ||
+    dependencyKinds.has("esm-reexport-star") ||
+    dependencyKinds.has("esm-local-reexport")
+  ) {
     tags.add("variation:barrel-reexport");
   }
   if (dependencyKinds.has("esm-reexport-star")) {
@@ -3231,7 +3237,8 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     program.modules.some((module) =>
       module.dependencies.some(
         (dependency) =>
-          dependency.kind === "esm-reexport-named" && dependency.sourceName === "default",
+          (dependency.kind === "esm-reexport-named" || dependency.kind === "esm-local-reexport") &&
+          dependency.sourceName === "default",
       ),
     )
   ) {
@@ -3421,23 +3428,34 @@ function hasCompletePureDefinerConjunction(
   return false;
 }
 
-/// A COMPLETE family-B eager-barrel conjunction (`mechanism:family-b-eager-barrel`), requiring EVERY
-/// ingredient the snapshot bisection proved load-bearing (probed od-RED / wa-GREEN; removing any one
-/// greens the shape):
+/// A COMPLETE family-B eager-barrel conjunction (`mechanism:family-b-eager-barrel`) — the CAUSAL
+/// fingerprint of the vben `initPreferences is not a function` breakage, every ingredient the snapshot
+/// bisection proved load-bearing (probed od-RED / wa-GREEN; removing any one greens the shape):
 ///
 /// - a package P with ARRAY (partial) `sideEffects` metadata;
-/// - a metadata-pure member barrel B of P carrying a STAR re-export to a facade F (a named hop
-///   resolves the binding directly and greens);
+/// - the package MAIN barrel B (`moduleIds[0]` — the file a bare `import … from "P"` resolves; the
+///   eager-forwarder bug lives on the main, not on some other member), metadata-pure, carrying a STAR
+///   re-export to a facade F (a named hop resolves the binding directly and greens);
 /// - B declares a local export that is CALL-marked and demanded — the included own statement (an
 ///   inlinable const, or nothing, greens: the delegation only happens for an INCLUDED forwarder);
 /// - F: a metadata-pure member of P whose init assigns its value from a CALL of a listed member S
 ///   (S carries events — the package's one side-effectful module);
-/// - a chunk group placing F and S together AWAY from the entry chunk: a manual group containing
-///   both, or an organic group whose regex test matches both rendered package files;
-/// - an ENTRY E that (a) consumes a name whose supply is F reached through B's star, (b) reads that
-///   binding inside a hiddenReadFn event, (c) calls B's declared helper, and (d) side-effect-imports
-///   an event-carrying non-member module at a LOWER dependency index than the facade import (source
-///   order runs it before S; predicted chunk order runs S first — the deviation seed).
+/// - a chunk group placing F and S together in a chunk that EXCLUDES the entry: a manual group with
+///   both members but not the entry, or an organic group whose regex matches both package files but
+///   not the entry's rendered path — the entry chunk provably is separate;
+/// - an ENTRY E that (a) consumes a name whose supply is F reached through B's star, (b) READS that
+///   facade binding in an event so the value reaches the oracle (the read is the ingredient, hidden or
+///   VISIBLE — the snapshot fails both, so the shrunken repro's plain read is still the conjunction),
+///   (c) actually INVOKES B's declared helper in an event — a `ValueRead.call` of the helper binding,
+///   NOT merely a call-marked import (a `call:true` import the entry never calls runs no forwarder;
+///   the decoy that keeps the import but drops the event call is NOT the shape), and (d)
+///   side-effect-imports an event-carrying non-member module at a LOWER dependency index than the
+///   facade import (source order runs it before S; predicted chunk order runs S first — the deviation
+///   seed).
+///
+/// Purely structural over the analyzed program, so it holds identically for generated, directed,
+/// handwritten, and shrunk models; the same-seed od-red/wa-green split is its runtime signature
+/// (family A reds both modes).
 function hasCompleteFamilyBConjunction(
   program: ProgramModel,
   modulesById: ReadonlyMap<string, ModuleModel>,
@@ -3447,33 +3465,44 @@ function hasCompleteFamilyBConjunction(
   const packages = packagesOf(program);
   const metadataPure = metadataPureModuleIds(program);
   const chunking = programChunking(program);
-
-  const splitsAcrossChunkGroup = (facade: ModuleModel, sibling: ModuleModel): boolean => {
+  const membership = packageMembershipOf(program);
+  // A module's rendered path — a package member under node_modules, a root module index-named exactly
+  // as the renderer assigns (its position in `program.modules`) — so the organic-group regex tests the
+  // SAME strings the build sees.
+  const renderedPathOf = (module: ModuleModel): string => {
+    const member = membership.get(module.id);
+    if (member !== undefined) {
+      return `node_modules/${member.package.name}/${packageMemberFileName(module)}`;
+    }
+    const index = program.modules.findIndex((candidate) => candidate.id === module.id);
+    return `module-${String(index).padStart(4, "0")}.${module.format === "esm" ? "mjs" : "cjs"}`;
+  };
+  // {facade, sibling} share a chunk group that the entry is NOT in — proving the entry chunk is split
+  // away, not merely that facade and sibling are grouped.
+  const groupSplitsEntry = (
+    facade: ModuleModel,
+    sibling: ModuleModel,
+    entry: ModuleModel,
+  ): boolean => {
     if (chunking.kind === "manual") {
       return chunking.groups.some(
-        (group) => group.moduleIds.includes(facade.id) && group.moduleIds.includes(sibling.id),
+        (group) =>
+          group.moduleIds.includes(facade.id) &&
+          group.moduleIds.includes(sibling.id) &&
+          !group.moduleIds.includes(entry.id),
       );
     }
     if (chunking.kind === "organic") {
-      const membership = packageMembershipOf(program);
-      const renderedPath = (module: ModuleModel): string | undefined => {
-        const member = membership.get(module.id);
-        return member === undefined
-          ? undefined
-          : `node_modules/${member.package.name}/${packageMemberFileName(module)}`;
-      };
-      const facadePath = renderedPath(facade);
-      const siblingPath = renderedPath(sibling);
-      if (facadePath === undefined || siblingPath === undefined) {
-        return false;
-      }
+      const facadePath = renderedPathOf(facade);
+      const siblingPath = renderedPathOf(sibling);
+      const entryPath = renderedPathOf(entry);
       return chunking.groups.some((group) => {
         if (group.test === undefined) {
           return false;
         }
         try {
           const test = new RegExp(group.test);
-          return test.test(facadePath) && test.test(siblingPath);
+          return test.test(facadePath) && test.test(siblingPath) && !test.test(entryPath);
         } catch {
           return false;
         }
@@ -3487,99 +3516,117 @@ function hasCompleteFamilyBConjunction(
       continue;
     }
     const members = new Set(pkg.moduleIds);
-    for (const barrelId of pkg.moduleIds) {
-      const barrel = modulesById.get(barrelId);
-      if (barrel === undefined || barrel.format !== "esm" || !metadataPure.has(barrelId)) {
+    // The barrel must be the package MAIN — the eager-forwarder the bug lives in is what a bare
+    // `import … from "P"` resolves; a non-main member is a different resolution surface.
+    const barrelId = pkg.moduleIds[0];
+    if (barrelId === undefined) {
+      continue;
+    }
+    const barrel = modulesById.get(barrelId);
+    if (barrel === undefined || barrel.format !== "esm" || !metadataPure.has(barrelId)) {
+      continue;
+    }
+    const starTargets = barrel.dependencies.flatMap((dependency) =>
+      dependency.kind === "esm-reexport-star" ? [dependency.target] : [],
+    );
+    if (starTargets.length === 0) {
+      continue;
+    }
+    // The included own statement: a DECLARED local export the plan call-marked and demanded.
+    const declared = barrel.localExports ?? [];
+    const demandedOnBarrel = new Set(plan.requestedNames.get(barrelId) ?? []);
+    const callable = plan.callableNames.get(barrelId) ?? new Set<string>();
+    const hasIncludedHelper = declared.some(
+      (name) => demandedOnBarrel.has(name) && callable.has(name),
+    );
+    if (!hasIncludedHelper) {
+      continue;
+    }
+    for (const facadeId of starTargets) {
+      const facade = modulesById.get(facadeId);
+      if (facade === undefined || !members.has(facadeId) || !metadataPure.has(facadeId)) {
         continue;
       }
-      const starTargets = barrel.dependencies.flatMap((dependency) =>
-        dependency.kind === "esm-reexport-star" ? [dependency.target] : [],
+      // The facade's init-assigned value: a CALL import of a LISTED (side-effectful) member.
+      const managerEdge = facade.dependencies.find(
+        (dependency) =>
+          dependency.kind === "esm-value-import" &&
+          dependency.call === true &&
+          members.has(dependency.target) &&
+          !metadataPure.has(dependency.target) &&
+          (modulesById.get(dependency.target)?.events.length ?? 0) > 0,
       );
-      if (starTargets.length === 0) {
+      if (managerEdge === undefined) {
         continue;
       }
-      // The included own statement: a DECLARED local export the plan call-marked and demanded.
-      const declared = barrel.localExports ?? [];
-      const demandedOnBarrel = new Set(plan.requestedNames.get(barrelId) ?? []);
-      const callable = plan.callableNames.get(barrelId) ?? new Set<string>();
-      const hasIncludedHelper = declared.some(
-        (name) => demandedOnBarrel.has(name) && callable.has(name),
-      );
-      if (!hasIncludedHelper) {
+      const sibling = modulesById.get(managerEdge.target);
+      if (sibling === undefined) {
         continue;
       }
-      for (const facadeId of starTargets) {
-        const facade = modulesById.get(facadeId);
-        if (facade === undefined || !members.has(facadeId) || !metadataPure.has(facadeId)) {
+      for (const entryId of entryModuleIds) {
+        const entry = modulesById.get(entryId);
+        if (entry === undefined || entry.format !== "esm") {
           continue;
         }
-        // The facade's init-assigned value: a CALL import of a LISTED (side-effectful) member.
-        const managerEdge = facade.dependencies.find(
-          (dependency) =>
+        const facadeImportIndex = entry.dependencies.findIndex((dependency) => {
+          if (dependency.kind !== "esm-value-import" || dependency.target !== barrelId) {
+            return false;
+          }
+          const consumption = plan.consumptions.find(
+            (record) => record.consumerModuleId === entryId && record.dependency === dependency,
+          );
+          return (
+            consumption !== undefined &&
+            consumption.supply.status === "supplied" &&
+            consumption.supply.origin.moduleId === facadeId &&
+            consumption.supply.hops.some((hop) => hop.via === "star" && hop.through === barrelId)
+          );
+        });
+        if (facadeImportIndex < 0) {
+          continue;
+        }
+        const facadeDependency = entry.dependencies[facadeImportIndex];
+        if (facadeDependency === undefined || facadeDependency.kind !== "esm-value-import") {
+          continue;
+        }
+        const facadeBinding = facadeDependency.localName;
+        // (b) The entry READS the facade value in an event so the oracle observes it — hidden or
+        // visible; the snapshot fails both, so the read itself is the ingredient.
+        const readsFacade = entry.events.some((event) =>
+          (event.reads ?? []).some((read) => read.binding === facadeBinding),
+        );
+        // (c) The entry ACTUALLY invokes B's declared helper: an event `ValueRead.call` of a binding
+        // bound to a call-marked helper import from the barrel — not merely a `call:true` import.
+        const helperBindings = new Set(
+          entry.dependencies.flatMap((dependency) =>
             dependency.kind === "esm-value-import" &&
+            dependency.target === barrelId &&
             dependency.call === true &&
-            members.has(dependency.target) &&
-            !metadataPure.has(dependency.target) &&
+            declared.includes(dependency.importedName)
+              ? [dependency.localName]
+              : [],
+          ),
+        );
+        const invokesHelper = entry.events.some((event) =>
+          (event.reads ?? []).some(
+            (read) => read.call === true && helperBindings.has(read.binding),
+          ),
+        );
+        // (d) An effectful non-member imported for side effect BEFORE the facade import.
+        const effectfulFirst = entry.dependencies.some(
+          (dependency, index) =>
+            index < facadeImportIndex &&
+            dependency.kind === "esm-side-effect-import" &&
+            !members.has(dependency.target) &&
             (modulesById.get(dependency.target)?.events.length ?? 0) > 0,
         );
-        if (managerEdge === undefined) {
-          continue;
-        }
-        const sibling = modulesById.get(managerEdge.target);
-        if (sibling === undefined || !splitsAcrossChunkGroup(facade, sibling)) {
-          continue;
-        }
-        // The entry: facade value through B's star, read inside a hiddenReadFn event, plus the
-        // helper call and the earlier effectful side-effect import.
-        for (const entryId of entryModuleIds) {
-          const entry = modulesById.get(entryId);
-          if (entry === undefined || entry.format !== "esm") {
-            continue;
-          }
-          const facadeImportIndex = entry.dependencies.findIndex((dependency) => {
-            if (dependency.kind !== "esm-value-import" || dependency.target !== barrelId) {
-              return false;
-            }
-            const consumption = plan.consumptions.find(
-              (record) => record.consumerModuleId === entryId && record.dependency === dependency,
-            );
-            return (
-              consumption !== undefined &&
-              consumption.supply.status === "supplied" &&
-              consumption.supply.origin.moduleId === facadeId &&
-              consumption.supply.hops.some((hop) => hop.via === "star" && hop.through === barrelId)
-            );
-          });
-          if (facadeImportIndex < 0) {
-            continue;
-          }
-          const facadeDependency = entry.dependencies[facadeImportIndex];
-          if (facadeDependency === undefined || facadeDependency.kind !== "esm-value-import") {
-            continue;
-          }
-          const facadeBinding = facadeDependency.localName;
-          const hiddenRead = entry.events.some(
-            (event) =>
-              event.hiddenReadFn === true &&
-              (event.reads ?? []).some((read) => read.binding === facadeBinding),
-          );
-          const callsHelper = entry.dependencies.some(
-            (dependency) =>
-              dependency.kind === "esm-value-import" &&
-              dependency.target === barrelId &&
-              dependency.call === true &&
-              declared.includes(dependency.importedName),
-          );
-          const effectfulFirst = entry.dependencies.some(
-            (dependency, index) =>
-              index < facadeImportIndex &&
-              dependency.kind === "esm-side-effect-import" &&
-              !members.has(dependency.target) &&
-              (modulesById.get(dependency.target)?.events.length ?? 0) > 0,
-          );
-          if (hiddenRead && callsHelper && effectfulFirst) {
-            return true;
-          }
+        if (
+          readsFacade &&
+          invokesHelper &&
+          effectfulFirst &&
+          groupSplitsEntry(facade, sibling, entry)
+        ) {
+          return true;
         }
       }
     }

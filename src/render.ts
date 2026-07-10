@@ -552,17 +552,24 @@ function isDeclarableName(name: string): boolean {
   return !INVALID_MODULE_BINDING_IDENTIFIERS.has(name);
 }
 
-/// Render one synthesized export as either a direct exported declaration (a plain identifier name) or,
-/// for a reserved name, a fresh local declaration plus an `export { local as name }` alias. `define`
-/// renders the declaration DEFINING a binding WITHOUT the `export` keyword (a `function binding() {…}`
-/// or a `const binding = …`); a declarable name gets `export ` prepended, a reserved one is aliased.
+/// Render one synthesized export as either a direct exported declaration (`export function name(){…}`)
+/// or a fresh local declaration plus an `export { local as name }` alias. `define` renders the
+/// declaration DEFINING a binding WITHOUT the `export` keyword (a `function binding() {…}` or a
+/// `const binding = …`). The direct form is taken ONLY when the name is both a legal declaration name
+/// AND not already bound in this module — an already-used name (an import local, a prior synthesized
+/// binding) or a reserved word takes the aliased form, so the module never emits a DUPLICATE lexical
+/// binding (W14b.1 blocker 3: `localExports ["x"]` beside `import { … as x }` would otherwise render
+/// `import { … as x }; export function x(){}` = a SyntaxError). The chosen name is registered so a
+/// later synthesized export cannot reuse it. Generated export names are plain identifiers that never
+/// collide, so the corpus stays on the direct path and is byte-identical.
 function renderSynthesizedExport(
   exportName: string,
   usedBindings: Set<string>,
   localPrefix: string,
   define: (binding: string) => string,
 ): string[] {
-  if (isDeclarableName(exportName)) {
+  if (isDeclarableName(exportName) && !usedBindings.has(exportName)) {
+    usedBindings.add(exportName);
     return [`export ${define(exportName)}`];
   }
   const local = freshBinding(usedBindings, localPrefix);

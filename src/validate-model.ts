@@ -16,8 +16,20 @@ import type {
   ProgramModel,
   ValueRead,
 } from "./model.ts";
-import { metadataPureModuleIds, programChunking } from "./model.ts";
+import { metadataPureModuleIds, packagesOf, programChunking } from "./model.ts";
 import type { ProgramFacts } from "./program-facts.ts";
+import { builtinModules } from "node:module";
+
+/// Node's canonical built-in module names (bare specifiers that resolve to a CORE module, e.g. `fs`,
+/// `path`, `events`). A package name that collides with one is rejected: a bare `import … from "fs"`
+/// of the package main would resolve the core module, not the fixture file. Both the bare and the
+/// `node:`-prefixed canonical forms are included, though the prefixed form can never satisfy
+/// `PACKAGE_NAME_PATTERN` (the `:` is not a legal package-name character) — it is listed for
+/// completeness so the rule reads as "every canonical built-in specifier".
+const BUILTIN_MODULE_NAMES: ReadonlySet<string> = new Set([
+  ...builtinModules,
+  ...builtinModules.map((name) => `node:${name}`),
+]);
 
 /// Generated package names: npm-safe, lowercase, deterministic. Restrictive on purpose — the name is
 /// a directory AND a bare import specifier, so the model never carries a name whose resolution could
@@ -169,47 +181,73 @@ function validatePackages(
   modulesById: ReadonlyMap<string, ModuleModel>,
   errors: string[],
 ): void {
-  const packages = program.packages;
-  if (packages !== undefined) {
-    const names = new Set<string>();
-    const memberIds = new Set<string>();
-    for (const [packageIndex, pkg] of packages.entries()) {
-      const path = `packages[${packageIndex}]`;
-      if (!PACKAGE_NAME_PATTERN.test(pkg.name)) {
-        errors.push(`${path}.name: invalid package name ${quote(pkg.name)}`);
-      } else if (names.has(pkg.name)) {
-        errors.push(`${path}.name: duplicate package name ${quote(pkg.name)}`);
+  // Structural well-formedness over the RESOLVED packages view (`packagesOf`) — persisted `packages`
+  // (schema 18) OR the legacy `sideEffectFree`-flag normalization to `sef-<id>` packages — so a
+  // legacy artifact or a handwritten model that reaches the rendered package layout is validated by
+  // the SAME rules, never bypasses them (W14b.1 blocker 1: the old check ran only on persisted
+  // `packages`, so a flagged module whose id collides case-fold (`A`/`a` → one `sef-a`) or escapes
+  // the source root (`../../../x`) slipped through). The `packages` field appearing only on
+  // package-carrying cases keeps the generated corpus byte-identical: its persisted packages ARE the
+  // resolved view, so these checks see exactly what they saw before.
+  const resolved = packagesOf(program);
+  const names = new Set<string>();
+  const memberIds = new Set<string>();
+  for (const [packageIndex, pkg] of resolved.entries()) {
+    const path = `packages[${packageIndex}]`;
+    if (!PACKAGE_NAME_PATTERN.test(pkg.name)) {
+      errors.push(`${path}.name: invalid package name ${quote(pkg.name)}`);
+    } else if (BUILTIN_MODULE_NAMES.has(pkg.name)) {
+      errors.push(
+        `${path}.name: package name ${quote(pkg.name)} collides with a Node built-in module; a bare import of its main would resolve the core module, not the package`,
+      );
+    } else if (names.has(pkg.name)) {
+      errors.push(`${path}.name: duplicate package name ${quote(pkg.name)}`);
+    } else {
+      names.add(pkg.name);
+    }
+    if (pkg.moduleIds.length === 0) {
+      errors.push(`${path}.moduleIds: a package needs at least one member (the main module)`);
+    }
+    // Case-insensitive filesystems (macOS/Windows) collapse `Foo.mjs` and `foo.mjs` in ONE package
+    // directory to a single file (SAFE note 2); member ids differing only in case within a package
+    // would render two members onto one path, so reject the collision.
+    const memberIdsLowerHere = new Set<string>();
+    for (const [memberIndex, moduleId] of pkg.moduleIds.entries()) {
+      const memberPath = `${path}.moduleIds[${memberIndex}]`;
+      if (!modulesById.has(moduleId)) {
+        errors.push(`${memberPath}: unknown module id ${quote(moduleId)}`);
+      } else if (!PACKAGE_MEMBER_ID_PATTERN.test(moduleId)) {
+        errors.push(
+          `${memberPath}: module id ${quote(moduleId)} is not filename-safe (a member id becomes its rendered file name)`,
+        );
+      }
+      const memberIdLower = moduleId.toLowerCase();
+      if (memberIdsLowerHere.has(memberIdLower)) {
+        errors.push(
+          `${memberPath}: module id ${quote(moduleId)} collides case-insensitively with another member of this package; their rendered file names would clash on a case-insensitive filesystem`,
+        );
       } else {
-        names.add(pkg.name);
+        memberIdsLowerHere.add(memberIdLower);
       }
-      if (pkg.moduleIds.length === 0) {
-        errors.push(`${path}.moduleIds: a package needs at least one member (the main module)`);
+      if (memberIds.has(moduleId)) {
+        errors.push(`${memberPath}: module ${quote(moduleId)} belongs to more than one package`);
+      } else {
+        memberIds.add(moduleId);
       }
-      for (const [memberIndex, moduleId] of pkg.moduleIds.entries()) {
-        const memberPath = `${path}.moduleIds[${memberIndex}]`;
-        if (!modulesById.has(moduleId)) {
-          errors.push(`${memberPath}: unknown module id ${quote(moduleId)}`);
-        } else if (!PACKAGE_MEMBER_ID_PATTERN.test(moduleId)) {
+    }
+    if (typeof pkg.sideEffects !== "boolean") {
+      for (const [patternIndex, pattern] of pkg.sideEffects.entries()) {
+        if (!SIDE_EFFECTS_PATTERN.test(pattern)) {
           errors.push(
-            `${memberPath}: module id ${quote(moduleId)} is not filename-safe (a member id becomes its rendered file name)`,
+            `${path}.sideEffects[${patternIndex}]: invalid pattern ${quote(pattern)} (a flat literal-plus-* name, optionally ./-prefixed)`,
           );
-        }
-        if (memberIds.has(moduleId)) {
-          errors.push(`${memberPath}: module ${quote(moduleId)} belongs to more than one package`);
-        } else {
-          memberIds.add(moduleId);
-        }
-      }
-      if (typeof pkg.sideEffects !== "boolean") {
-        for (const [patternIndex, pattern] of pkg.sideEffects.entries()) {
-          if (!SIDE_EFFECTS_PATTERN.test(pattern)) {
-            errors.push(
-              `${path}.sideEffects[${patternIndex}]: invalid pattern ${quote(pattern)} (a flat literal-plus-* name, optionally ./-prefixed)`,
-            );
-          }
         }
       }
     }
+  }
+  // ONE live representation: a program carrying PERSISTED packages may not ALSO flag a module
+  // sideEffectFree — the flag is the legacy form `packagesOf` normalizes, never a parallel one.
+  if (program.packages !== undefined) {
     for (const [moduleIndex, module] of program.modules.entries()) {
       if (module.sideEffectFree === true) {
         errors.push(
@@ -580,9 +618,13 @@ function validateModules(
 }
 
 /// DECLARED local exports (`localExports`, the vben own-helper-next-to-a-star shape): ESM-only,
-/// valid unique identifier names, and never colliding with a re-export's exported name (ESM permits
-/// one binding per exported name — Node: Duplicate export). Names here are LOCAL definers that
-/// shadow `export *` for routing, so a collision would make the two projections disagree.
+/// valid unique identifier names, never colliding with a re-export's exported name (ESM permits one
+/// binding per exported name — Node: Duplicate export), and never colliding with an import's LOCAL
+/// binding. Names here are LOCAL definers that render as `export function name(){…}`, so a name an
+/// import already binds (`import { … as name }`) would be declared twice — a SyntaxError the renderer
+/// now sidesteps with a fresh alias, but the model is still ill-formed and rejected here (W14b.1
+/// blocker 3). A collision would also make the demand/supply projections disagree on whether the name
+/// is a local definer or a forwarded import.
 function validateLocalExports(
   module: ModuleModel,
   moduleIndex: number,
@@ -598,6 +640,16 @@ function validateLocalExports(
     errors.push(`${path}: only an ESM module may declare local exports`);
     return;
   }
+  const importLocalNames = new Set<string>();
+  for (const dependency of module.dependencies) {
+    if (
+      dependency.kind === "esm-value-import" ||
+      dependency.kind === "esm-namespace-import" ||
+      dependency.kind === "esm-local-reexport"
+    ) {
+      importLocalNames.add(dependency.localName);
+    }
+  }
   const seen = new Set<string>();
   for (const [nameIndex, name] of declared.entries()) {
     if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(name)) {
@@ -612,6 +664,11 @@ function validateLocalExports(
     if (explicitReexportNames.has(name)) {
       errors.push(
         `${path}[${nameIndex}]: ${quote(name)} collides with a re-export's exported name; a module may export a name at most once (Node: Duplicate export)`,
+      );
+    }
+    if (importLocalNames.has(name)) {
+      errors.push(
+        `${path}[${nameIndex}]: ${quote(name)} collides with an import's local binding; a declared local export defines the name, so an import already binding it would be declared twice`,
       );
     }
   }
@@ -1182,7 +1239,7 @@ function validateSchedule(
 /// The persisted BuildConfig axes (W14a). `strictExecutionOrder` must be `true` in W14a: every generated
 /// case keeps strict order, and a hand-crafted `seo:false` model is REJECTED here (the full-order oracle
 /// would false-positive on the accepted relaxed-order divergences a `seo:false` cell exhibits — that cell
-/// needs the weaker order oracle that lands in W14b, so `seo:false` is unrepresentable until then).
+/// needs the weaker order oracle that lands in W14c, so `seo:false` is unrepresentable until then).
 /// `preserveEntrySignatures` must be one of rolldown's accepted values; the two rolled boolean axes must
 /// be booleans. Legacy (schema-16) models carry no `build` and resolve to defaults, so they pass.
 function validateBuildConfig(program: ProgramModel, errors: string[]): void {
@@ -1192,7 +1249,7 @@ function validateBuildConfig(program: ProgramModel, errors: string[]): void {
   }
   if (build.strictExecutionOrder !== true) {
     errors.push(
-      `build.strictExecutionOrder: must be true in W14a (a seo:false case needs the W14b relaxed-order oracle), received ${String(build.strictExecutionOrder)}`,
+      `build.strictExecutionOrder: must be true (a seo:false case needs the W14c relaxed-order oracle), received ${String(build.strictExecutionOrder)}`,
     );
   }
   if (!VALID_PRESERVE_ENTRY_SIGNATURES.has(build.preserveEntrySignatures)) {

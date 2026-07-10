@@ -481,6 +481,60 @@ describe("withRolldownBuild", () => {
     });
   });
 
+  test("builds and round-trips a package whose MAIN member is CommonJS", async () => {
+    // A bare `import { answer } from "cjspkg"` must resolve node_modules/cjspkg → package.json
+    // main `./cmain.cjs` → the CJS main's named export (ESM↔CJS interop over a package boundary). The
+    // W14b doc claimed a CJS-main package was smoke-verified; this pins it differential-green.
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "cmain", importedName: "answer", localName: "a" },
+          ],
+          events: [{ module: "entry", phase: "evaluate", value: 1, reads: [{ binding: "a" }] }],
+        },
+        {
+          id: "cmain",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "cmain", phase: "evaluate", value: 42 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      packages: [{ name: "cjspkg", sideEffects: true, moduleIds: ["cmain"] }],
+    } satisfies ProgramModel;
+    const rendered = renderProgram(analyzeProgram(program));
+    // The importer really uses the BARE package specifier (the CJS-main resolution surface).
+    const entrySource =
+      rendered.files.find((file) => file.path === "module-0000.mjs")?.contents ?? "";
+    expect(entrySource).toContain('from "cjspkg"');
+
+    const result = await withRolldownBuild(program, rendered, async (artifacts) => {
+      const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
+        executeManifest(artifacts.sourceManifestPath),
+        executeManifest(artifacts.bundleManifestPath),
+        readFile(join(artifacts.sourceDirectory, "node_modules/cjspkg/package.json"), "utf8"),
+      ]);
+      return {
+        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+        sourceEvents: moduleEventPairs(sourceOutcome.events),
+        packageJson,
+      };
+    });
+
+    expect(successValue(result)).toEqual({
+      verdict: { kind: "pass", signature: "pass" },
+      sourceEvents: [
+        ["cmain", 42],
+        ["entry", 43],
+      ],
+      packageJson: '{\n  "name": "cjspkg",\n  "main": "./cmain.cjs",\n  "sideEffects": true\n}\n',
+    });
+  });
+
   test("builds and round-trips a #8675-shaped namespace import member read", async () => {
     // `import * as ns` + a folded `ns.k`. If rolldown wrongly removes the used export or mis-rewrites
     // the namespace member access (#8675 / #4780 / #8710), the folded number diverges or the binding

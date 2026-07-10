@@ -9,7 +9,7 @@
 
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { analyzeProgram, type AnalyzedProgram } from "./analyzed-program.ts";
@@ -264,11 +264,27 @@ export function classifyCampaignVerdict(
   throw new Error("A valid source outcome cannot have a source-invalid bundle outcome");
 }
 
+/// A rendered file's absolute path, GUARDED to stay within the materialization root. A well-formed
+/// program never produces an escaping path (the validator rejects non-filename-safe package member
+/// ids), but a materializer is a defense-in-depth boundary: a handwritten/legacy model or a shrink
+/// candidate that skips validation must not write outside its temp dir (W14b.1 blocker 1 — a flagged
+/// `../../../x` id would otherwise `join` to `/tmp/x.mjs`).
+function containedPath(rootDirectory: string, filePath: string): string {
+  const rootResolved = resolve(rootDirectory);
+  const joined = resolve(rootDirectory, filePath);
+  if (joined !== rootResolved && !joined.startsWith(rootResolved + sep)) {
+    throw new Error(
+      `rendered file path ${JSON.stringify(filePath)} escapes the materialization root ${JSON.stringify(rootDirectory)}`,
+    );
+  }
+  return joined;
+}
+
 async function executeRenderedSource(rendered: RenderedProgram): Promise<ExecutionOutcome> {
   const sourceDirectory = await mkdtemp(join(tmpdir(), "rolldown-order-source-"));
   try {
     for (const file of rendered.files) {
-      const path = join(sourceDirectory, file.path);
+      const path = containedPath(sourceDirectory, file.path);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, file.contents);
     }
