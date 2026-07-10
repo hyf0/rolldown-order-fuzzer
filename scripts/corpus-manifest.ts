@@ -260,9 +260,9 @@ function unexplainedChangeReasons(
   }
   // (4) Every root file that changed IN PLACE (`module-NNNN.ext`) must have changed because its import
   // specifier now targets a package member, or because it carries a new operation — a root file whose
-  // bytes moved for neither reason is unexplained. Package files (`node_modules/`) are package layout;
-  // `schedule.json` reflects the cluster's added entry. Added / removed files (a member moving into
-  // node_modules, a cluster's new root module) are covered by (2)/(3) plus the package view.
+  // bytes moved for neither reason is unexplained. Package files (`node_modules/`) are package layout.
+  // Added / removed files (a member moving into node_modules, a cluster's new root module) are covered
+  // by (2)/(3) plus the package view.
   const pathToModule = new Map<string, ModuleModel>();
   program.modules.forEach((module, index) => {
     const member = membership?.get(module.id);
@@ -283,7 +283,30 @@ function unexplainedChangeReasons(
     if (afterHash === undefined || afterHash === beforeFile.sha256) {
       continue;
     }
-    if (beforeFile.path.startsWith("node_modules/") || beforeFile.path === "schedule.json") {
+    if (beforeFile.path.startsWith("node_modules/")) {
+      continue;
+    }
+    // (5) schedule.json: the old golden holds only a HASH, so byte-level "the old schedule is a prefix
+    // of the new one" cannot be re-proven here. What IS checkable causally: the only allowed causes of
+    // a schedule change are an APPENDED enrichment entry (the family-B / retained-reference cluster's
+    // `import-entry`, whose entry module imports a package member or carries a new operation) or an
+    // entry module whose rendered path moved into node_modules (it became a package member). A
+    // schedule.json change in a case with NO such entry has no allowed cause and is unexplained.
+    if (beforeFile.path === "schedule.json") {
+      const hasEnrichmentEntry = program.entries.some((entry) => {
+        const entryModule = program.modules.find((module) => module.id === entry.moduleId);
+        return (
+          entryModule !== undefined &&
+          (importsPackageMember(entryModule) ||
+            carriesModuleNewOp(entryModule) ||
+            memberIds.has(entryModule.id))
+        );
+      });
+      if (!hasEnrichmentEntry) {
+        reasons.push(
+          "schedule.json changed but no entry module imports a package member, carries a new operation, or is a package member",
+        );
+      }
       continue;
     }
     const module = pathToModule.get(beforeFile.path);

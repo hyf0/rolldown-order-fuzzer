@@ -101,7 +101,7 @@ removing ANY ingredient greens the shape:
 7. the entry reads the facade's value through the barrel in an event so the oracle observes it —
    HIDDEN (a hiddenReadFn-invoked function, the brief's shape) OR VISIBLE (the bisection found even a
    plain top-level read fails on this build): the READ is the load-bearing ingredient, not its
-   visibility, so the shrunken repro below reveals the read and stays BOTH red and tagged.
+   visibility, so the shrunken repro below reveals the read and stays red.
 
 **Generator:** `injectFamilyBEagerBarrel` — part of the W14b END-STAGE enrichment in
 `finalizeProgram`, every roll drawn AFTER the last W14a draw (the lazyBarrel axis), so a case where
@@ -117,8 +117,10 @@ members but not the entry); and the entry ACTUALLY invokes the helper via a `Val
 event (a `call:true` import the entry never calls runs no forwarder and is NOT the shape — a decoy
 that keeps the call-marked import but drops the event call is correctly rejected). The entry's facade
 read is counted whether HIDDEN or VISIBLE
-(the snapshot fails both, so the read is the ingredient, not its visibility), so the tag holds for
-generated, directed, handwritten, and shrunk models alike. Recomputed with the causal predicate:
+(the snapshot fails both, so the read is the ingredient, not its visibility). Purely structural over
+the analyzed program, so ANY model carrying the complete conjunction is tagged, whatever its
+provenance — and a model that simplified PAST an ingredient is correctly NOT (see the shrunken repro
+below). Recomputed with the causal predicate:
 **15.4% of random-mixed** (3000-case scan; the ≥10% double-digit target) — unchanged, because the
 injector already emits the full causal shape, so the tightened predicate rejects only hand-crafted
 decoys, never a random case.
@@ -140,10 +142,14 @@ and the package membership of barrel+sibling drop (a root no-events barrel is in
 metadata purity must only cover the FACADE, a single-member `sideEffects: false` package), the
 hiddenReadFn reveals to a plain top-level read, and idr flips to true — while the package on the
 facade, the star hop, the declared call-marked helper, the {facade, sibling} chunk group, and the
-effectful first import all stayed (each was tried and rejected — load-bearing). Because the causal tag
-counts a VISIBLE facade read, the shrunken model is itself `mechanism:family-b-eager-barrel`-tagged:
-the "held by shrunk models" claim is now TRUE by the predicate, not contradicted by the reveal (the
-earlier tag required `hiddenReadFn` and so would have un-tagged this exact repro).
+effectful first import all stayed (each was tried and rejected — load-bearing). The shrunken model is
+therefore deliberately **NOT** `mechanism:family-b-eager-barrel`-tagged: shrinking reduced the
+partial `sideEffects` ARRAY to a boolean `sideEffects: false` facade-only package, i.e. it simplified
+PAST conjunction ingredient 1 (the tag fingerprints the vben conjunction, where the partial form is
+the point; the underlying delegation bug turns out to survive even simpler metadata on this 5-module
+shape). The read's visibility is NOT what separates them — the causal tag accepts a visible read, and
+a crafted test pins both facts: the directed conjunction with its read revealed STAYS tagged, while
+the committed shrunken model (array reduced to boolean) is untagged yet valid.
 
 ## 4. Witness shapes (deliverable 3)
 

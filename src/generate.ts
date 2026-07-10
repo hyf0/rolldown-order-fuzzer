@@ -3190,10 +3190,11 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
 
   // The COMPLETE family-B eager-barrel conjunction (the vben shape): partial-array package metadata
   // keeping a star barrel eager while its facade hop is shaken, an included own helper, a chunk group
-  // splitting {facade, sibling} from the entry chunk, an effectful first import, and a
-  // hiddenReadFn-consumed facade value. Only a complete conjunction is tagged (density = the
-  // conjunction, not sprinkled ingredients); purely structural, so it holds for generated,
-  // handwritten, and shrunk models alike.
+  // splitting {facade, sibling} from the entry chunk, an effectful first import, and an
+  // event-consumed facade value (hidden or visible). Only a complete conjunction is tagged (density =
+  // the conjunction, not sprinkled ingredients); purely structural, so any model carrying the
+  // conjunction is tagged whatever its provenance — and one that simplified past an ingredient (the
+  // committed shrunken repro reduced the array to boolean metadata) is correctly not.
   if (hasCompleteFamilyBConjunction(program, modulesById, plan, entryModuleIds)) {
     tags.add("mechanism:family-b-eager-barrel");
   }
@@ -3445,7 +3446,7 @@ function hasCompletePureDefinerConjunction(
 ///   not the entry's rendered path — the entry chunk provably is separate;
 /// - an ENTRY E that (a) consumes a name whose supply is F reached through B's star, (b) READS that
 ///   facade binding in an event so the value reaches the oracle (the read is the ingredient, hidden or
-///   VISIBLE — the snapshot fails both, so the shrunken repro's plain read is still the conjunction),
+///   VISIBLE — the snapshot fails both, so a revealed read keeps a conjunction tagged),
 ///   (c) actually INVOKES B's declared helper in an event — a `ValueRead.call` of the helper binding,
 ///   NOT merely a call-marked import (a `call:true` import the entry never calls runs no forwarder;
 ///   the decoy that keeps the import but drops the event call is NOT the shape), and (d)
@@ -3453,9 +3454,11 @@ function hasCompletePureDefinerConjunction(
 ///   facade import (source order runs it before S; predicted chunk order runs S first — the deviation
 ///   seed).
 ///
-/// Purely structural over the analyzed program, so it holds identically for generated, directed,
-/// handwritten, and shrunk models; the same-seed od-red/wa-green split is its runtime signature
-/// (family A reds both modes).
+/// Purely structural over the analyzed program: any model carrying the COMPLETE conjunction is tagged
+/// whatever its provenance (generated, directed, handwritten), while a model that simplified PAST an
+/// ingredient is correctly not — the committed shrunken repro reduced the partial array to boolean
+/// `sideEffects: false`, so ingredient 1 is gone and it is untagged though still od-red/wa-green. The
+/// same-seed od-red/wa-green split is the conjunction's runtime signature (family A reds both modes).
 function hasCompleteFamilyBConjunction(
   program: ProgramModel,
   modulesById: ReadonlyMap<string, ModuleModel>,

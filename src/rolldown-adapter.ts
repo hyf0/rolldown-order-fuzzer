@@ -654,7 +654,8 @@ async function materializeRenderedProgram(
     // escaping path, but a materializer must not write outside its build dir for an unvalidated model
     // (a `../../../x` package member id would otherwise `join` above the root).
     const filePath = join(sourceDirectory, file.path);
-    if (resolve(filePath) !== rootResolved && !resolve(filePath).startsWith(rootResolved + sep)) {
+    const resolved = resolve(filePath);
+    if (resolved !== rootResolved && !resolved.startsWith(rootResolved + sep)) {
       throw new Error(
         `rendered file path ${JSON.stringify(file.path)} escapes the build root ${JSON.stringify(sourceDirectory)}`,
       );

@@ -1,3 +1,7 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, test } from "vite-plus/test";
 
 import { analyzeProgram } from "../src/analyzed-program.ts";
@@ -117,8 +121,8 @@ describe("the directed family-B eager-barrel builder", () => {
       })),
     ).not.toContain("mechanism:family-b-eager-barrel");
     // The hidden read REVEALED to a plain visible read STAYS tagged — `hiddenReadFn` is not causal
-    // (the snapshot fails a visible read too), so the shrunken repro's plain top-level read is still
-    // the conjunction. This is the honest reconciliation of the tag with the shrunken model.
+    // (the snapshot fails a visible read too), so revealing the read alone never un-tags a
+    // conjunction.
     expect(
       retag((program) =>
         mutateEntry(program, (module) => ({
@@ -131,6 +135,31 @@ describe("the directed family-B eager-barrel builder", () => {
         })),
       ),
     ).toContain("mechanism:family-b-eager-barrel");
+  });
+
+  test("the committed shrunken repro is valid but NOT tagged — it simplified past the conjunction", () => {
+    // The shrinker reduced the partial `sideEffects` ARRAY to a boolean `sideEffects: false`
+    // facade-only package (and revealed the read). The boolean form drops conjunction ingredient 1
+    // (the partial-array metadata the tag fingerprints), so the minimal repro is deliberately
+    // untagged even though it stays od-red/wa-green on the snapshot — the tag marks the COMPLETE
+    // vben conjunction, not every model expressing the underlying delegation bug. Pins the doc's
+    // shrunken-repro claim to reality (W14b.1 review).
+    const shrunken = JSON.parse(
+      readFileSync(
+        join(
+          dirname(fileURLToPath(import.meta.url)),
+          "..",
+          ".agents",
+          "evidence",
+          "family-b-shrunken-model.json",
+        ),
+        "utf8",
+      ),
+    ) as ProgramModel;
+    expect(shrunken.packages?.map((pkg) => pkg.sideEffects)).toEqual([false]);
+    const analyzed = analyzeProgram(shrunken);
+    expect(validateProgramModel(analyzed)).toEqual([]);
+    expect(deriveCoverageTags(analyzed)).not.toContain("mechanism:family-b-eager-barrel");
   });
 });
 
