@@ -612,7 +612,7 @@ function buildRandomMixed(
 
   // Insert barrel (re-export) chains between some ESM readers and their ESM definers. The read now
   // flows through pure re-exporter modules (forward edges only), the classic barrel shape.
-  drafts.push(...insertBarrelChains(rng, drafts));
+  drafts.push(...insertBarrelChains(rng, drafts, usedEdges));
 
   // Turn a meaningful minority of forward pairs into real multi-kind pairs — `import { a } from "./x"`
   // AND `import("./x")` (static + lazy), a side-effect plus a value import of one module, and the
@@ -637,17 +637,17 @@ function buildRandomMixed(
   drafts.push(...injectObjectIdentityClusters(rng, drafts, regime));
 
   const modules = drafts.map((draft): ModuleModel => {
-    // A draft only ever accumulates dependency kinds legal for its format, so the filters below are
-    // defensive; the reads are chosen from the same forward-only bindings the renderer will fold.
+    // Finalization ASSERTS a draft's dependencies are already legal for its format rather than silently
+    // filtering illegal kinds away — a bad future transform then fails loudly at generation instead of
+    // being sanitized before the validator can catch it. The reads are chosen from the same
+    // forward-only bindings the renderer will fold.
     // An inferred-pure definer emits NO events (an event would make its top level impure) and carries
     // its build-function base; a barrel (a pure re-exporter) emits no events — it only forwards.
     if (draft.inferredPure === true) {
       return {
         id: draft.id,
         format: "esm",
-        dependencies: draft.dependencies.filter(
-          (dependency) => dependency.kind !== "cjs-require",
-        ) as EsmModuleModel["dependencies"],
+        dependencies: esmDraftDependencies(draft),
         events: [],
         inferredPure: true,
         pureBase: draft.pureBase ?? 1 + rng.integer(900_000),
@@ -668,9 +668,7 @@ function buildRandomMixed(
       return {
         id: draft.id,
         format: "esm",
-        dependencies: draft.dependencies.filter(
-          (dependency) => dependency.kind !== "cjs-require",
-        ) as EsmModuleModel["dependencies"],
+        dependencies: esmDraftDependencies(draft),
         events: [
           {
             module: draft.id,
@@ -686,23 +684,12 @@ function buildRandomMixed(
       ? []
       : withValueReads(events(draft.id, rng, 1 + rng.integer(2)), draft.dependencies, rng);
     if (draft.format === "esm") {
-      const esm = esmModule(
-        draft.id,
-        draft.dependencies.filter((dependency) => dependency.kind !== "cjs-require"),
-        moduleEvents,
-      );
+      const esm = esmModule(draft.id, esmDraftDependencies(draft), moduleEvents);
       // An event-carrying callable-own-state definer (Task 2): a real side-effecting module whose
       // exports read a module-scope state var assigned during init (its base is its first event value).
       return draft.callableOwnState === true ? { ...esm, callableOwnState: true } : esm;
     }
-    return cjsModule(
-      draft.id,
-      draft.dependencies.filter(
-        (dependency) =>
-          dependency.kind === "cjs-require" || dependency.kind === "esm-dynamic-import",
-      ),
-      moduleEvents,
-    );
+    return cjsModule(draft.id, cjsDraftDependencies(draft), moduleEvents);
   });
 
   // Module 0 anchors the schedule; extra entries may be modules other modules also import,
@@ -939,6 +926,7 @@ function makeReexport(
 function insertBarrelChains(
   rng: SeededRng,
   drafts: readonly RandomModuleDraft[],
+  usedEdges: Set<string>,
 ): RandomModuleDraft[] {
   const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
   const barrels: RandomModuleDraft[] = [];
@@ -986,15 +974,49 @@ function insertBarrelChains(
         const isDefinerHop = hopIndex === chain.length - 1;
         const nextId = isDefinerHop ? definer.id : (chain[hopIndex + 1]?.id ?? definer.id);
         barrel.dependencies.push(makeReexport(rng, nextId, forwardedName, isDefinerHop));
+        usedEdges.add(`${barrel.id}->${nextId}`);
       }
       const head = chain[0];
       if (head !== undefined) {
         importer.dependencies[dependencyIndex] = { ...dependency, target: head.id };
+        // Keep the edge index consistent with the rerouted graph: the reader now points at the barrel
+        // head, not the definer. The old key was previously left stale (harmless today because no later
+        // pass reads it, but a latent trap for a future pass that does).
+        usedEdges.delete(`${importer.id}->${dependency.target}`);
+        usedEdges.add(`${importer.id}->${head.id}`);
         barrels.push(...chain);
       }
     }
   }
   return barrels;
+}
+
+/// The shared scaffold behind the three witness-cluster injectors (family-A conjunction, callable-own-
+/// state, object-identity): a self-contained ESM-only cluster — skipped in pure-CJS — appended after
+/// the DAG, gated by a module `budget` and a per-family `probabilityPercent`. Only the gate and budget
+/// are shared; each family supplies its own definer / barrel / forced-entry consumer drafts as `build`,
+/// which consumes the RNG exactly as its wave always did (the gate rolls `integer(100)` once, in the
+/// same position, so seeded corpora are byte-identical).
+interface ClusterRecipe {
+  readonly minBudget: number;
+  readonly probabilityPercent: number;
+  readonly build: (rng: SeededRng, counter: number, budget: number) => RandomModuleDraft[];
+}
+
+function injectCluster(
+  rng: SeededRng,
+  drafts: readonly RandomModuleDraft[],
+  regime: FormatRegime,
+  recipe: ClusterRecipe,
+): RandomModuleDraft[] {
+  const budget = MAX_RANDOM_MODULES - drafts.length;
+  if (regime === "pure-cjs" || budget < recipe.minBudget) {
+    return [];
+  }
+  if (rng.integer(100) >= recipe.probabilityPercent) {
+    return [];
+  }
+  return recipe.build(rng, drafts.length, budget);
 }
 
 /// Inject complete family-A conjunctions (`.agents/docs/real-app-bug-families.md`): an inferred-pure
@@ -1007,20 +1029,24 @@ function insertBarrelChains(
 /// edges only), so acyclicity and every read invariant hold. The star re-export of the pure definer
 /// is essential: a NAMED re-export resolves the binding directly and the bug does not fire (verified
 /// against the frozen snapshot). Returns the appended drafts; the caller forces the consumers to be
-/// entries. Bounded by the module budget.
+/// entries. A cluster is 5 modules (definer, sibling, barrel, two consumers); a 2-hop barrel adds one.
 function injectPureDefinerConjunctions(
   rng: SeededRng,
   drafts: readonly RandomModuleDraft[],
   regime: FormatRegime,
 ): RandomModuleDraft[] {
-  // The conjunction is an inherently ESM shape (star re-exports, namespace imports, an inferred-pure
-  // ESM definer), so it cannot appear in a pure-CJS case without breaking the single-format invariant.
-  const budget = MAX_RANDOM_MODULES - drafts.length;
-  // A cluster is 5 modules (definer, sibling, barrel, two consumers); a 2-hop barrel adds one.
-  if (regime === "pure-cjs" || budget < 5 || rng.integer(100) >= 22) {
-    return [];
-  }
-  const counter = drafts.length;
+  return injectCluster(rng, drafts, regime, {
+    minBudget: 5,
+    probabilityPercent: 22,
+    build: (rng, counter, budget) => buildPureDefinerConjunction(rng, counter, budget),
+  });
+}
+
+function buildPureDefinerConjunction(
+  rng: SeededRng,
+  counter: number,
+  budget: number,
+): RandomModuleDraft[] {
   const definerId = `pdef${counter}`;
   const siblingId = `psib${counter}`;
   const outerBarrelId = `pbar${counter}`;
@@ -1132,11 +1158,18 @@ function injectCallableOwnStateClusters(
 ): RandomModuleDraft[] {
   // A cluster is 4 modules (definer, barrel, two entry consumers), 5 with the split sibling; ESM-only
   // (a callable function export forwarded through a barrel and called through a namespace).
-  const budget = MAX_RANDOM_MODULES - drafts.length;
-  if (regime === "pure-cjs" || budget < 4 || rng.integer(100) >= 18) {
-    return [];
-  }
-  const counter = drafts.length;
+  return injectCluster(rng, drafts, regime, {
+    minBudget: 4,
+    probabilityPercent: 18,
+    build: (rng, counter, budget) => buildCallableOwnStateCluster(rng, counter, budget),
+  });
+}
+
+function buildCallableOwnStateCluster(
+  rng: SeededRng,
+  counter: number,
+  budget: number,
+): RandomModuleDraft[] {
   const definerId = `cos${counter}`;
   const siblingId = `cossib${counter}`;
   const barrelId = `cosbar${counter}`;
@@ -1251,11 +1284,14 @@ function injectObjectIdentityClusters(
   regime: FormatRegime,
 ): RandomModuleDraft[] {
   // A cluster is 4 modules (object-export definer, barrel, two entry consumers). ESM-only.
-  const budget = MAX_RANDOM_MODULES - drafts.length;
-  if (regime === "pure-cjs" || budget < 4 || rng.integer(100) >= 12) {
-    return [];
-  }
-  const counter = drafts.length;
+  return injectCluster(rng, drafts, regime, {
+    minBudget: 4,
+    probabilityPercent: 12,
+    build: (rng, counter) => buildObjectIdentityCluster(rng, counter),
+  });
+}
+
+function buildObjectIdentityCluster(rng: SeededRng, counter: number): RandomModuleDraft[] {
   const definerId = `obj${counter}`;
   const barrelId = `objbar${counter}`;
   const definerName = `v${definerId}`;
@@ -2144,6 +2180,29 @@ function manualGroupsSeparateFormats(
     formats.some((groupFormats) => groupFormats.size === 1 && groupFormats.has("esm")) &&
     formats.some((groupFormats) => groupFormats.size === 1 && groupFormats.has("cjs"))
   );
+}
+
+/// Assert a draft's dependencies are all ESM-legal (no `cjs-require`) and return them typed. A draft
+/// only ever accumulates format-legal kinds, so this never throws in practice; it converts a would-be
+/// silent sanitization into a loud generation-time failure for a future transform that violates it.
+function esmDraftDependencies(draft: RandomModuleDraft): EsmModuleModel["dependencies"] {
+  for (const dependency of draft.dependencies) {
+    if (dependency.kind === "cjs-require") {
+      throw new Error(`ESM draft ${draft.id} carries an illegal cjs-require dependency`);
+    }
+  }
+  return draft.dependencies as EsmModuleModel["dependencies"];
+}
+
+/// Assert a draft's dependencies are all CJS-legal (only `cjs-require` or `esm-dynamic-import`) and
+/// return them typed. As with `esmDraftDependencies`, an assertion rather than a silent filter.
+function cjsDraftDependencies(draft: RandomModuleDraft): CjsModuleModel["dependencies"] {
+  for (const dependency of draft.dependencies) {
+    if (dependency.kind !== "cjs-require" && dependency.kind !== "esm-dynamic-import") {
+      throw new Error(`CJS draft ${draft.id} carries an illegal ${dependency.kind} dependency`);
+    }
+  }
+  return draft.dependencies as CjsModuleModel["dependencies"];
 }
 
 function esmModule(
