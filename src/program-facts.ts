@@ -18,7 +18,12 @@ export interface ModuleLike {
 export interface CycleFacts {
   readonly cyclicMembers: ReadonlySet<string>;
   readonly sccs: readonly (readonly string[])[];
+  /// The union of formats across ALL cyclic members — a program-wide summary.
   readonly formats: ReadonlySet<ModuleFormat>;
+  /// The formats present in EACH synchronous SCC, parallel to `sccs`. A per-SCC breakdown is what a
+  /// per-format cycle predicate needs: a program with a separate all-ESM SCC and a separate all-CJS SCC
+  /// has BOTH an esm-cycle and a cjs-cycle, which the program-wide `formats` (size 2) would hide.
+  readonly sccFormats: readonly ReadonlySet<ModuleFormat>[];
   readonly hasChord: boolean;
   readonly hasInterlocking: boolean;
   readonly hasMultiEnter: boolean;
@@ -468,12 +473,17 @@ export class ProgramFacts {
     const cyclicMembers = new Set<string>(sccs.flat());
 
     const formats = new Set<ModuleFormat>();
-    for (const id of cyclicMembers) {
-      const format = this.#modulesById.get(id)?.format;
-      if (format !== undefined) {
-        formats.add(format);
+    const sccFormats = sccs.map((scc) => {
+      const perScc = new Set<ModuleFormat>();
+      for (const id of scc) {
+        const format = this.#modulesById.get(id)?.format;
+        if (format !== undefined) {
+          perScc.add(format);
+          formats.add(format);
+        }
       }
-    }
+      return perScc;
+    });
 
     let hasChord = false;
     let hasInterlocking = false;
@@ -516,6 +526,6 @@ export class ProgramFacts {
       }
     }
 
-    return { cyclicMembers, sccs, formats, hasChord, hasInterlocking, hasMultiEnter };
+    return { cyclicMembers, sccs, formats, sccFormats, hasChord, hasInterlocking, hasMultiEnter };
   }
 }

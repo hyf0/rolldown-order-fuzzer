@@ -987,4 +987,50 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
     // c1 and c2 read the split, but they are NOT entries, so the conjunction is incomplete.
     expect(deriveCoverageTags(program)).not.toContain("mechanism:pure-definer-behind-barrel");
   });
+
+  // Finding B: cycle formats were aggregated PROGRAM-WIDE, so a case with a separate all-ESM SCC and a
+  // separate all-CJS SCC saw a format union of size 2 and fired NEITHER per-format cycle tag. Per-SCC
+  // format predicates fire BOTH.
+  test("a program with a separate ESM cycle and a separate CJS cycle tags BOTH per-format cycles", () => {
+    const program = {
+      modules: [
+        {
+          id: "a1",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "a2" }],
+          events: [{ module: "a1", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "a2",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "a1" }],
+          events: [{ module: "a2", phase: "evaluate", value: 2 }],
+        },
+        {
+          id: "c1",
+          format: "cjs",
+          dependencies: [{ kind: "cjs-require", target: "c2" }],
+          events: [{ module: "c1", phase: "evaluate", value: 3 }],
+        },
+        {
+          id: "c2",
+          format: "cjs",
+          dependencies: [{ kind: "cjs-require", target: "c1" }],
+          events: [{ module: "c2", phase: "evaluate", value: 4 }],
+        },
+      ],
+      entries: [
+        { name: "esm-entry", moduleId: "a1" },
+        { name: "cjs-entry", moduleId: "c1" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "esm-entry" },
+        { kind: "require-entry", entry: "cjs-entry" },
+      ],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    const tags = deriveCoverageTags(program);
+    expect(tags).toContain("mechanism:esm-cycle");
+    expect(tags).toContain("mechanism:cjs-cycle");
+  });
 });

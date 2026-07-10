@@ -1812,10 +1812,12 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   const cycles = facts.cycles();
   if (cycles.cyclicMembers.size > 0) {
     tags.add("mechanism:cycle");
-    if (cycles.formats.size === 1 && cycles.formats.has("esm")) {
+    // Per-SCC, not program-wide: a program with a separate all-ESM SCC AND a separate all-CJS SCC has
+    // BOTH an esm-cycle and a cjs-cycle. The old program-wide format union (size 2 then) fired neither.
+    if (cycles.sccFormats.some((formats) => formats.size === 1 && formats.has("esm"))) {
       tags.add("mechanism:esm-cycle");
     }
-    if (cycles.formats.size === 1 && cycles.formats.has("cjs")) {
+    if (cycles.sccFormats.some((formats) => formats.size === 1 && formats.has("cjs"))) {
       tags.add("mechanism:cjs-cycle");
     }
     if (cycles.hasChord) {
