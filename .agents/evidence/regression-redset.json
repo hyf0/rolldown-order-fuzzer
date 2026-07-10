@@ -1,0 +1,102 @@
+{
+  "proof": "standing version-bracketed regression red-set (FW-C)",
+  "generatedAt": "2026-07-10T22:02:46.183Z",
+  "head": "5356dfdc5939f919e65485d23a28d25dd9f178ba",
+  "dirty": true,
+  "node": "v24.18.0",
+  "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
+  "cacheRoot": "/tmp/order-fuzzer-regression-targets",
+  "subset": null,
+  "entryCount": 4,
+  "accepted": true,
+  "entries": [
+    {
+      "id": "RED-0",
+      "issue": 9887,
+      "form": "generator",
+      "cluster": "1.2 wrapped-ESM init emission — cross-chunk init cycle",
+      "redTarget": {
+        "label": "npm:1.1.5",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+        "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+      },
+      "greenTarget": {
+        "label": "snapshot:final-snapshot-42628c18b",
+        "distPath": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+        "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+      },
+      "expectedRedSignature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+      "observedRedSignature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-1",
+      "issue": 9502,
+      "form": "raw",
+      "cluster": "1.2 wrapped-ESM init emission — dangling init across chunks",
+      "redTarget": {
+        "label": "npm:1.1.1",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.1/node_modules/rolldown/dist/index.mjs",
+        "sha256": "f4ecdcf80d3270fa619def8d5cfe6410fb7862b847ff4fe1cd3338510ff7d966"
+      },
+      "greenTarget": {
+        "label": "npm:1.1.2",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.2/node_modules/rolldown/dist/index.mjs",
+        "sha256": "38462bf5408421b2192e1f610f7b0414e8604287a70842f7db3b4f3aaa939d66"
+      },
+      "expectedRedSignature": "raw-crash:[\"ReferenceError\",\"init_shared is not defined\"]",
+      "observedRedSignature": "raw-crash:[\"ReferenceError\",\"init_shared is not defined\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-2",
+      "issue": 9882,
+      "form": "raw",
+      "cluster": "1.9 CJS-wrapped-local deconfliction",
+      "redTarget": {
+        "label": "npm:1.1.3",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.3/node_modules/rolldown/dist/index.mjs",
+        "sha256": "81bfdb1ca916178c0694db6e8e20c3cdd4390276df301e3f90b175638cccd6d6"
+      },
+      "greenTarget": {
+        "label": "npm:1.1.4",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.4/node_modules/rolldown/dist/index.mjs",
+        "sha256": "e53f01ed8f22bfbd7f56a858eccc3b174916f855b0c080d1ca7252dfc2937e66"
+      },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'EventMatch')\"]",
+      "observedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'EventMatch')\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-3",
+      "issue": 9993,
+      "form": "raw",
+      "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
+      "redTarget": {
+        "label": "npm:1.1.4",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.4/node_modules/rolldown/dist/index.mjs",
+        "sha256": "e53f01ed8f22bfbd7f56a858eccc3b174916f855b0c080d1ca7252dfc2937e66"
+      },
+      "greenTarget": {
+        "label": "npm:1.1.5",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+        "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+      },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+{
+  "schema": 1,
+  "title": "Standing version-bracketed regression red-set (FW-C)",
+  "description": "One entry per historical fix, each a shape proven RED on the released rolldown BEFORE the fix and GREEN AT/after it. Run by scripts/regression-redset.ts against both the red and green npm targets (a local PR snapshot for RED-0) so anything that ever broke twice can never silently break a third time. See .agents/docs/regression-red-set.md.",
+  "miningDoc": "research/vite-chunk-execution-order/fix-history-mining.md (section 4)",
+  "greenSnapshot": {
+    "id": "final-snapshot-42628c18b",
+    "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+    "note": "PR-10104 strict-order arc snapshot; the RED-0 green target. Override with REDSET_GREEN_SNAPSHOT."
+  },
+  "entries": [
+    {
+      "id": "RED-0",
+      "issue": 9887,
+      "cluster": "1.2 wrapped-ESM init emission — cross-chunk init cycle",
+      "title": "cross-chunk init_* cycle (barrel/CJS)",
+      "form": "generator",
+      "generator": "generateCrossChunkInitCycleCase",
+      "seed": 0,
+      "onDemandWrapping": true,
+      "redTarget": { "kind": "npm", "version": "1.1.5" },
+      "greenTarget": { "kind": "snapshot" },
+      "expectedRedSignature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+      "provenance": {
+        "fixPr": "#9887",
+        "fixCommit": "no released main fix — GREEN only on final-snapshot-42628c18b (PR-10104 strict-order arc); still OPEN on npm 1.1.5",
+        "redBelow": "1.1.5",
+        "greenAtOrAbove": "final-snapshot-42628c18b",
+        "miningDocRef": "section 4 RED-0",
+        "note": "Generator shape buildCrossChunkInitCycle (src/generate.ts). Also the live-catch acceptance scripts/cross-chunk-init-cycle-catch.ts + .agents/evidence/9887-cross-chunk-init-cycle.json."
+      }
+    },
+    {
+      "id": "RED-1",
+      "issue": 9502,
+      "cluster": "1.2 wrapped-ESM init emission — dangling init across chunks",
+      "title": "dangling wrapped-ESM init_shared",
+      "form": "raw",
+      "dir": "raw/9502",
+      "redTarget": { "kind": "npm", "version": "1.1.1" },
+      "greenTarget": { "kind": "npm", "version": "1.1.2" },
+      "expectedRedSignature": "raw-crash:[\"ReferenceError\",\"init_shared is not defined\"]",
+      "provenance": {
+        "fixPr": "#9502 / #9717",
+        "fixCommit": "63fbc96e1 fix: avoid dangling wrapped-ESM init call across chunks (#9502) (#9717)",
+        "redBelow": "1.1.2",
+        "greenAtOrAbove": "1.1.2",
+        "miningDocRef": "section 4 RED-1"
+      }
+    },
+    {
+      "id": "RED-2",
+      "issue": 9882,
+      "cluster": "1.9 CJS-wrapped-local deconfliction",
+      "title": "CJS-wrapped local shadows chunk-root binding",
+      "form": "raw",
+      "dir": "raw/9882",
+      "redTarget": { "kind": "npm", "version": "1.1.3" },
+      "greenTarget": { "kind": "npm", "version": "1.1.4" },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'EventMatch')\"]",
+      "provenance": {
+        "fixPr": "#9882 (issue) / #9921 (fix)",
+        "fixCommit": "6345ddf70 fix(deconflict): rename CJS-wrapped locals that shadow chunk-root bindings (#9921)",
+        "redBelow": "1.1.4",
+        "greenAtOrAbove": "1.1.4",
+        "miningDocRef": "section 4 RED-2"
+      }
+    },
+    {
+      "id": "RED-3",
+      "issue": 9993,
+      "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
+      "title": "runtime-placement cycle (__commonJSMin)",
+      "form": "raw",
+      "dir": "raw/9993",
+      "redTarget": { "kind": "npm", "version": "1.1.4" },
+      "greenTarget": { "kind": "npm", "version": "1.1.5" },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "provenance": {
+        "fixPr": "#9993 (issue) / #10101 (fix, \"a regression of #9224\")",
+        "fixCommit": "2d9f81cdd fix(chunk-optimizer): follow entry facade edges in runtime placement cycle check (#10101)",
+        "redBelow": "1.1.5",
+        "greenAtOrAbove": "1.1.5",
+        "miningDocRef": "section 4 RED-3"
+      }
+    }
+  ]
+}

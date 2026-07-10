@@ -9,6 +9,7 @@
     "corpus:write": "vp exec node scripts/corpus-manifest.ts write corpus-manifest.golden.json",
     "corpus:check": "vp exec node scripts/corpus-manifest.ts check corpus-manifest.golden.json",
     "catching-power": "vp exec node scripts/catching-power.ts",
+    "regression:redset": "vp exec node scripts/regression-redset.ts",
     "prepare": "vp config"
   },
   "devDependencies": {

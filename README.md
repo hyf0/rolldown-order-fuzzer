@@ -91,6 +91,17 @@ Every non-pass result is first written to a unique `.case-NNNN-seed-S-HASH.tmp-*
 
 Replay is exact for the generated inputs and preserves the original observed outputs as evidence. Rerunning is environment-exact only when the recorded Node version/platform/architecture and package identity can be pinned: requested specifier, resolved entry URL/path, nearest package root/version when available, resolved entry-file hash when readable, deterministic package-content hash, resolved `@rolldown/binding-*` optional sibling package versions/content hashes, `NAPI_RS_NATIVE_LIBRARY_PATH` requested value plus generated binding-loader candidates/base and resolved/real path/file hash, and the current fuzzer lockfile hash when available. Binding-loader discovery is restricted to the runtime `dist` tree and requires exactly one marker-bearing candidate for relative overrides; no candidate or multiple sorted candidates leaves relative resolution null. Absolute overrides are base-independent and are realpathed/hashed even when loader candidates are ambiguous. Missing platform-specific optional bindings and unresolved native overrides are recorded without failing the campaign. Compact packages hash every regular file except dependency/VCS/cache directories; larger worktrees hash `package.json`, `dist`, `bin`, and native `.node` files. Ordinary symlinks and symlink directories are ignored, while a package-relative `.node` symlink contributes its link path, canonical target path, and target bytes. When those dependencies are unavailable or have changed, the artifact still preserves the original manifests, outcomes, emitted bytes, verdict, and identity.
 
+## Regression red-set
+
+A standing corpus of shapes each proven RED on the released rolldown before a historical fix and GREEN after, run against both bracketing targets so a twice-broken shape can never silently break a third time.
+
+```
+npm run regression:redset          # all brackets
+npm run regression:redset RED-2    # one bracket by id
+```
+
+Not part of `vp test` (it acquires pinned npm rolldown targets and runs out-of-tree builds). It writes evidence to `.agents/evidence/regression-redset.json` and exits non-zero on any violation. See [.agents/docs/regression-red-set.md](.agents/docs/regression-red-set.md) for the brackets, the two entry forms, and how to add one.
+
 ## Context
 
 Read [AGENTS.md](AGENTS.md) first. Durable project context lives under [.agents/docs/](.agents/docs/).
