@@ -748,3 +748,243 @@ describe("nested dynamic chains (wave 6)", () => {
     expect(saw).toBe(true);
   });
 });
+
+describe("deriveCoverageTags predicate corrections (finding 8)", () => {
+  test("a dynamic import of a CJS module is not tagged as a side-effect import", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-dynamic-import", target: "cjs", registration: "r" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "cjs",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "cjs", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    const tags = deriveCoverageTags(program);
+    expect(tags).toContain("mechanism:esm-imports-cjs");
+    expect(tags).not.toContain("variation:side-effect-import");
+  });
+
+  test("a multi-edge pair is tagged only for DISTINCT kinds, not repeated same-kind edges", () => {
+    const twoValueImports = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "b", importedName: "x", localName: "bx" },
+            { kind: "esm-value-import", target: "b", importedName: "y", localName: "by" },
+          ],
+          events: [{ module: "a", phase: "evaluate", value: 1, reads: [{ binding: "bx" }] }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(deriveCoverageTags(twoValueImports)).not.toContain("variation:multi-edge-pair");
+
+    const valuePlusDynamic = {
+      ...twoValueImports,
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "b", importedName: "x", localName: "bx" },
+            { kind: "esm-dynamic-import", target: "b", registration: "r" },
+          ],
+          events: [{ module: "a", phase: "evaluate", value: 1, reads: [{ binding: "bx" }] }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+    } satisfies ProgramModel;
+    expect(deriveCoverageTags(valuePlusDynamic)).toContain("variation:multi-edge-pair");
+  });
+
+  test("a namespace import with no read members is not tagged namespace-read", () => {
+    const program = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-namespace-import", target: "b", localName: "ns", readMembers: [] },
+          ],
+          events: [{ module: "a", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(deriveCoverageTags(program)).not.toContain("variation:namespace-read");
+  });
+
+  test("a forward callable read does not falsely produce a cycle-hoisted-call tag", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-side-effect-import", target: "ring-a" },
+            {
+              kind: "esm-namespace-import",
+              target: "def",
+              localName: "ns",
+              readMembers: ["vdef"],
+              callMembers: ["vdef"],
+            },
+          ],
+          events: [
+            {
+              module: "entry",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "ns", member: "vdef", call: true }],
+            },
+          ],
+        },
+        {
+          id: "ring-a",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "ring-b" }],
+          events: [{ module: "ring-a", phase: "evaluate", value: 2 }],
+        },
+        {
+          id: "ring-b",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "ring-a" }],
+          events: [{ module: "ring-b", phase: "evaluate", value: 3 }],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 4 }],
+          callableOwnState: true,
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    const tags = deriveCoverageTags(program);
+    expect(tags).toContain("mechanism:cycle");
+    expect(tags).toContain("variation:callable-own-state");
+    // The call read is on a FORWARD edge (entry -> def), not a cycle-closing one.
+    expect(tags).not.toContain("variation:cycle-hoisted-call");
+    expect(tags).not.toContain("mechanism:cycle-value-read");
+  });
+
+  test("an incomplete pure-definer conjunction (importers are not entries) is not tagged complete", () => {
+    // A star-barrel over a pure definer, namespace-imported by two NON-entry modules with a split
+    // read — everything except the forced entries. The completeness predicate must decline it.
+    const program = {
+      modules: [
+        {
+          id: "root",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-side-effect-import", target: "c1" },
+            { kind: "esm-side-effect-import", target: "c2" },
+          ],
+          events: [{ module: "root", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "c1",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "barrel",
+              localName: "n1",
+              readMembers: ["vdef"],
+            },
+          ],
+          events: [
+            {
+              module: "c1",
+              phase: "evaluate",
+              value: 2,
+              reads: [{ binding: "n1", member: "vdef" }],
+            },
+          ],
+        },
+        {
+          id: "c2",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "barrel",
+              localName: "n2",
+              readMembers: ["vsib"],
+            },
+          ],
+          events: [
+            {
+              module: "c2",
+              phase: "evaluate",
+              value: 3,
+              reads: [{ binding: "n2", member: "vsib" }],
+            },
+          ],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-reexport-star", target: "def" },
+            { kind: "esm-reexport-named", target: "sib", sourceName: "vsib", exportedName: "vsib" },
+          ],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [],
+          inferredPure: true,
+          pureBase: 10,
+        },
+        {
+          id: "sib",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "sib", phase: "evaluate", value: 4 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "root" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    // c1 and c2 read the split, but they are NOT entries, so the conjunction is incomplete.
+    expect(deriveCoverageTags(program)).not.toContain("mechanism:pure-definer-behind-barrel");
+  });
+});

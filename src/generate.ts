@@ -1686,11 +1686,17 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
       }
       if (module.format === "esm" && target?.format === "cjs") {
         tags.add("mechanism:esm-imports-cjs");
-        tags.add(
-          dependency.kind === "esm-value-import"
-            ? "variation:value-import"
-            : "variation:side-effect-import",
-        );
+        // Classify by the actual dependency kind: a side-effect import is a bare side effect, a
+        // value/namespace import folds a value, and a DYNAMIC import is neither — it defers, so it must
+        // not be mislabeled as a side-effect import (the review's finding-8 defect).
+        if (dependency.kind === "esm-side-effect-import") {
+          tags.add("variation:side-effect-import");
+        } else if (
+          dependency.kind === "esm-value-import" ||
+          dependency.kind === "esm-namespace-import"
+        ) {
+          tags.add("variation:value-import");
+        }
         const carriers = esmCarriersByCjsTarget.get(target.id) ?? new Set<string>();
         carriers.add(module.id);
         esmCarriersByCjsTarget.set(target.id, carriers);
@@ -1805,18 +1811,33 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     ) {
       tags.add("mechanism:cycle-split-groups");
     }
-    // A value read folded across a cycle edge (a hoisted-function call or a guarded partial read) —
-    // cycle data flow, not just cycle side-effect ordering.
-    const cycleReads = program.modules.flatMap((module) =>
-      module.events.flatMap((event) => event.reads ?? []),
-    );
-    if (cycleReads.some((read) => read.call === true || read.guard === true)) {
+    // A value read folded across a CYCLE-CLOSING edge (a hoisted-function call or a guarded partial
+    // read) — cycle data flow, not just cycle side-effect ordering. Attributed to the edge that closes
+    // a cycle, not to any call/guard read anywhere in the program: a forward callable/guarded witness
+    // (a callable-own-state cluster, a post-cycle read) must not falsely produce a cycle tag once some
+    // unrelated cycle exists (the review's finding-8 defect).
+    let hasCycleHoistedCall = false;
+    let hasCyclePartialRead = false;
+    for (const module of program.modules) {
+      for (const dependency of module.dependencies) {
+        if (!facts.edgeClosesCycle(module.id, dependency.target)) {
+          continue;
+        }
+        if (dependency.kind === "esm-value-import" && dependency.call === true) {
+          hasCycleHoistedCall = true;
+        }
+        if (dependency.kind === "cjs-require" && dependency.guard === true) {
+          hasCyclePartialRead = true;
+        }
+      }
+    }
+    if (hasCycleHoistedCall || hasCyclePartialRead) {
       tags.add("mechanism:cycle-value-read");
     }
-    if (cycleReads.some((read) => read.call === true)) {
+    if (hasCycleHoistedCall) {
       tags.add("variation:cycle-hoisted-call");
     }
-    if (cycleReads.some((read) => read.guard === true)) {
+    if (hasCyclePartialRead) {
       tags.add("variation:cycle-partial-read");
     }
     // A module OUTSIDE every cycle reads a cycle member's export (forward, fully-evaluated) — the
@@ -1887,7 +1908,8 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   // that >= 2 modules namespace-import, at least one reading the definer's value via the star. Only a
   // complete conjunction is tagged, so a campaign summary's count proves conjunction DENSITY (the
   // failure mode that made the old corpus miss these bugs was ingredients that rarely all met).
-  if (hasCompletePureDefinerConjunction(program, modulesById)) {
+  const entryModuleIds = new Set(program.entries.map((entry) => entry.moduleId));
+  if (hasCompletePureDefinerConjunction(program, modulesById, facts, entryModuleIds)) {
     tags.add("mechanism:pure-definer-behind-barrel");
   }
 
@@ -1896,7 +1918,16 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   const dependencyKinds = new Set(
     program.modules.flatMap((module) => module.dependencies.map((dependency) => dependency.kind)),
   );
-  if (dependencyKinds.has("esm-namespace-import")) {
+  // A namespace import certifies the namespace-read shape only when it actually READS a member; a
+  // namespace with no remaining members after shrinking reads nothing (the review's finding-8 defect).
+  if (
+    program.modules.some((module) =>
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-namespace-import" && dependency.readMembers.length > 0,
+      ),
+    )
+  ) {
     tags.add("variation:namespace-read");
   }
   if (dependencyKinds.has("esm-reexport-named") || dependencyKinds.has("esm-reexport-star")) {
@@ -1916,16 +1947,20 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     tags.add("variation:reexport-default");
   }
 
-  // A module reaches the SAME target through more than one dependency kind — a real multi-edge pair
-  // (static + lazy, side-effect + value, require + dynamic, …), the most common shape real code
-  // writes that a single edge per pair could not express.
+  // A module reaches the SAME target through more than one dependency KIND — a real multi-edge pair
+  // (static + lazy, side-effect + value, require + dynamic, …), the most common shape real code writes
+  // that a single edge per pair could not express. Counts DISTINCT kinds, not edge count: repeated
+  // same-kind edges (two named value imports, a barrel forwarding several names) are explicitly legal
+  // and are NOT a multi-kind pair (the review's finding-8 defect).
   if (
     program.modules.some((module) => {
-      const perTarget = new Map<string, number>();
+      const kindsByTarget = new Map<string, Set<string>>();
       for (const dependency of module.dependencies) {
-        perTarget.set(dependency.target, (perTarget.get(dependency.target) ?? 0) + 1);
+        const kinds = kindsByTarget.get(dependency.target) ?? new Set<string>();
+        kinds.add(dependency.kind);
+        kindsByTarget.set(dependency.target, kinds);
       }
-      return [...perTarget.values()].some((count) => count >= 2);
+      return [...kindsByTarget.values()].some((kinds) => kinds.size >= 2);
     })
   ) {
     tags.add("variation:multi-edge-pair");
@@ -1966,19 +2001,27 @@ function hasNestedDynamicChain(program: ProgramModel, facts: ProgramFacts): bool
   );
 }
 
-/// A COMPLETE family-A conjunction (`.agents/docs/real-app-bug-families.md`): an inferred-pure
-/// definer whose value is STAR-re-exported (transitively) through a barrel that at least two modules
-/// namespace-import, with at least one importer reading, via the star (a member the barrel does not
-/// provide by a NAMED re-export), the definer's value. The star re-export is essential — a named
-/// re-export resolves the binding directly and the bug does not fire. Purely structural, so it holds
-/// for generated, handwritten, and shrunk models alike (the barrel chain is forward-only acyclic).
+/// A COMPLETE family-A conjunction (`.agents/docs/real-app-bug-families.md`), requiring ALL of the
+/// documented ingredients — not merely a star path and two importers, which the old predicate accepted
+/// and which certified conjunction density for cases missing the entries / sibling / split the bug
+/// actually needs (the review's finding-8 defect). A barrel:
+///
+/// - STAR-re-exports (transitively) an inferred-pure definer (not callable-own-state, a distinct
+///   wave-8 witness) — the star is load-bearing (a named re-export resolves the binding directly and
+///   the bug does not fire);
+/// - NAMED-re-exports a SIDE-EFFECTFUL sibling (a module that emits events), which keeps the barrel a
+///   real wrapped chunk rather than an inlined pure re-exporter;
+/// - is namespace-imported by >= 2 modules that BECOME ENTRIES (so it is a shared, order-wrapped chunk);
+/// - with SPLIT reads across those entries: at least one entry reads the definer through the star (a
+///   member the barrel does not NAMED-provide) AND at least one reads the named-provided sibling.
+///
+/// Purely structural, so it holds for generated, handwritten, and shrunk models alike.
 function hasCompletePureDefinerConjunction(
   program: ProgramModel,
   modulesById: ReadonlyMap<string, ModuleModel>,
+  facts: ProgramFacts,
+  entryModuleIds: ReadonlySet<string>,
 ): boolean {
-  // Only the family-A VALUE-read shape counts here: a callable-own-state definer (whose export is read
-  // via a CALL, not a value) is a distinct wave-8 witness tagged `variation:callable-own-state`, so it
-  // is excluded to keep `mechanism:pure-definer-behind-barrel` specific to the family-A conjunction.
   const pureDefinerIds = new Set(
     program.modules
       .filter((module) => module.inferredPure === true && module.callableOwnState !== true)
@@ -2016,35 +2059,43 @@ function hasCompletePureDefinerConjunction(
   };
 
   for (const barrel of program.modules) {
-    if (
-      !barrel.dependencies.some((dependency) => dependency.kind === "esm-reexport-star") ||
-      !starReachesPureDefiner(barrel.id, new Set())
-    ) {
+    // The definer is reached through a STAR re-export (the load-bearing ingredient — a named
+    // re-export resolves the binding directly and the bug does not fire). Handles a multi-hop chain.
+    if (!starReachesPureDefiner(barrel.id, new Set())) {
       continue;
     }
-    const namedProvided = new Set(
-      barrel.dependencies.flatMap((dependency) =>
-        dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
-      ),
+    const entryNamespaceImporters = program.modules.filter(
+      (module) =>
+        entryModuleIds.has(module.id) &&
+        module.dependencies.some(
+          (dependency) =>
+            dependency.kind === "esm-namespace-import" && dependency.target === barrel.id,
+        ),
     );
-    const namespaceImporters = program.modules.filter((module) =>
-      module.dependencies.some(
-        (dependency) =>
-          dependency.kind === "esm-namespace-import" && dependency.target === barrel.id,
-      ),
-    );
-    if (namespaceImporters.length < 2) {
+    if (entryNamespaceImporters.length < 2) {
       continue;
     }
-    const readsDefinerViaStar = namespaceImporters.some((module) =>
-      module.dependencies.some(
-        (dependency) =>
-          dependency.kind === "esm-namespace-import" &&
-          dependency.target === barrel.id &&
-          dependency.readMembers.some((member) => !namedProvided.has(member)),
-      ),
+    // Resolve each entry's read members THROUGH the barrel chain to their origin, so both hops and
+    // named-vs-star forwarding are handled uniformly. The SPLIT that makes on-demand drop the definer's
+    // init: one entry reads a member resolving to the pure definer, another reads a member resolving to
+    // a SIDE-EFFECTFUL sibling (which keeps the barrel a wrapped chunk).
+    const readsMemberResolving = (predicate: (originId: string) => boolean): boolean =>
+      entryNamespaceImporters.some((module) =>
+        module.dependencies.some(
+          (dependency) =>
+            dependency.kind === "esm-namespace-import" &&
+            dependency.target === barrel.id &&
+            dependency.readMembers.some((member) => {
+              const origin = facts.resolveExportOrigin(barrel.id, member);
+              return origin !== undefined && predicate(origin.moduleId);
+            }),
+        ),
+      );
+    const readsPureDefiner = readsMemberResolving((originId) => pureDefinerIds.has(originId));
+    const readsSideEffectfulSibling = readsMemberResolving(
+      (originId) => (modulesById.get(originId)?.events.length ?? 0) > 0,
     );
-    if (readsDefinerViaStar) {
+    if (readsPureDefiner && readsSideEffectfulSibling) {
       return true;
     }
   }
