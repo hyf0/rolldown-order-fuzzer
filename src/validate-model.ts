@@ -1,9 +1,17 @@
+import {
+  canonicalReadFlags,
+  describeCaptures,
+  readKey,
+  resolveExportCapability,
+  type ExportCapability,
+} from "./capture-analysis.ts";
 import type {
   CjsRequireOperation,
   DependencyOperation,
   EntryModel,
   ModuleModel,
   ProgramModel,
+  ValueRead,
 } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 
@@ -83,12 +91,14 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
   validateModules(
     program.modules,
     modulesById,
+    facts,
     modulesReachingTopLevelAwait,
     dynamicRegistrationOwners,
     errors,
   );
 
   validateCycleValueFlow(program.modules, facts, errors);
+  validateSynchronousCycleFormats(facts, errors);
 
   const entriesByName = collectEntries(program.entries, modulesById, errors);
   validateSchedule(program, entriesByName, modulesById, facts, dynamicRegistrationOwners, errors);
@@ -153,6 +163,26 @@ function validateCycleValueFlow(
   }
 }
 
+/// A synchronous strongly-connected component (a cycle cluster) must be SINGLE-FORMAT. A cycle that
+/// mixes ESM and CJS members is Node-illegal — the require of an evaluating ESM module (or the reverse)
+/// errors depending on the runtime entry point into the cycle, exactly the shape the mixed-cycle
+/// exclusion documents (`.agents/docs/execution-order-fuzzer-mvp.md`). The generator forces each cycle
+/// to one `ringFormat`, so this only rejects a handwritten model; it closes the gap where validation
+/// checked read totality across cycle edges but never the cluster's format uniformity.
+function validateSynchronousCycleFormats(facts: ProgramFacts, errors: string[]): void {
+  for (const scc of facts.cycles().sccs) {
+    const formats = new Set(
+      scc.map((id) => facts.module(id)?.format).filter((f) => f !== undefined),
+    );
+    if (formats.size > 1) {
+      const members = [...scc].sort();
+      errors.push(
+        `synchronous cycle {${members.map(quote).join(", ")}} mixes module formats (${[...formats].sort().join(", ")}); a mixed-format cycle is Node-illegal`,
+      );
+    }
+  }
+}
+
 function collectModules(
   modules: readonly ModuleModel[],
   errors: string[],
@@ -174,6 +204,7 @@ function collectModules(
 function validateModules(
   modules: readonly ModuleModel[],
   modulesById: ReadonlyMap<string, ModuleModel>,
+  facts: ProgramFacts,
   modulesReachingTopLevelAwait: ReadonlySet<string>,
   dynamicRegistrationOwners: Map<string, string>,
   errors: string[],
@@ -191,6 +222,18 @@ function validateModules(
     // Per target, the pair "slots" already used from this module. A (importer, target) pair may carry
     // several DISTINCT dependency kinds (the wave-5 mixed pairs), but at most one edge per slot.
     const pairSlots = new Map<string, Set<string>>();
+    // Where each objectRef binding's captured object is ultimately defined (following barrels), so an
+    // identity comparison can require both sides witness the SAME object (not merely both be objectRef
+    // captures). Built from the canonical capture descriptors.
+    const objectOrigins = new Map<string, string>();
+    for (const capture of describeCaptures(module, facts, modulesById)) {
+      if (capture.objectOrigin !== undefined) {
+        objectOrigins.set(
+          capture.binding,
+          `${capture.objectOrigin.moduleId} ${capture.objectOrigin.exportName}`,
+        );
+      }
+    }
 
     for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
       const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
@@ -213,37 +256,8 @@ function validateModules(
         );
       }
 
-      // Every export a callable-own-state module synthesizes is a FUNCTION. Folding a function
-      // binding numerically concatenates its SOURCE TEXT into the payload, and the bundle may rename
-      // or reformat that function — a false-positive surface, not a bug witness. So a read of a
-      // callable-own-state module's export must consume it as a CALL (or capture it as an objectRef,
-      // compared only for identity). Checked on DIRECT edges; a chain through a barrel is the
-      // generator's responsibility (its consumers always call), the same split as flagged barrels.
-      if (target !== undefined && target.callableOwnState === true) {
-        if (
-          operation.kind === "esm-value-import" &&
-          operation.call !== true &&
-          operation.objectRef !== true
-        ) {
-          errors.push(
-            `${path}: a value import of callable-own-state module ${quote(target.id)} must be a call import or an objectRef; its export is a function and a numeric fold of it is unsound`,
-          );
-        }
-        if (operation.kind === "esm-namespace-import") {
-          const callMembers = new Set(operation.callMembers ?? []);
-          for (const member of operation.readMembers) {
-            if (!callMembers.has(member)) {
-              errors.push(
-                `${path}: namespace member ${quote(member)} of callable-own-state module ${quote(target.id)} must be in callMembers; its exports are functions and a plain member fold is unsound`,
-              );
-            }
-          }
-        }
-        if (operation.kind === "cjs-require" && operation.resultBinding !== undefined) {
-          errors.push(
-            `${path}: a readable require may not target callable-own-state module ${quote(target.id)}; its exports are functions and a member fold is unsound`,
-          );
-        }
+      if (target !== undefined) {
+        validateCaptureCapability(operation, path, facts, modulesById, errors);
       }
 
       if (operation.kind === "esm-dynamic-import") {
@@ -257,6 +271,7 @@ function validateModules(
       }
     }
 
+    const readFlags = canonicalReadFlags(module.dependencies);
     for (const [eventIndex, event] of module.events.entries()) {
       const eventPath = `modules[${moduleIndex}].events[${eventIndex}]`;
       if (event.module !== module.id) {
@@ -269,7 +284,86 @@ function validateModules(
         errors.push(`${eventPath}.value: expected a finite JSON number`);
       }
 
-      validateEventReads(event, eventPath, readableBindings, errors);
+      validateEventReads(event, eventPath, readableBindings, readFlags, objectOrigins, errors);
+    }
+  }
+}
+
+/// A capture's CONSUMPTION must match the CAPABILITY its demanded export resolves to through re-export
+/// barrels — closing the gap where the direct-target checks stopped at the barrel and could not see a
+/// `callableOwnState`/`objectExport` definer several hops away.
+///
+/// - A `callable` origin (a function export) must be consumed as a CALL: a value import must be a
+///   `call` import or an `objectRef` capture; a namespace member must be in `callMembers`; a readable
+///   require may not target it. Folding a function binding numerically concatenates its source text —
+///   a false positive, not a witness.
+/// - An `object` origin (a fresh-object export) may only be captured by `objectRef`: a plain value
+///   import, a `call` import, a namespace member, or a readable require would fold or invoke an object.
+/// - A readable require reading `default` from a CJS target is unsupplied: a CJS provider renders
+///   `module.exports = <value>` (or filters `default` out of a `module.exports = {}`), so the required
+///   `.default` property never exists and the fold is `undefined` -> NaN, a degenerate both-sides
+///   crash the oracle must never rely on.
+function validateCaptureCapability(
+  operation: DependencyOperation,
+  path: string,
+  facts: ProgramFacts,
+  modulesById: ReadonlyMap<string, ModuleModel>,
+  errors: string[],
+): void {
+  const capabilityOf = (name: string): ExportCapability =>
+    resolveExportCapability(facts, modulesById, operation.target, name);
+
+  if (operation.kind === "esm-value-import") {
+    const capability = capabilityOf(operation.importedName);
+    if (capability === "callable" && operation.call !== true && operation.objectRef !== true) {
+      errors.push(
+        `${path}: import ${quote(operation.importedName)} resolves to a callable-own-state export; it must be a call import or an objectRef, a numeric fold of a function is unsound`,
+      );
+    }
+    if (capability === "object" && operation.objectRef !== true) {
+      errors.push(
+        `${path}: import ${quote(operation.importedName)} resolves to an object export; it must be an objectRef capture, folding or calling an object is unsound`,
+      );
+    }
+    return;
+  }
+
+  if (operation.kind === "esm-namespace-import") {
+    const callMembers = new Set(operation.callMembers ?? []);
+    for (const member of operation.readMembers) {
+      const capability = capabilityOf(member);
+      if (capability === "callable" && !callMembers.has(member)) {
+        errors.push(
+          `${path}: namespace member ${quote(member)} resolves to a callable-own-state export; it must be in callMembers, a plain member fold of a function is unsound`,
+        );
+      }
+      if (capability === "object") {
+        errors.push(
+          `${path}: namespace member ${quote(member)} resolves to an object export; folding an object numerically is unsound`,
+        );
+      }
+    }
+    return;
+  }
+
+  if (operation.kind === "cjs-require" && operation.resultBinding !== undefined) {
+    const target = modulesById.get(operation.target);
+    if (operation.readName === "default" && target?.format === "cjs") {
+      errors.push(
+        `${path}: a readable require cannot read ${quote("default")} from CJS module ${quote(operation.target)}; a CommonJS provider supplies no default property`,
+      );
+    }
+    const capability =
+      operation.readName === undefined ? "value" : capabilityOf(operation.readName);
+    if (capability === "callable") {
+      errors.push(
+        `${path}: a readable require resolves to a callable-own-state export on ${quote(operation.target)}; its exports are functions and a member fold is unsound`,
+      );
+    }
+    if (capability === "object") {
+      errors.push(
+        `${path}: a readable require resolves to an object export on ${quote(operation.target)}; folding an object numerically is unsound`,
+      );
     }
   }
 }
@@ -421,6 +515,8 @@ function validateEventReads(
   event: ModuleModel["events"][number],
   eventPath: string,
   readableBindings: ReadonlyMap<string, ReadableBinding>,
+  readFlags: ReadonlyMap<string, { readonly call: boolean; readonly guard: boolean }>,
+  objectOrigins: ReadonlyMap<string, string>,
   errors: string[],
 ): void {
   // An object-identity event folds `value + ((left === right) ? 0 : sentinel)`: it carries no numeric
@@ -437,12 +533,26 @@ function validateEventReads(
         `${eventPath}.value: expected a finite number when the event carries an identityCheck`,
       );
     }
+    let bothObject = true;
     for (const side of ["leftBinding", "rightBinding"] as const) {
       const bindingName = event.identityCheck[side];
       const binding = readableBindings.get(bindingName);
       if (binding === undefined || binding.kind !== "object") {
+        bothObject = false;
         errors.push(
           `${eventPath}.identityCheck.${side}: ${quote(bindingName)} must be an objectRef import binding in this module`,
+        );
+      }
+    }
+    // The two captures only witness a double-init when they reference the SAME object export reached
+    // through different paths. Comparing captures of two DIFFERENT objects is always false on a correct
+    // build too, so the "mismatch" fold fires on a healthy bundle — a false positive.
+    if (bothObject) {
+      const leftOrigin = objectOrigins.get(event.identityCheck.leftBinding);
+      const rightOrigin = objectOrigins.get(event.identityCheck.rightBinding);
+      if (leftOrigin !== undefined && rightOrigin !== undefined && leftOrigin !== rightOrigin) {
+        errors.push(
+          `${eventPath}.identityCheck: leftBinding and rightBinding must capture the SAME object export; they resolve to different origins`,
         );
       }
     }
@@ -485,6 +595,8 @@ function validateEventReads(
         errors.push(
           `${readPath}.member: expected a namespace member for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
         );
+      } else {
+        validateReadCapability(read, readPath, readFlags, errors);
       }
       continue;
     }
@@ -500,7 +612,36 @@ function validateEventReads(
       errors.push(
         `${readPath}.member: expected ${expectedMember === undefined ? "no member" : quote(expectedMember)} for binding ${quote(read.binding)}, received ${read.member === undefined ? "no member" : quote(read.member)}`,
       );
+    } else {
+      validateReadCapability(read, readPath, readFlags, errors);
     }
+  }
+}
+
+/// An event read's `call`/`guard` must MATCH the dependency that created its binding (the canonical
+/// read from `readableBindingsOf`). A read that folds a hoisted-function/callable export WITHOUT a call
+/// concatenates the function's source text into a number (a bundle may rename or reformat it — a false
+/// positive); a read that calls a plain numeric binding invokes a number (a TypeError). The guard flag
+/// (the partial-cycle-read sentinel) must likewise match, so the rendered fold is the intended one.
+function validateReadCapability(
+  read: ValueRead,
+  readPath: string,
+  readFlags: ReadonlyMap<string, { readonly call: boolean; readonly guard: boolean }>,
+  errors: string[],
+): void {
+  const canonical = readFlags.get(readKey(read));
+  if (canonical === undefined) {
+    return;
+  }
+  if ((read.call === true) !== canonical.call) {
+    errors.push(
+      `${readPath}.call: read of ${quote(read.binding)}${read.member === undefined ? "" : `.${read.member}`} must ${canonical.call ? "be a call (call: true)" : "not be a call"} to match its binding's capability`,
+    );
+  }
+  if ((read.guard === true) !== canonical.guard) {
+    errors.push(
+      `${readPath}.guard: read of ${quote(read.binding)}${read.member === undefined ? "" : `.${read.member}`} must ${canonical.guard ? "be guarded (guard: true)" : "not be guarded"} to match its binding's capability`,
+    );
   }
 }
 

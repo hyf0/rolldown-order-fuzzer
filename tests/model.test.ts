@@ -1355,6 +1355,243 @@ describe("validateProgramModel", () => {
       'modules[0].dependencies[1]: a (importer, target) pair to "t" may carry at most one dynamic dependency',
     ]);
   });
+
+  // Finding 1 (capture/export-demand analyzer): tightenings that close contract gaps the direct-target
+  // checks missed. Each rejects a crafted illegal model; the generated corpus is unaffected (a 6000-case
+  // sweep validates clean), proving these only exclude hand-crafted / drifted models.
+
+  test("rejects an event read whose call/guard disagrees with its binding's capability", () => {
+    // A plain (numeric) value import read AS A CALL would invoke a number.
+    const callingANumber = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "b", importedName: "vb", localName: "a_vb" },
+          ],
+          events: [
+            { module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_vb", call: true }] },
+          ],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(callingANumber)).toEqual([
+      'modules[0].events[0].reads[0].call: read of "a_vb" must not be a call to match its binding\'s capability',
+    ]);
+
+    // A hoisted-function CALL import read WITHOUT a call folds the function's source text into a number.
+    const foldingFunctionSource = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "b",
+              importedName: "fb",
+              localName: "a_fb",
+              call: true,
+            },
+          ],
+          events: [{ module: "a", phase: "evaluate", value: 1, reads: [{ binding: "a_fb" }] }],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(foldingFunctionSource)).toEqual([
+      'modules[0].events[0].reads[0].call: read of "a_fb" must be a call (call: true) to match its binding\'s capability',
+    ]);
+  });
+
+  test("rejects a callable-own-state export consumed as a plain fold through a barrel", () => {
+    const program = {
+      modules: [
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            // A namespace import of the BARREL (not the definer), reading the forwarded member
+            // WITHOUT marking it callable — the direct-target check never sees the definer.
+            {
+              kind: "esm-namespace-import",
+              target: "barrel",
+              localName: "ns",
+              readMembers: ["vdef"],
+            },
+          ],
+          events: [],
+        },
+        {
+          id: "barrel",
+          format: "esm",
+          dependencies: [{ kind: "esm-reexport-star", target: "def" }],
+          events: [],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 5 }],
+          callableOwnState: true,
+        },
+      ],
+      entries: [{ name: "main", moduleId: "consumer" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      'modules[0].dependencies[0]: namespace member "vdef" resolves to a callable-own-state export; it must be in callMembers, a plain member fold of a function is unsound',
+    ]);
+  });
+
+  test("rejects a call import of an object-export module", () => {
+    const program = {
+      modules: [
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "obj",
+              importedName: "vobj",
+              localName: "o",
+              call: true,
+            },
+          ],
+          events: [
+            {
+              module: "consumer",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "o", call: true }],
+            },
+          ],
+        },
+        { id: "obj", format: "esm", dependencies: [], events: [], objectExport: true },
+      ],
+      entries: [{ name: "main", moduleId: "consumer" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toContain(
+      'modules[0].dependencies[0]: import "vobj" resolves to an object export; it must be an objectRef capture, folding or calling an object is unsound',
+    );
+  });
+
+  test("rejects a readable require reading default from a CJS module", () => {
+    const program = {
+      modules: [
+        {
+          id: "a",
+          format: "cjs",
+          dependencies: [
+            { kind: "cjs-require", target: "b", resultBinding: "r", readName: "default" },
+          ],
+          events: [
+            {
+              module: "a",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "r", member: "default" }],
+            },
+          ],
+        },
+        {
+          id: "b",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toContain(
+      'modules[0].dependencies[0]: a readable require cannot read "default" from CJS module "b"; a CommonJS provider supplies no default property',
+    );
+  });
+
+  test("rejects an object-identity check comparing captures of DIFFERENT objects", () => {
+    const program = {
+      modules: [
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "obj1",
+              importedName: "vobj1",
+              localName: "l",
+              objectRef: true,
+            },
+            {
+              kind: "esm-value-import",
+              target: "obj2",
+              importedName: "vobj2",
+              localName: "r",
+              objectRef: true,
+            },
+          ],
+          events: [
+            {
+              module: "consumer",
+              phase: "evaluate",
+              value: 1,
+              identityCheck: { leftBinding: "l", rightBinding: "r" },
+            },
+          ],
+        },
+        { id: "obj1", format: "esm", dependencies: [], events: [], objectExport: true },
+        { id: "obj2", format: "esm", dependencies: [], events: [], objectExport: true },
+      ],
+      entries: [{ name: "main", moduleId: "consumer" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      "modules[0].events[0].identityCheck: leftBinding and rightBinding must capture the SAME object export; they resolve to different origins",
+    ]);
+  });
+
+  test("rejects a synchronous cycle that mixes ESM and CJS members", () => {
+    const program = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "b" }],
+          events: [{ module: "a", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "b",
+          format: "cjs",
+          dependencies: [{ kind: "cjs-require", target: "a" }],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      'synchronous cycle {"a", "b"} mixes module formats (cjs, esm); a mixed-format cycle is Node-illegal',
+    ]);
+  });
 });
 
 describe("organic chunk groups (wave 6)", () => {
