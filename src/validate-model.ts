@@ -19,7 +19,10 @@ import type { ProgramFacts } from "./program-facts.ts";
 
 const JAVASCRIPT_IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
 
-const INVALID_MODULE_BINDING_IDENTIFIERS = new Set([
+/// The JavaScript reserved words that are valid EXPORT names (any IdentifierName) but not valid
+/// declaration/binding names. A local binding cannot be named one of these, and a definer synthesizing
+/// such an export must render `export { local as name }` rather than `export function name`/`const name`.
+export const INVALID_MODULE_BINDING_IDENTIFIERS = new Set([
   "arguments",
   "await",
   "break",

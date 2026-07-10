@@ -13,6 +13,7 @@ import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
 import type { ExecutionEvent } from "../src/protocol.ts";
 import { renderProgram } from "../src/render.ts";
+import { validateProgramModel } from "../src/validate-model.ts";
 import { fileContents } from "./fixtures.ts";
 
 const execFileAsync = promisify(execFile);
@@ -1404,3 +1405,83 @@ async function withRenderedProgram(
     await rm(directory, { recursive: true, force: true });
   }
 }
+
+describe("reserved export-name declarations (finding 2.3)", () => {
+  test("a callable-own-state definer synthesizing `default` uses a fresh local + export-as", () => {
+    const program = {
+      modules: [
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "def",
+              importedName: "default",
+              localName: "d",
+              call: true,
+            },
+          ],
+          events: [
+            {
+              module: "consumer",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "d", call: true }],
+            },
+          ],
+        },
+        {
+          id: "def",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "def", phase: "evaluate", value: 5 }],
+          callableOwnState: true,
+        },
+      ],
+      entries: [{ name: "main", moduleId: "consumer" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    const def = fileContents(renderProgram(program).files, "module-0001.mjs");
+    // `export function default()` is a syntax error; a fresh local aliased to `default` is valid.
+    expect(def).not.toContain("export function default(");
+    expect(def).toContain("as default };");
+  });
+
+  test("an object definer synthesizing `default` uses a fresh local + export-as", () => {
+    const program = {
+      modules: [
+        {
+          id: "consumer",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "obj",
+              importedName: "default",
+              localName: "o",
+              objectRef: true,
+            },
+          ],
+          events: [
+            {
+              module: "consumer",
+              phase: "evaluate",
+              value: 1,
+              identityCheck: { leftBinding: "o", rightBinding: "o" },
+            },
+          ],
+        },
+        { id: "obj", format: "esm", dependencies: [], events: [], objectExport: true },
+      ],
+      entries: [{ name: "main", moduleId: "consumer" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    const obj = fileContents(renderProgram(program).files, "module-0001.mjs");
+    // `export const default = …` is a syntax error; a fresh local aliased to `default` is valid.
+    expect(obj).not.toContain("export const default ");
+    expect(obj).toContain("as default };");
+  });
+});

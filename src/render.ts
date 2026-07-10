@@ -7,7 +7,7 @@ import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } f
 import { moduleProfile, readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
 import { EXECUTION_PROTOCOL_VERSION } from "./protocol.ts";
-import { validateProgramModel } from "./validate-model.ts";
+import { INVALID_MODULE_BINDING_IDENTIFIERS, validateProgramModel } from "./validate-model.ts";
 
 export interface RenderedFile {
   readonly path: string;
@@ -438,7 +438,14 @@ function renderCallableOwnStateExports(
     `let ${stateName} = /* @__PURE__ */ ${buildName}();`,
   ];
   for (const [index, exportName] of requestedExports.entries()) {
-    lines.push(`export function ${exportName}() { return ${stateName} + ${index + 1}; }`);
+    lines.push(
+      ...renderSynthesizedExport(
+        exportName,
+        usedBindings,
+        "__ownStateExport",
+        (binding) => `function ${binding}() { return ${stateName} + ${index + 1}; }`,
+      ),
+    );
   }
   return lines;
 }
@@ -449,9 +456,46 @@ function renderCallableOwnStateExports(
 /// captures the export through two paths sees one object on a correct (single-evaluation) build and
 /// two on a silently double-run init. Object exports emit no events (the invisible double-init
 /// target). See `.agents/docs/object-identity-and-callable-own-state.md`.
-function renderObjectExports(module: ModuleModel, requestedExports: readonly string[]): string[] {
+function renderObjectExports(
+  module: ModuleModel,
+  requestedExports: readonly string[],
+  usedBindings: Set<string>,
+): string[] {
   const base = moduleStateBase(module);
-  return requestedExports.map((exportName) => `export const ${exportName} = { v: ${base} };`);
+  return requestedExports.flatMap((exportName) =>
+    renderSynthesizedExport(
+      exportName,
+      usedBindings,
+      "__objectExport",
+      (binding) => `const ${binding} = { v: ${base} };`,
+    ),
+  );
+}
+
+/// Whether `name` can be a DECLARATION name (`export function name` / `export const name`). A reserved
+/// word — notably `default`, from the `export { default as X }` re-export shape — is a valid export name
+/// but not a valid declaration name, so a definer synthesizing it must render a fresh local plus
+/// `export { local as name }`. Generated export names are always plain identifiers, so the corpus never
+/// takes the fresh-local path (this is byte-identical there) and only hand-crafted models exercise it.
+function isDeclarableName(name: string): boolean {
+  return !INVALID_MODULE_BINDING_IDENTIFIERS.has(name);
+}
+
+/// Render one synthesized export as either a direct exported declaration (a plain identifier name) or,
+/// for a reserved name, a fresh local declaration plus an `export { local as name }` alias. `define`
+/// renders the declaration DEFINING a binding WITHOUT the `export` keyword (a `function binding() {…}`
+/// or a `const binding = …`); a declarable name gets `export ` prepended, a reserved one is aliased.
+function renderSynthesizedExport(
+  exportName: string,
+  usedBindings: Set<string>,
+  localPrefix: string,
+  define: (binding: string) => string,
+): string[] {
+  if (isDeclarableName(exportName)) {
+    return [`export ${define(exportName)}`];
+  }
+  const local = freshBinding(usedBindings, localPrefix);
+  return [define(local), `export { ${local} as ${exportName} };`];
 }
 
 /// A fresh module-local binding with the given prefix that does not collide with any already-used
@@ -479,7 +523,7 @@ function renderEsmExports(
   // checked before purity); a numeric-fold module then splits on inferred vs normal/metadata purity.
   const profile = moduleProfile(module);
   if (profile.exportShape.kind === "fresh-object") {
-    return renderObjectExports(module, requestedExports);
+    return renderObjectExports(module, requestedExports, usedBindings);
   }
   if (profile.exportShape.kind === "callable-own-state") {
     return renderCallableOwnStateExports(module, requestedExports, usedBindings);
@@ -498,7 +542,14 @@ function renderEsmExports(
       // before this module's body has run (even mid-cycle, up the stack). It deliberately does NOT
       // fold the module's own reads: a callable that called its siblings would mutually recurse
       // around the cycle. The value oracle rides on events and value exports, which fold reads.
-      lines.push(`export function ${exportName}() { return ${base}; }`);
+      lines.push(
+        ...renderSynthesizedExport(
+          exportName,
+          usedBindings,
+          "__callableExport",
+          (binding) => `function ${binding}() { return ${base}; }`,
+        ),
+      );
       continue;
     }
 
