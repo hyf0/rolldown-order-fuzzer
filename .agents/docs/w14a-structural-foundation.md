@@ -231,7 +231,15 @@ holds on the persisted axis. Machine-readable evidence committed at
 `vp check` + `vp test` (331 tests, +6 regression tests) green; `corpus:check` 458 byte-identical to the
 regenerated `golden: IDR single-source`; a 6000-case validate sweep 0 rejections; `npm run catching-power`
 in-band (23.7%, unchanged from the pre-round baseline); the #9887 directed campaign RED 20/20 / GREEN
-20/20 (evidence file committed).
+20/20 (evidence file committed). Full 6-cell reacceptance vs the frozen snapshot (3 regimes × od/wa ×
+300, the catching-power seed range): mixed-od 69/300 (23.0%), mixed-wa 73/300 (24.3%), pure-esm-od 70/300
+(23.3%), pure-esm-wa 71/300 (23.7%), pure-cjs 0/300 in both cells (family-A-free, as before) — every red
+across all 1800 builds is the ONE known family-A `bundle-only-crash` NaN signature class ("Execution event
+value must be a primitive JSON value"); ZERO new divergence classes after the IDR effective-build change.
+A directed red/green flip additionally proves the single source end-to-end: the #9887 shape with its
+persisted global flipped to `idr:true` builds GREEN on the buggy rolldown (the cycle dissolves), where the
+old per-group hardcode would have kept it RED — so shrink's `false → true` candidate now genuinely changes
+the effective build.
 
 ## W14b must-not-repeat list (carried verbatim from the codex W14a findings)
 
