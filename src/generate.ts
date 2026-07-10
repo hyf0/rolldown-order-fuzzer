@@ -13,7 +13,7 @@ import type {
   ScheduleOperation,
   ValueRead,
 } from "./model.ts";
-import { programChunking, readableBindingsOf } from "./model.ts";
+import { moduleProfile, programChunking, readableBindingsOf } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
 
@@ -644,6 +644,9 @@ function buildRandomMixed(
     // An inferred-pure definer emits NO events (an event would make its top level impure) and carries
     // its build-function base; a barrel (a pure re-exporter) emits no events — it only forwards.
     if (draft.inferredPure === true) {
+      // Assert the draft is ESM rather than FORCING `format: "esm"` — inferred purity is an ESM-only
+      // construct, so a non-ESM draft carrying the flag is a bug that must fail loudly, not be sanitized.
+      assertEsmSpecialDraft(draft, "inferred-pure");
       return {
         id: draft.id,
         format: "esm",
@@ -659,12 +662,22 @@ function buildRandomMixed(
     // An object-export definer (Task 3): a no-events ESM leaf exporting fresh object literals — the
     // invisible double-init target of the object-identity witness.
     if (draft.objectExport === true) {
+      assertEsmSpecialDraft(draft, "object-export");
+      // ASSERT the definer is a leaf rather than silently dropping its dependencies (`dependencies: []`):
+      // an object-export module is validated leaf, so a draft that accumulated dependencies is a bug that
+      // must surface, not be quietly discarded (which would change the graph the later passes reasoned on).
+      if (draft.dependencies.length > 0) {
+        throw new Error(
+          `object-export draft ${draft.id} must be a leaf, received ${draft.dependencies.length} dependencies`,
+        );
+      }
       return { id: draft.id, format: "esm", dependencies: [], events: [], objectExport: true };
     }
     // An object-identity consumer (Task 3): its objectRef imports capture the same object export
     // through two paths; a single event compares them for identity. objectRef bindings are never
     // folded numerically, so this event carries no `reads`.
     if (draft.identityCheck !== undefined) {
+      assertEsmSpecialDraft(draft, "object-identity consumer");
       return {
         id: draft.id,
         format: "esm",
@@ -1904,14 +1917,16 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
 
   // A module carries `sideEffects: false` package metadata: the primary dead-code-elimination
   // versus execution-order trigger. Flagged modules emit no events and contribute only values.
-  if (program.modules.some((module) => module.sideEffectFree === true)) {
+  // Classified through the ONE ModuleProfile projection, not the raw flags (the tag deriver is a pure
+  // consumer of a module's purity/export-shape, so it reads the canonical interpretation).
+  if (program.modules.some((module) => moduleProfile(module).purity.kind === "metadata")) {
     tags.add("variation:side-effect-free-metadata");
   }
 
   // Family A/B mechanisms (`.agents/docs/real-app-bug-families.md`). An inferred-pure definer (judged
   // side-effect-free by STATEMENT inference, not a package flag); a function-hidden read (a folded
   // read run inside a local function called at init); a computed namespace member access (`ns[k]`).
-  if (program.modules.some((module) => module.inferredPure === true)) {
+  if (program.modules.some((module) => moduleProfile(module).purity.kind === "inferred")) {
     tags.add("variation:inferred-pure-definer");
   }
   if (
@@ -1928,7 +1943,11 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   }
   // A callable-reads-own-state definer (Task 2): an exported function reads its module's own
   // init-assigned state var, called by consumers — the d3-scale/shadcn read-side witness.
-  if (program.modules.some((module) => module.callableOwnState === true)) {
+  if (
+    program.modules.some(
+      (module) => moduleProfile(module).exportShape.kind === "callable-own-state",
+    )
+  ) {
     tags.add("variation:callable-own-state");
   }
   // An object-identity witness (Task 3): an event compares two captures of one object export for
@@ -2166,6 +2185,17 @@ function manualGroupsSeparateFormats(
     formats.some((groupFormats) => groupFormats.size === 1 && groupFormats.has("esm")) &&
     formats.some((groupFormats) => groupFormats.size === 1 && groupFormats.has("cjs"))
   );
+}
+
+/// Assert a special-role draft (inferred-pure, object-export, object-identity consumer) is ESM. These
+/// are ESM-only constructs — a CJS module cannot express statement-inferred purity, a fresh-object
+/// export, or an objectRef capture — so finalization ASSERTS the draft's format instead of forcing
+/// `format: "esm"`, turning a future transform that mis-formats such a draft into a loud failure rather
+/// than a silent sanitization the validator can no longer catch.
+function assertEsmSpecialDraft(draft: RandomModuleDraft, role: string): void {
+  if (draft.format !== "esm") {
+    throw new Error(`${role} draft ${draft.id} must be ESM, received ${draft.format}`);
+  }
 }
 
 /// Assert a draft's dependencies are all ESM-legal (no `cjs-require`) and return them typed. A draft

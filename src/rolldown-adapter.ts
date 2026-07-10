@@ -18,6 +18,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { ProgramModel, ScheduleOperation } from "./model.ts";
+import { programChunking } from "./model.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -667,6 +668,10 @@ async function buildWithChild(
   const requestPath = join(temporaryDirectory, "build-request.json");
   const responsePath = join(temporaryDirectory, "build-response.json");
   const phasePath = join(temporaryDirectory, "build-phase.json");
+  // The SELECTED chunking mode from the one canonical union, so the request serializes exactly one mode
+  // (the other array empty) instead of both raw arrays — an empty `manualChunkGroups: []` no longer
+  // leaks as a fourth state, matching what the child and the artifact identity resolve.
+  const chunking = programChunking(program);
   const request: BuildChildRequest = {
     version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier,
@@ -679,7 +684,7 @@ async function buildWithChild(
     preserveEntrySignatures: ROLLDOWN_BUILD_OPTIONS.preserveEntrySignatures,
     onDemandWrapping,
     bundleDirectory,
-    manualChunkGroups: (program.manualChunkGroups ?? []).map((group) => ({
+    manualChunkGroups: (chunking.kind === "manual" ? chunking.groups : []).map((group) => ({
       name: group.name,
       modulePaths: group.moduleIds.map((moduleId) =>
         resolve(sourceDirectory, requiredPath(rendered.modulePaths, moduleId, "module")),
@@ -687,7 +692,7 @@ async function buildWithChild(
     })),
     // Organic (size/share-driven) groups pass through as serializable descriptors; the child maps
     // them onto rolldown's `codeSplitting.groups` and reconstructs each regex `test` from its source.
-    organicChunkGroups: (program.organicChunkGroups ?? []).map((group) => ({
+    organicChunkGroups: (chunking.kind === "organic" ? chunking.groups : []).map((group) => ({
       name: group.name,
       ...(group.test === undefined ? {} : { test: group.test }),
       ...(group.minSize === undefined ? {} : { minSize: group.minSize }),

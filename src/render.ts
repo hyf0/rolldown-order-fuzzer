@@ -42,10 +42,12 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
     );
   }
 
+  const isMetadataPure = (module: ModuleModel): boolean =>
+    moduleProfile(module).purity.kind === "metadata";
   const modulePaths = new Map(
     program.modules.map((module, index) => [
       module.id,
-      modulePath(index, module.format, module.sideEffectFree === true),
+      modulePath(index, module.format, isMetadataPure(module)),
     ]),
   );
   const requestedExports = collectRequestedExports(program);
@@ -65,7 +67,7 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
   }
 
   // A single synthetic package.json marks every flagged module's directory as side-effect-free.
-  if (program.modules.some((module) => module.sideEffectFree === true)) {
+  if (program.modules.some(isMetadataPure)) {
     files.push({
       path: `${SIDE_EFFECT_FREE_DIRECTORY}/package.json`,
       contents: SIDE_EFFECT_FREE_PACKAGE_JSON,
@@ -374,13 +376,22 @@ function renderCjsNamedExport(
 /// reads). The bundler infers the top level pure (so it may order-wrap or drop the module), yet the
 /// call form prevents constant-folding the value to a literal, so a dropped init surfaces as an
 /// `undefined` read downstream. No events are emitted (validated).
+/// The numeric base a definer's synthesized value folds onto, read through the ONE ModuleProfile
+/// projection: an inferred-pure definer's build-function base (`purity.base`, the canonical form of the
+/// `pureBase` flag), else the module's first event value. The renderer never inspects the raw purity
+/// flags directly, so the profile stays the single interpreter of them.
+function definerBase(module: ModuleModel): number {
+  const purity = moduleProfile(module).purity;
+  return purity.kind === "inferred" ? purity.base : moduleStateBase(module);
+}
+
 function renderInferredPureExports(
   module: ModuleModel,
   requestedExports: readonly string[],
   usedBindings: Set<string>,
   readable: readonly ValueRead[],
 ): string[] {
-  const base = module.pureBase ?? moduleStateBase(module);
+  const base = definerBase(module);
   const lines: string[] = [];
   let index = 0;
   for (const exportName of requestedExports) {
@@ -419,7 +430,7 @@ function renderCallableOwnStateExports(
   requestedExports: readonly string[],
   usedBindings: Set<string>,
 ): string[] {
-  const base = module.inferredPure === true ? (module.pureBase ?? 0) : moduleStateBase(module);
+  const base = definerBase(module);
   const buildName = freshBinding(usedBindings, "__ownStateBuild");
   const stateName = freshBinding(usedBindings, "__ownState");
   const lines = [
