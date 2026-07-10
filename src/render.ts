@@ -3,7 +3,7 @@
 import { posix } from "node:path";
 
 import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
-import { readableBindingsOf } from "./model.ts";
+import { moduleProfile, readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
 import { EXECUTION_PROTOCOL_VERSION } from "./protocol.ts";
 import { validateProgramModel } from "./validate-model.ts";
@@ -577,15 +577,17 @@ function renderEsmExports(
   readable: readonly ValueRead[],
   callableExports: ReadonlySet<string>,
 ): string[] {
-  if (module.objectExport === true) {
+  // One dispatch on the module's profile. exportShape decides the export FORM (a callable-own-state
+  // definer that is also inferred-pure still renders its state-reading callables, so exportShape is
+  // checked before purity); a numeric-fold module then splits on inferred vs normal/metadata purity.
+  const profile = moduleProfile(module);
+  if (profile.exportShape.kind === "fresh-object") {
     return renderObjectExports(module, requestedExports);
   }
-  // Checked before `inferredPure`: a callable-own-state definer may ALSO be inferred-pure, and it must
-  // render its state-reading callables rather than the pure-const value form.
-  if (module.callableOwnState === true) {
+  if (profile.exportShape.kind === "callable-own-state") {
     return renderCallableOwnStateExports(module, requestedExports, usedBindings);
   }
-  if (module.inferredPure === true) {
+  if (profile.purity.kind === "inferred") {
     return renderInferredPureExports(module, requestedExports, usedBindings, readable);
   }
 

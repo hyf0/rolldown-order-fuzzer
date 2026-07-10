@@ -260,6 +260,49 @@ export interface CjsModuleModel extends ModuleModelBase {
 
 export type ModuleModel = EsmModuleModel | CjsModuleModel;
 
+/// The two INDEPENDENT behavioral axes a module's five correlated boolean flags encode, as one
+/// discriminated `ModuleProfile` shared by generation, validation, rendering, tags, and shrinking
+/// instead of each re-deriving the combination. The two purity mechanisms stay SEMANTICALLY DISTINCT
+/// (metadata purity emits a `package.json`; inferred purity rewrites the initializer to a
+/// non-inlinable PURE call) — this only normalizes their REPRESENTATION.
+///
+/// - purity: `normal` (nothing dropped), `metadata` (`sideEffects: false` package flag), or
+///   `inferred` (side-effect-free by statement inference, carrying the fold base).
+/// - exportShape: `numeric-fold` (folded numbers), `callable-own-state` (state-reading function
+///   exports), or `fresh-object` (a fresh object literal per export — the double-init witness).
+export type ModulePurity =
+  | { readonly kind: "normal" }
+  | { readonly kind: "metadata" }
+  | { readonly kind: "inferred"; readonly base: number };
+
+export type ModuleExportShape =
+  | { readonly kind: "numeric-fold" }
+  | { readonly kind: "callable-own-state" }
+  | { readonly kind: "fresh-object" };
+
+export interface ModuleProfile {
+  readonly purity: ModulePurity;
+  readonly exportShape: ModuleExportShape;
+}
+
+/// Project a module's flags onto the canonical `ModuleProfile`. The legal combinations and precedence
+/// (the flags are mutually exclusive where they conflict, enforced by the validator) live HERE, once.
+export function moduleProfile(module: ModuleModel): ModuleProfile {
+  const purity: ModulePurity =
+    module.sideEffectFree === true
+      ? { kind: "metadata" }
+      : module.inferredPure === true
+        ? { kind: "inferred", base: module.pureBase ?? 0 }
+        : { kind: "normal" };
+  const exportShape: ModuleExportShape =
+    module.objectExport === true
+      ? { kind: "fresh-object" }
+      : module.callableOwnState === true
+        ? { kind: "callable-own-state" }
+        : { kind: "numeric-fold" };
+  return { purity, exportShape };
+}
+
 export interface EntryModel {
   readonly name: string;
   readonly moduleId: string;

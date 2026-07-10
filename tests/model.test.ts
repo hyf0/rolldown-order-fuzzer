@@ -1592,6 +1592,33 @@ describe("validateProgramModel", () => {
       'synchronous cycle {"a", "b"} mixes module formats (cjs, esm); a mixed-format cycle is Node-illegal',
     ]);
   });
+
+  // Finding 5 (module-profile normalization): metadata purity and callable-own-state are incompatible.
+  test("rejects a module that is both sideEffectFree and callableOwnState", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "flagged",
+          format: "esm",
+          dependencies: [],
+          events: [],
+          sideEffectFree: true,
+          callableOwnState: true,
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(program)).toEqual([
+      "modules[1]: a module cannot be both sideEffectFree and callableOwnState; a legal DCE may drop the state a callable-own-state export reads",
+    ]);
+  });
 });
 
 describe("organic chunk groups (wave 6)", () => {

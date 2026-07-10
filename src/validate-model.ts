@@ -13,6 +13,7 @@ import type {
   ProgramModel,
   ValueRead,
 } from "./model.ts";
+import { moduleProfile } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 
 const JAVASCRIPT_IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
@@ -380,48 +381,69 @@ const SIDE_EFFECT_FREE_DEPENDENCY_KINDS = new Set([
   "esm-reexport-star",
 ]);
 
-/// A `sideEffects: false` module is a user promise the bundler may act on with aggressive dead-code
-/// elimination. To keep the oracle sound, such a module must contribute ONLY values and never emit
-/// an observable event: an emitted event could be legally dropped in the bundle while the source
-/// still emits it. It must also be ESM whose every dependency is a value-only edge (see
-/// `SIDE_EFFECT_FREE_DEPENDENCY_KINDS`). This is a LOCAL invariant; whole-chain soundness (nothing
-/// only reachable through the flagged module emits events) is the generator's / handwritten test's
-/// responsibility, as with flagged leaves. See the `sideEffectFree` doc in model.ts and
-/// `.agents/docs/namespace-and-barrel-reexports.md`.
-function validateSideEffectFreeModule(
+/// The shared contract of BOTH purity mechanisms (metadata `sideEffects: false` and statement-inferred
+/// purity): the module must be ESM, emit NO observable event (an event could be legally dropped by the
+/// bundler while the source still emits it), and carry only value-only ESM dependencies (a side-effect
+/// import, dynamic registration, or interop require would be droppable under purity yet could reorder
+/// or drop another module's events). Only the descriptor and the no-events reason differ between the
+/// two mechanisms; the checks are one.
+function validateValueOnlyEsmContract(
   module: ModuleModel,
-  moduleIndex: number,
+  path: string,
+  descriptor: string,
+  noEventsReason: string,
   errors: string[],
 ): void {
-  if (module.sideEffectFree !== true) {
-    return;
-  }
-
-  const path = `modules[${moduleIndex}]`;
   if (module.format !== "esm") {
-    errors.push(`${path}: a side-effect-free module must be ESM, received ${module.format}`);
+    errors.push(`${path}: ${descriptor} module must be ESM, received ${module.format}`);
   }
   if (module.events.length > 0) {
-    errors.push(
-      `${path}: a side-effect-free module must not emit events; its events can be legally dropped under sideEffects:false`,
-    );
+    errors.push(`${path}: ${descriptor} module must not emit events; ${noEventsReason}`);
   }
   for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
     if (!SIDE_EFFECT_FREE_DEPENDENCY_KINDS.has(dependency.kind)) {
       errors.push(
-        `${path}.dependencies[${dependencyIndex}]: a side-effect-free module may only carry value-only ESM dependencies, received ${dependency.kind}`,
+        `${path}.dependencies[${dependencyIndex}]: ${descriptor} module may only carry value-only ESM dependencies, received ${dependency.kind}`,
       );
     }
   }
 }
 
+/// A `sideEffects: false` (metadata-purity) module. Beyond the shared value-only ESM contract, it may
+/// not ALSO be a callable-own-state definer: the bundler is entitled to drop a metadata-pure module's
+/// state initialization, so the state-reading callable would read `undefined` on a legal DCE — a false
+/// positive, not a witness (the generator already excludes callable-own-state from flagging). See the
+/// `sideEffectFree` doc in model.ts and `.agents/docs/namespace-and-barrel-reexports.md`.
+function validateSideEffectFreeModule(
+  module: ModuleModel,
+  moduleIndex: number,
+  errors: string[],
+): void {
+  if (moduleProfile(module).purity.kind !== "metadata") {
+    return;
+  }
+
+  const path = `modules[${moduleIndex}]`;
+  validateValueOnlyEsmContract(
+    module,
+    path,
+    "a side-effect-free",
+    "its events can be legally dropped under sideEffects:false",
+    errors,
+  );
+  if (module.callableOwnState === true) {
+    errors.push(
+      `${path}: a module cannot be both sideEffectFree and callableOwnState; a legal DCE may drop the state a callable-own-state export reads`,
+    );
+  }
+}
+
 /// An inferred-pure definer (`inferredPure`) is judged side-effect-free by the bundler from its
 /// STATEMENTS (not a `package.json` flag): local pure functions, a `const` assigned from a
-/// `/* @__PURE__ */` call, exports of those bindings. Like a `sideEffects: false` module it must be
-/// ESM, emit no events (an event is a side effect that would make its top level impure), and carry
-/// only value-only ESM dependencies. It also carries a finite numeric `pureBase` (the build
-/// function's return value) and is MUTUALLY EXCLUSIVE with `sideEffectFree` — the two are distinct
-/// mechanisms. See the `inferredPure` doc in model.ts and `.agents/docs/real-app-bug-families.md`.
+/// `/* @__PURE__ */` call, exports of those bindings. It shares the value-only ESM contract, carries a
+/// finite numeric `pureBase` (the build function's return value), and is MUTUALLY EXCLUSIVE with
+/// `sideEffectFree` and `objectExport` — distinct mechanisms. See the `inferredPure` doc in model.ts
+/// and `.agents/docs/real-app-bug-families.md`.
 function validateInferredPureModule(
   module: ModuleModel,
   moduleIndex: number,
@@ -435,27 +457,19 @@ function validateInferredPureModule(
   if (module.sideEffectFree === true) {
     errors.push(`${path}: a module cannot be both inferredPure and sideEffectFree`);
   }
-  if (module.format !== "esm") {
-    errors.push(`${path}: an inferred-pure module must be ESM, received ${module.format}`);
-  }
-  if (module.events.length > 0) {
-    errors.push(
-      `${path}: an inferred-pure module must not emit events; an event is a top-level side effect`,
-    );
-  }
   if (module.objectExport === true) {
     errors.push(`${path}: a module cannot be both inferredPure and objectExport`);
   }
   if (module.pureBase === undefined || !Number.isFinite(module.pureBase)) {
     errors.push(`${path}.pureBase: an inferred-pure module requires a finite numeric pureBase`);
   }
-  for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
-    if (!SIDE_EFFECT_FREE_DEPENDENCY_KINDS.has(dependency.kind)) {
-      errors.push(
-        `${path}.dependencies[${dependencyIndex}]: an inferred-pure module may only carry value-only ESM dependencies, received ${dependency.kind}`,
-      );
-    }
-  }
+  validateValueOnlyEsmContract(
+    module,
+    path,
+    "an inferred-pure",
+    "an event is a top-level side effect",
+    errors,
+  );
 }
 
 /// A callable-reads-own-state definer (`callableOwnState`) synthesizes a module-scope mutable state
