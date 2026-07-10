@@ -2,6 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ProgramModel } from "../src/model.ts";
+import { programChunking } from "../src/model.ts";
 import { candidates, parseArgs, sameFailure } from "../src/shrink.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 
@@ -204,9 +205,11 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
       organicChunkGroups: [{ name: "g", minShareCount: 2, maxSize: 500, priority: 1 }],
     } satisfies ProgramModel;
-    // A candidate drops one optional field (e.g. maxSize) while keeping the organic config.
+    // A candidate drops one optional field (e.g. maxSize) while keeping the organic config. The shrinker
+    // re-canonicalizes chunking onto `build.chunking`, so read it through `programChunking`.
     const trimmed = findValidCandidate(program, (candidate) => {
-      const group = candidate.organicChunkGroups?.[0];
+      const chunking = programChunking(candidate);
+      const group = chunking.kind === "organic" ? chunking.groups[0] : undefined;
       return group !== undefined && group.maxSize === undefined && group.minShareCount === 2;
     });
     expect(trimmed).toBeDefined();

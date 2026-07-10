@@ -356,34 +356,87 @@ export interface OrganicChunkGroupConfig {
   readonly includeDependenciesRecursively?: boolean;
 }
 
-/// A program carries at most ONE chunking config, the per-case axis rolled by the seeded RNG:
-/// `default` (neither field present, rolldown's automatic chunking), `explicit`
-/// (`manualChunkGroups` — exact module lists), or `organic` (`organicChunkGroups` — size/share
-/// thresholds rolldown resolves). The two group fields are mutually exclusive (`validate-model.ts`
-/// enforces it). `deriveCoverageTags` reads the fields to emit `chunking:default|explicit|organic`.
+/// A program carries at most ONE chunking config (`Chunking`), plus the other bundle-side build axes,
+/// in a single persisted `BuildConfig` (`build`). Legacy (schema-16) programs instead carry the two
+/// optional top-level chunk-group arrays and no `build`; `buildConfigOf` reconciles both shapes so an
+/// old artifact still replays. The two legacy group fields are mutually exclusive (`validate-model.ts`
+/// enforces it). `deriveCoverageTags` reads the resolved config to emit `chunking:default|explicit|organic`
+/// plus the per-axis tags.
 export interface ProgramModel {
   readonly modules: readonly ModuleModel[];
   readonly entries: readonly EntryModel[];
   readonly schedule: readonly ScheduleOperation[];
+  /// The single persisted bundle-side build configuration (W14a, schema 17). Present on every
+  /// generator-produced program; absent on a legacy (schema-16) model, where `buildConfigOf` derives it
+  /// from the legacy top-level arrays + defaults.
+  readonly build?: BuildConfig;
+  /// LEGACY (schema-16) chunking fields. A generator-produced schema-17 program carries `build.chunking`
+  /// instead; these remain only so an old persisted artifact (v16) still parses and replays.
   readonly manualChunkGroups?: readonly ManualChunkGroup[];
   readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
 }
 
 /// The three mutually-exclusive chunking modes as ONE discriminated union, so tags, artifact identity,
 /// adapter options, and shrinking share a single matcher instead of each re-deriving the mode from two
-/// optional arrays (where an EMPTY array leaks as a fourth, ambiguous state). The persisted
-/// `ProgramModel` still carries the two optional arrays (no schema migration); `programChunking`
-/// projects them onto this union canonically.
+/// optional arrays (where an EMPTY array leaks as a fourth, ambiguous state). `build.chunking` carries it
+/// directly on a schema-17 program; `programChunking` normalizes it (an empty groups array is automatic).
 export type Chunking =
   | { readonly kind: "automatic" }
   | { readonly kind: "manual"; readonly groups: readonly ManualChunkGroup[] }
   | { readonly kind: "organic"; readonly groups: readonly OrganicChunkGroupConfig[] };
 
-/// The canonical chunking mode of a program. Organic groups win over manual (mirroring the build
-/// child's precedence), and an EMPTY manual/organic array is `automatic` — the fix for the artifact
-/// identity that recorded `{ groups: [] }` while the build ran automatic chunking. A program with both
-/// arrays is rejected by the validator, so precedence only disambiguates the empty cases.
-export function programChunking(program: ProgramModel): Chunking {
+/// `InputOptions.preserveEntrySignatures` — the fuzzer only produces `"allow-extension"` (the historical
+/// hardcoded value, now moved into the persisted `BuildConfig`); the other values are here only so the
+/// build child's request type accepts what a future axis might roll.
+export type PreserveEntrySignatures = false | "strict" | "allow-extension" | "exports-only";
+
+/// The ONE persisted bundle-side build configuration a case builds with — consumed by the adapter/build
+/// child, the evaluator, replay/shrink, the artifact identity, the corpus manifest, and the coverage
+/// tags. All of these bundle-side; NONE changes the source run, so the differential oracle stays valid.
+///
+/// - `chunking` — the code-splitting mode (moved in from the top-level arrays).
+/// - `includeDependenciesRecursively` — the GLOBAL `codeSplitting.includeDependenciesRecursively`
+///   fallback (rolldown default `true`); the W14a axis the generator rolls. `false` is a necessary
+///   ingredient of the #9887 cross-chunk init-cycle catch.
+/// - `preserveEntrySignatures` — the `InputOptions.preserveEntrySignatures` value (moved in from the
+///   hardcoded `"allow-extension"`; not rolled).
+/// - `lazyBarrel` — `experimental.lazyBarrel`, rolldown's barrel-pruning optimization (default `false`);
+///   the W14-9 axis the generator rolls (smoke-verified honored by the frozen snapshot under strict order).
+/// - `strictExecutionOrder` — `OutputOptions.strictExecutionOrder` (default `true`; NOT rolled in W14a —
+///   every case keeps `true`, because a `seo:false` cell needs a weaker order oracle that lands in W14b).
+export interface BuildConfig {
+  readonly chunking: Chunking;
+  readonly includeDependenciesRecursively: boolean;
+  readonly preserveEntrySignatures: PreserveEntrySignatures;
+  readonly lazyBarrel: boolean;
+  readonly strictExecutionOrder: boolean;
+}
+
+/// The build config a program with no persisted `build` (a legacy v16 artifact) resolves to, minus its
+/// chunking (which `buildConfigOf` derives from the legacy arrays): rolldown/fuzzer defaults.
+export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
+  chunking: { kind: "automatic" } as const,
+  includeDependenciesRecursively: true,
+  preserveEntrySignatures: "allow-extension",
+  lazyBarrel: false,
+  strictExecutionOrder: true,
+});
+
+/// The resolved `BuildConfig` of a program: its persisted `build` if present (schema 17), else derived
+/// from the legacy top-level chunk arrays + defaults (schema 16). This is the ONE place the two persisted
+/// shapes reconcile, so every consumer reads the config the same way whatever the artifact vintage.
+export function buildConfigOf(program: ProgramModel): BuildConfig {
+  if (program.build !== undefined) {
+    return program.build;
+  }
+  return { ...DEFAULT_BUILD_CONFIG, chunking: legacyChunking(program) };
+}
+
+/// Derive a legacy (schema-16) program's chunking from its top-level arrays. Organic groups win over
+/// manual (mirroring the build child's precedence), and an EMPTY array is automatic (the empty-array
+/// identity fix). A program with both arrays is rejected by the validator, so precedence only
+/// disambiguates the empty cases.
+function legacyChunking(program: ProgramModel): Chunking {
   if (program.organicChunkGroups !== undefined && program.organicChunkGroups.length > 0) {
     return { kind: "organic", groups: program.organicChunkGroups };
   }
@@ -391,6 +444,21 @@ export function programChunking(program: ProgramModel): Chunking {
     return { kind: "manual", groups: program.manualChunkGroups };
   }
   return { kind: "automatic" };
+}
+
+/// The canonical chunking mode of a program, from its resolved `BuildConfig`. An EMPTY manual/organic
+/// groups array normalizes to `automatic` — the durable fix for the artifact identity that recorded
+/// `{ groups: [] }` while the build ran automatic chunking, now guarding `build.chunking` too so an empty
+/// union never leaks as a distinct mode.
+export function programChunking(program: ProgramModel): Chunking {
+  const chunking = buildConfigOf(program).chunking;
+  if (chunking.kind === "manual" && chunking.groups.length === 0) {
+    return { kind: "automatic" };
+  }
+  if (chunking.kind === "organic" && chunking.groups.length === 0) {
+    return { kind: "automatic" };
+  }
+  return chunking;
 }
 
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an

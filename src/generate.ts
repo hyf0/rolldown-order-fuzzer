@@ -1,4 +1,6 @@
 import type {
+  BuildConfig,
+  Chunking,
   CjsModuleModel,
   DependencyOperation,
   EntryModel,
@@ -14,7 +16,7 @@ import type {
   ValueRead,
 } from "./model.ts";
 import { analyzeProgram, type AnalyzedProgram, type ExportDemandPlan } from "./analyzed-program.ts";
-import { moduleProfile, programChunking, readableBindingsOf } from "./model.ts";
+import { buildConfigOf, moduleProfile, programChunking, readableBindingsOf } from "./model.ts";
 import { ProgramFacts, type ExportSupply } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
 
@@ -832,17 +834,24 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     conjunctionConsumerIds,
   );
 
-  const program: ProgramModel = {
-    modules: finalModules,
-    entries,
-    schedule,
-    ...(chunking.manualChunkGroups !== undefined
-      ? { manualChunkGroups: chunking.manualChunkGroups }
-      : {}),
-    ...(chunking.organicChunkGroups !== undefined
-      ? { organicChunkGroups: chunking.organicChunkGroups }
-      : {}),
+  // Roll the persisted BuildConfig axes LAST — AFTER every source-affecting roll (deps, entries,
+  // schedule, chunking, side-effect flagging, statically-invisible reads) — so the rendered source is
+  // byte-identical to before this wave: these axes are bundle-side only and never change the source run,
+  // and appending their rolls here shifts no earlier draw. `includeDependenciesRecursively` (the global
+  // codeSplitting fallback) and `lazyBarrel` (the barrel-pruning optimization) are the two W14a axes;
+  // `preserveEntrySignatures` and `strictExecutionOrder` are fixed (the latter not rolled — every case
+  // keeps strict order; a seo:false cell needs a weaker order oracle that lands in W14b).
+  const includeDependenciesRecursively = rng.boolean();
+  const lazyBarrel = rng.boolean();
+  const build: BuildConfig = {
+    chunking: chunkingUnionOf(chunking),
+    includeDependenciesRecursively,
+    preserveEntrySignatures: "allow-extension",
+    lazyBarrel,
+    strictExecutionOrder: true,
   };
+
+  const program: ProgramModel = { modules: finalModules, entries, schedule, build };
   // Deep-freeze the finalized program so accidental post-finalization mutation throws in tests — nothing
   // downstream (render, validate, tags, the artifact writer) mutates it; they only READ. analyzeProgram
   // then freezes the plan and the analyzed view over this frozen graph.
@@ -901,6 +910,22 @@ function buildChunkingConfig(
     return { manualChunkGroups };
   }
   return {};
+}
+
+/// Project the rolled chunking config onto the persisted `Chunking` union stored on `build.chunking`.
+/// `buildChunkingConfig` returns at most one non-empty group array, so the union is unambiguous; an
+/// absent/empty array is `automatic`.
+function chunkingUnionOf(chunking: {
+  readonly manualChunkGroups?: readonly ManualChunkGroup[];
+  readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
+}): Chunking {
+  if (chunking.organicChunkGroups !== undefined && chunking.organicChunkGroups.length > 0) {
+    return { kind: "organic", groups: chunking.organicChunkGroups };
+  }
+  if (chunking.manualChunkGroups !== undefined && chunking.manualChunkGroups.length > 0) {
+    return { kind: "manual", groups: chunking.manualChunkGroups };
+  }
+  return { kind: "automatic" };
 }
 
 /// Build 1–2 organic (size/share-driven) chunk groups whose composition rolldown resolves. Rolls one
@@ -1939,6 +1964,14 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     tags.add("chunking:default");
   }
 
+  // The persisted BuildConfig axes (W14a): one tag per rolled value so a density scan sees both settings
+  // of each axis. `includeDependenciesRecursively` (the global codeSplitting fallback, `false` an
+  // ingredient of the #9887 catch) and `lazyBarrel` (rolldown's barrel-pruning optimization) are rolled;
+  // `preserveEntrySignatures` / `strictExecutionOrder` are fixed, so they carry no per-value axis tag.
+  const build = buildConfigOf(program);
+  tags.add(`axis:include-dependencies-recursively:${String(build.includeDependenciesRecursively)}`);
+  tags.add(`axis:lazy-barrel:${String(build.lazyBarrel)}`);
+
   const registrations = program.modules.flatMap((module) =>
     module.dependencies.flatMap((dependency) =>
       dependency.kind === "esm-dynamic-import" ? [dependency.registration] : [],
@@ -1989,7 +2022,8 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     // A cycle whose members land in two or more manual chunk groups — the cross-chunk init-cycle
     // shape behind the `init_X is not a function` family (rolldown #3529, #9887, #9946, vite #22341).
     const groupsById = new Map<string, string>();
-    for (const group of program.manualChunkGroups ?? []) {
+    const manualChunking = programChunking(program);
+    for (const group of manualChunking.kind === "manual" ? manualChunking.groups : []) {
       for (const moduleId of group.moduleIds) {
         groupsById.set(moduleId, group.name);
       }
@@ -2300,7 +2334,7 @@ function deriveTemplateName(
   hasOverlappingEntries: boolean,
   esmCarriersByCjsTarget: ReadonlyMap<string, ReadonlySet<string>>,
 ): MixedTemplateName | undefined {
-  if ((program.manualChunkGroups?.length ?? 0) > 0) {
+  if (programChunking(program).kind === "manual") {
     return "manual-chunk-separation";
   }
   if (program.entries.length > 1 && hasOverlappingEntries) {

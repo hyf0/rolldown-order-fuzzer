@@ -1,7 +1,9 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import { analyzeProgram } from "../src/analyzed-program.ts";
-import type { ModuleModel, ProgramModel } from "../src/model.ts";
+import type { BuildConfig, ProgramModel } from "../src/model.ts";
+import type { ModuleModel } from "../src/model.ts";
+import { buildConfigOf, DEFAULT_BUILD_CONFIG, programChunking } from "../src/model.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import { sideEffectFreeTransitiveProgram } from "./fixtures.ts";
 
@@ -2034,6 +2036,108 @@ describe("organic chunk groups (wave 6)", () => {
     );
     expect(errors).toContain(
       "organicChunkGroups[1].minShareCount: must be a finite non-negative number",
+    );
+  });
+});
+
+describe("persisted BuildConfig (W14a, schema 17)", () => {
+  function baseModules(): ProgramModel {
+    return {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "leaf" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        { id: "leaf", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+  }
+
+  const build: BuildConfig = {
+    chunking: { kind: "manual", groups: [{ name: "g", moduleIds: ["leaf"] }] },
+    includeDependenciesRecursively: false,
+    preserveEntrySignatures: "allow-extension",
+    lazyBarrel: true,
+    strictExecutionOrder: true,
+  };
+
+  test("buildConfigOf returns the persisted build when present", () => {
+    const program: ProgramModel = { ...baseModules(), build };
+    expect(buildConfigOf(program)).toBe(build);
+    expect(programChunking(program)).toEqual({
+      kind: "manual",
+      groups: [{ name: "g", moduleIds: ["leaf"] }],
+    });
+  });
+
+  test("buildConfigOf derives defaults + legacy chunking for a v16 program (no build)", () => {
+    // A legacy (schema-16) artifact carries top-level chunk arrays and NO `build`; the reader resolves
+    // it to defaults + the derived chunking, so an old artifact still replays.
+    const legacy: ProgramModel = {
+      ...baseModules(),
+      manualChunkGroups: [{ name: "legacy", moduleIds: ["leaf"] }],
+    };
+    expect(buildConfigOf(legacy)).toEqual({
+      ...DEFAULT_BUILD_CONFIG,
+      chunking: { kind: "manual", groups: [{ name: "legacy", moduleIds: ["leaf"] }] },
+    });
+    expect(programChunking(legacy).kind).toBe("manual");
+    // The legacy model still validates and round-trips (replay).
+    expect(validateProgramModel(analyzeProgram(legacy))).toEqual([]);
+  });
+
+  test("programChunking normalizes an empty groups union to automatic", () => {
+    for (const empty of [
+      { kind: "manual", groups: [] } as const,
+      { kind: "organic", groups: [] } as const,
+    ]) {
+      const program: ProgramModel = { ...baseModules(), build: { ...build, chunking: empty } };
+      expect(programChunking(program)).toEqual({ kind: "automatic" });
+    }
+  });
+
+  test("validates chunking through build.chunking (unknown module id is rejected)", () => {
+    const program: ProgramModel = {
+      ...baseModules(),
+      build: {
+        ...build,
+        chunking: { kind: "manual", groups: [{ name: "g", moduleIds: ["ghost"] }] },
+      },
+    };
+    expect(validateProgramModel(analyzeProgram(program))).toContain(
+      'manualChunkGroups[0].moduleIds[0]: unknown module id "ghost"',
+    );
+  });
+
+  test("accepts a valid build config, rejects strictExecutionOrder:false (W14a policy)", () => {
+    expect(validateProgramModel(analyzeProgram({ ...baseModules(), build }))).toEqual([]);
+    // seo:false is unrepresentable in W14a — it needs the W14b relaxed-order oracle, so the validator
+    // rejects a hand-crafted seo:false model BEFORE it can be compared with the full-order oracle.
+    const seoFalse: ProgramModel = {
+      ...baseModules(),
+      build: { ...build, chunking: { kind: "automatic" }, strictExecutionOrder: false },
+    };
+    expect(validateProgramModel(analyzeProgram(seoFalse))).toContain(
+      "build.strictExecutionOrder: must be true in W14a (a seo:false case needs the W14b relaxed-order oracle), received false",
+    );
+  });
+
+  test("rejects an invalid preserveEntrySignatures value", () => {
+    const program: ProgramModel = {
+      ...baseModules(),
+      build: {
+        ...build,
+        chunking: { kind: "automatic" },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        preserveEntrySignatures: "bogus" as any,
+      },
+    };
+    expect(validateProgramModel(analyzeProgram(program))).toContain(
+      'build.preserveEntrySignatures: invalid value "bogus"',
     );
   });
 });

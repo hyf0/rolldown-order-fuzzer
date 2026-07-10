@@ -342,8 +342,73 @@ describe("withRolldownBuild", () => {
           },
           { packageSpecifier: pathToFileURL(packagePath).href, onDemandWrapping },
         );
-        expect(JSON.parse(await readFile(capturePath, "utf8"))).toEqual({ onDemandWrapping });
+        // experimental now also carries `lazyBarrel` from the BuildConfig (default false for this
+        // legacy-shaped program with no persisted `build`).
+        expect(JSON.parse(await readFile(capturePath, "utf8"))).toEqual({
+          onDemandWrapping,
+          lazyBarrel: false,
+        });
       }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test("threads the persisted BuildConfig axes into rolldown input and output options (W14a)", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "order-adapter-build-config-"));
+    const packagePath = join(directory, "rolldown.mjs");
+    const capturePath = join(directory, "captured.json");
+    // A mock rolldown that captures the input experimental options AND the write() output options.
+    await writeFile(
+      packagePath,
+      [
+        "import fs from 'node:fs';",
+        "export async function rolldown(inputOptions) {",
+        "  return {",
+        "    async write(outputOptions) {",
+        `      fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
+        "        experimental: inputOptions.experimental,",
+        "        preserveEntrySignatures: inputOptions.preserveEntrySignatures,",
+        "        codeSplitting: outputOptions.codeSplitting,",
+        "        strictExecutionOrder: outputOptions.strictExecutionOrder,",
+        "      }));",
+        "      throw new Error('capture-only');",
+        "    },",
+        "    async close() {},",
+        "  };",
+        "}",
+        "",
+      ].join("\n"),
+    );
+    // A program whose persisted BuildConfig carries a manual chunk group (so codeSplitting has groups
+    // the global includeDependenciesRecursively applies to), idr:false, and lazyBarrel:true.
+    const base = singleEntryProgram();
+    const program: ProgramModel = {
+      ...base,
+      modules: [...base.modules, { id: "leaf", format: "esm", dependencies: [], events: [] }],
+      build: {
+        chunking: { kind: "manual", groups: [{ name: "g", moduleIds: ["leaf"] }] },
+        includeDependenciesRecursively: false,
+        preserveEntrySignatures: "allow-extension",
+        lazyBarrel: true,
+        strictExecutionOrder: true,
+      },
+    };
+    try {
+      await withRolldownBuild(
+        program,
+        renderProgram(analyzeProgram(program)),
+        async (): Promise<never> => {
+          throw new Error("build callback must not run");
+        },
+        { packageSpecifier: pathToFileURL(packagePath).href, onDemandWrapping: true },
+      );
+      const captured = JSON.parse(await readFile(capturePath, "utf8"));
+      expect(captured.experimental).toEqual({ onDemandWrapping: true, lazyBarrel: true });
+      expect(captured.preserveEntrySignatures).toBe("allow-extension");
+      expect(captured.strictExecutionOrder).toBe(true);
+      // The global includeDependenciesRecursively:false rides on the codeSplitting object.
+      expect(captured.codeSplitting.includeDependenciesRecursively).toBe(false);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1410,11 +1475,24 @@ describe("withRolldownBuild", () => {
         manualChunkGroups: [{ name: "shared", modulePaths: ["relative/module.mjs"] }],
       },
       { ...valid, output: { ...valid.output, format: "cjs" } },
-      { ...valid, output: { ...valid.output, strictExecutionOrder: false } },
+      // The build child accepts any BOOLEAN strictExecutionOrder (a non-boolean is invalid); the
+      // seo:true policy is a MODEL-validator rule (`validateBuildConfig`), not a request-parse rule.
+      { ...valid, output: { ...valid.output, strictExecutionOrder: "yes" } },
+      { ...valid, preserveEntrySignatures: "bogus" },
+      { ...valid, includeDependenciesRecursively: "yes" },
+      { ...valid, lazyBarrel: 1 },
     ];
     for (const value of invalid) {
       expect(() => parseBuildChildRequest(value)).toThrow(TypeError);
     }
+    // strictExecutionOrder:false is a VALID build-child request (rolldown accepts it); it is the model
+    // validator that forbids seo:false in W14a.
+    expect(() =>
+      parseBuildChildRequest({
+        ...valid,
+        output: { ...valid.output, strictExecutionOrder: false },
+      }),
+    ).not.toThrow();
 
     await expect(runBuildChildFromUnknown({ ...valid, version: 2 })).resolves.toMatchObject({
       status: "failure",
@@ -1977,6 +2055,8 @@ function validBuildChildRequest(): BuildChildRequest {
     packageSpecifier: "rolldown",
     input: { main: "/tmp/source/entry.mjs" },
     preserveEntrySignatures: "allow-extension",
+    includeDependenciesRecursively: true,
+    lazyBarrel: false,
     onDemandWrapping: true,
     bundleDirectory: "/tmp/bundle",
     manualChunkGroups: [{ name: "shared", modulePaths: ["/tmp/source/shared.mjs"] }],

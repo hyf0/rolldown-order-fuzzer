@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import { analyzeProgram } from "./analyzed-program.ts";
 import { failureSignatureOf } from "./case-evaluator.ts";
-import type { DependencyOperation, EventRecord, ProgramModel } from "./model.ts";
+import type { Chunking, DependencyOperation, EventRecord, ProgramModel } from "./model.ts";
+import { buildConfigOf, programChunking } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
 import { validateProgramModel } from "./validate-model.ts";
 
@@ -94,6 +95,15 @@ const ORGANIC_OPTIONAL_FIELDS = [
   "includeDependenciesRecursively",
 ] as const;
 
+/// Re-canonicalize a program onto a `build.chunking` union, preserving the other BuildConfig axes and
+/// clearing any legacy top-level chunk arrays so `build.chunking` is the single source of truth.
+function withChunking(program: ProgramModel, chunking: Chunking): ProgramModel {
+  const next: ProgramModel = { ...program, build: { ...buildConfigOf(program), chunking } };
+  delete (next as { manualChunkGroups?: unknown }).manualChunkGroups;
+  delete (next as { organicChunkGroups?: unknown }).organicChunkGroups;
+  return next;
+}
+
 /// Candidate edits, most aggressive first: drop a module (with every reference to it),
 /// then drop a single dependency, an entry, a schedule operation, a manual group, an event.
 export function* candidates(program: ProgramModel): Generator<ProgramModel> {
@@ -146,52 +156,54 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
       yield { ...program, schedule: program.schedule.filter((_, i) => i !== index) };
     }
   }
-  for (const [index] of (program.manualChunkGroups ?? []).entries()) {
-    const groups = (program.manualChunkGroups ?? []).filter((_, i) => i !== index);
-    if (groups.length > 0) {
-      yield { ...program, manualChunkGroups: groups };
-    } else {
-      // Dropping the SOLE group must DELETE the field, not spread the original program (which would
-      // retain `manualChunkGroups` and yield a candidate identical to the current one). An identical
-      // candidate keeps the same failure signature forever, so the greedy loop re-accepts it every pass
-      // and never terminates. Deleting the field makes the candidate genuinely smaller and progress.
-      const withoutGroups = { ...program };
-      delete (withoutGroups as { manualChunkGroups?: unknown }).manualChunkGroups;
-      yield withoutGroups;
+  // Chunking shrink over the resolved `build.chunking` union (or a legacy program's top-level arrays):
+  // drop a manual group (falling back to automatic when the last is gone), drop the organic config
+  // entirely, or shrink an organic group field-by-field toward the minimal lever the bug needs. Each
+  // candidate re-canonicalizes onto `build.chunking`; the greedy pass keeps it only if the failure kind
+  // is preserved, which also reveals whether the chunking is load-bearing.
+  const chunking = programChunking(program);
+  if (chunking.kind === "manual") {
+    for (const [index] of chunking.groups.entries()) {
+      const groups = chunking.groups.filter((_, i) => i !== index);
+      yield withChunking(
+        program,
+        groups.length > 0 ? { kind: "manual", groups } : { kind: "automatic" },
+      );
     }
   }
-  // Drop the organic chunk config entirely (falling back to default chunking). When the failure does
-  // not depend on the organic composition this simplifies the case; the greedy pass keeps it only if
-  // the failure kind is preserved, which also reveals whether the chunking is load-bearing.
-  const organicGroups = program.organicChunkGroups ?? [];
-  if (organicGroups.length > 0) {
-    const withoutOrganic = { ...program };
-    delete (withoutOrganic as { organicChunkGroups?: unknown }).organicChunkGroups;
-    yield withoutOrganic;
-  }
-  // Drop a WHOLE organic group (when more than one) or a SINGLE optional field of a group, so an
-  // organic config shrinks field-by-field toward the minimal lever the bug needs — not just
-  // all-or-nothing. Each candidate is validated and kept only if the failure kind is preserved.
-  for (const [groupIndex, group] of organicGroups.entries()) {
-    if (organicGroups.length > 1) {
-      yield {
-        ...program,
-        organicChunkGroups: organicGroups.filter((_, index) => index !== groupIndex),
-      };
-    }
-    for (const field of ORGANIC_OPTIONAL_FIELDS) {
-      if (group[field] === undefined) {
-        continue;
+  if (chunking.kind === "organic") {
+    yield withChunking(program, { kind: "automatic" });
+    for (const [groupIndex, group] of chunking.groups.entries()) {
+      if (chunking.groups.length > 1) {
+        yield withChunking(program, {
+          kind: "organic",
+          groups: chunking.groups.filter((_, index) => index !== groupIndex),
+        });
       }
-      const trimmed = { ...group };
-      delete (trimmed as Record<string, unknown>)[field];
-      yield {
-        ...program,
-        organicChunkGroups: organicGroups.map((candidate, index) =>
-          index === groupIndex ? trimmed : candidate,
-        ),
-      };
+      for (const field of ORGANIC_OPTIONAL_FIELDS) {
+        if (group[field] === undefined) {
+          continue;
+        }
+        const trimmed = { ...group };
+        delete (trimmed as Record<string, unknown>)[field];
+        yield withChunking(program, {
+          kind: "organic",
+          groups: chunking.groups.map((candidate, index) =>
+            index === groupIndex ? trimmed : candidate,
+          ),
+        });
+      }
     }
+  }
+  // BuildConfig axis shrink (W14a): try each rolled axis at its rolldown default, revealing whether it
+  // is load-bearing for the failure. `includeDependenciesRecursively:false` is an ingredient of the
+  // #9887 cross-chunk-cycle catch; `lazyBarrel:true` is the barrel-pruning axis.
+  const build = buildConfigOf(program);
+  if (build.includeDependenciesRecursively !== true) {
+    yield { ...program, build: { ...build, includeDependenciesRecursively: true } };
+  }
+  if (build.lazyBarrel !== false) {
+    yield { ...program, build: { ...build, lazyBarrel: false } };
   }
   // Remove ANY single event (not just the last), including a module's SOLE event — an irrelevant event
   // on an otherwise load-bearing module could not be dropped before, so the case never minimized past it.
@@ -596,12 +608,17 @@ function dropModule(program: ProgramModel, moduleId: string): ProgramModel {
     );
   const entries = program.entries.filter((entry) => entry.moduleId !== moduleId);
   const entryNames = new Set(entries.map((entry) => entry.name));
-  const groups = (program.manualChunkGroups ?? [])
-    .map((group) => ({
-      ...group,
-      moduleIds: group.moduleIds.filter((id) => id !== moduleId),
-    }))
-    .filter((group) => group.moduleIds.length > 0);
+  // Drop the module from any manual chunk group; organic groups reference no module id (rolldown decides
+  // composition) so they survive unchanged. The resulting chunking re-canonicalizes onto `build.chunking`,
+  // preserving the other BuildConfig axes for a faithful replay.
+  const chunking = programChunking(program);
+  let nextChunking: Chunking = chunking;
+  if (chunking.kind === "manual") {
+    const groups = chunking.groups
+      .map((group) => ({ ...group, moduleIds: group.moduleIds.filter((id) => id !== moduleId) }))
+      .filter((group) => group.moduleIds.length > 0);
+    nextChunking = groups.length > 0 ? { kind: "manual", groups } : { kind: "automatic" };
+  }
   return {
     modules,
     entries,
@@ -610,12 +627,7 @@ function dropModule(program: ProgramModel, moduleId: string): ProgramModel {
         ? !droppedRegistrations.has(op.registration)
         : entryNames.has(op.entry),
     ),
-    ...(groups.length > 0 ? { manualChunkGroups: groups } : {}),
-    // Organic chunk groups reference no module id (rolldown decides composition), so they survive a
-    // module drop unchanged and must be preserved for byte-identical replay.
-    ...(program.organicChunkGroups !== undefined
-      ? { organicChunkGroups: program.organicChunkGroups }
-      : {}),
+    build: { ...buildConfigOf(program), chunking: nextChunking },
   };
 }
 

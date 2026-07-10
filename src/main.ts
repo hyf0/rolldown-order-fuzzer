@@ -13,7 +13,7 @@ import {
   type FormatRegime,
   type GeneratedCase,
 } from "./generate.ts";
-import { programChunking } from "./model.ts";
+import { buildConfigOf, programChunking, type BuildConfig } from "./model.ts";
 import {
   DEFAULT_CASE_SIZE,
   executeGeneratedCase,
@@ -52,7 +52,7 @@ const UINT32_RANGE = 0x1_0000_0000;
 // per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 16 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 17 as const;
 
 export interface CampaignSummary {
   readonly casesRun: number;
@@ -387,6 +387,12 @@ interface FailureArtifactIdentity {
     readonly replayOptions: ReturnType<typeof createReplayMetadata>["options"];
     readonly runtimeIdentity: ObservedRuntimeIdentity;
     readonly buildOptions: typeof ROLLDOWN_BUILD_OPTIONS & {
+      // The persisted BuildConfig axes (W14a): a different config yields a distinct failure artifact.
+      // These override the hardcoded `ROLLDOWN_BUILD_OPTIONS` values they were moved out of.
+      readonly preserveEntrySignatures: BuildConfig["preserveEntrySignatures"];
+      readonly strictExecutionOrder: boolean;
+      readonly includeDependenciesRecursively: boolean;
+      readonly lazyBarrel: boolean;
       readonly codeSplitting:
         | true
         | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> }
@@ -424,6 +430,7 @@ function createFailureArtifactIdentity(
   caseIndex: number,
 ): FailureArtifactIdentity {
   const replay = createReplayMetadata(result);
+  const buildConfig = buildConfigOf(result.generated.program);
   const inputs: FailureArtifactIdentity["inputs"] = {
     schemaVersion: FAILURE_ARTIFACT_SCHEMA_VERSION,
     protocolVersion: EXECUTION_PROTOCOL_VERSION,
@@ -441,6 +448,10 @@ function createFailureArtifactIdentity(
     runtimeIdentity: result.runtimeIdentity,
     buildOptions: {
       ...ROLLDOWN_BUILD_OPTIONS,
+      preserveEntrySignatures: buildConfig.preserveEntrySignatures,
+      strictExecutionOrder: buildConfig.strictExecutionOrder,
+      includeDependenciesRecursively: buildConfig.includeDependenciesRecursively,
+      lazyBarrel: buildConfig.lazyBarrel,
       codeSplitting: effectiveCodeSplitting(result.generated.program),
     },
     sourceOutcome: result.sourceOutcome,

@@ -61,14 +61,19 @@ export interface BuildChildRequest {
   readonly version: typeof BUILD_CHILD_PROTOCOL_VERSION;
   readonly packageSpecifier: string;
   readonly input: Readonly<Record<string, string>>;
-  readonly preserveEntrySignatures: "allow-extension";
+  readonly preserveEntrySignatures: false | "strict" | "allow-extension" | "exports-only";
+  /// The GLOBAL `codeSplitting.includeDependenciesRecursively` fallback (W14a axis). Applied to the
+  /// `codeSplitting` object when the request carries groups; irrelevant to automatic chunking.
+  readonly includeDependenciesRecursively: boolean;
+  /// `experimental.lazyBarrel` — rolldown's barrel-pruning optimization (W14a axis).
+  readonly lazyBarrel: boolean;
   readonly onDemandWrapping: boolean;
   readonly bundleDirectory: string;
   readonly manualChunkGroups: readonly BuildChildManualChunkGroup[];
   readonly organicChunkGroups: readonly BuildChildOrganicChunkGroup[];
   readonly output: {
     readonly format: "esm";
-    readonly strictExecutionOrder: true;
+    readonly strictExecutionOrder: boolean;
     readonly entryFileNames: string;
     readonly chunkFileNames: string;
     readonly assetFileNames: string;
@@ -122,9 +127,20 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
       requireAbsolutePath(path, `build input ${JSON.stringify(name)}`),
     ]),
   );
-  if (request.preserveEntrySignatures !== "allow-extension") {
-    throw new TypeError("build preserveEntrySignatures must be allow-extension");
+  if (
+    request.preserveEntrySignatures !== false &&
+    request.preserveEntrySignatures !== "strict" &&
+    request.preserveEntrySignatures !== "allow-extension" &&
+    request.preserveEntrySignatures !== "exports-only"
+  ) {
+    throw new TypeError("build preserveEntrySignatures is invalid");
   }
+  const preserveEntrySignatures = request.preserveEntrySignatures;
+  const includeDependenciesRecursively = requireBoolean(
+    request.includeDependenciesRecursively,
+    "build includeDependenciesRecursively",
+  );
+  const lazyBarrel = requireBoolean(request.lazyBarrel, "build lazyBarrel");
   const bundleDirectory = requireAbsolutePath(request.bundleDirectory, "build bundleDirectory");
   const manualChunkGroups = requireArray(request.manualChunkGroups, "build manualChunkGroups").map(
     (value, index): BuildChildManualChunkGroup => {
@@ -181,14 +197,13 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     };
   });
   const output = requireRecord(request.output, "build output");
-  if (
-    output.format !== "esm" ||
-    output.strictExecutionOrder !== true ||
-    output.cleanDir !== false ||
-    output.minify !== false
-  ) {
+  if (output.format !== "esm" || output.cleanDir !== false || output.minify !== false) {
     throw new TypeError("build output constants are invalid");
   }
+  const strictExecutionOrder = requireBoolean(
+    output.strictExecutionOrder,
+    "build output.strictExecutionOrder",
+  );
   if (typeof request.onDemandWrapping !== "boolean") {
     throw new TypeError("build onDemandWrapping must be a boolean");
   }
@@ -196,14 +211,16 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier,
     input,
-    preserveEntrySignatures: "allow-extension",
+    preserveEntrySignatures,
+    includeDependenciesRecursively,
+    lazyBarrel,
     onDemandWrapping: request.onDemandWrapping,
     bundleDirectory,
     manualChunkGroups,
     organicChunkGroups,
     output: {
       format: "esm",
-      strictExecutionOrder: true,
+      strictExecutionOrder,
       entryFileNames: requireNonEmptyString(output.entryFileNames, "build output.entryFileNames"),
       chunkFileNames: requireNonEmptyString(output.chunkFileNames, "build output.chunkFileNames"),
       assetFileNames: requireNonEmptyString(output.assetFileNames, "build output.assetFileNames"),
@@ -298,7 +315,10 @@ export async function runBuildChild(
     const inputOptions: InputOptions = {
       input: request.input,
       preserveEntrySignatures: request.preserveEntrySignatures,
-      experimental: { onDemandWrapping: request.onDemandWrapping },
+      experimental: {
+        onDemandWrapping: request.onDemandWrapping,
+        lazyBarrel: request.lazyBarrel,
+      },
     };
     bundle = await (loaded.rolldown as RolldownFunction)(inputOptions);
     output = await bundle.write(createOutputOptions(request));
@@ -368,7 +388,15 @@ function parseOutputFile(
 /// automatic default (`codeSplitting: true`). The three are the distinct chunking-config modes and
 /// never coexist in one request (validated model-side).
 export function createOutputOptions(request: BuildChildRequest): OutputOptions {
-  const codeSplitting = organicCodeSplitting(request) ?? manualCodeSplitting(request);
+  const groups = organicCodeSplitting(request) ?? manualCodeSplitting(request);
+  // The GLOBAL `codeSplitting.includeDependenciesRecursively` fallback applies to any group that does
+  // not set it per-group; it is meaningless for automatic chunking (`true`), which carries no groups.
+  // (Current generated groups set it per-group, so the global is inert for them; it becomes load-bearing
+  // for the #9887 cross-chunk-cycle shape, whose groups omit the per-group setting.)
+  const codeSplitting =
+    groups === true
+      ? true
+      : { ...groups, includeDependenciesRecursively: request.includeDependenciesRecursively };
   return {
     dir: request.bundleDirectory,
     ...request.output,

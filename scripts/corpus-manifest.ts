@@ -44,7 +44,7 @@ import {
   type MixedTemplateName,
 } from "../src/generate.ts";
 import { analyzeProgram } from "../src/analyzed-program.ts";
-import { programChunking, type ProgramModel } from "../src/model.ts";
+import { buildConfigOf, programChunking, type ProgramModel } from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 
@@ -161,31 +161,36 @@ function templateCases(): readonly CaseManifest[] {
   return wanted.flatMap((name) => buckets.get(name) ?? []);
 }
 
-/// Strip every chunking config from a program, yielding an automatic-chunking base.
+/// Reset a program's chunking to automatic, yielding an automatic-chunking base whose other BuildConfig
+/// axes are preserved. Also clears any legacy top-level arrays so `build.chunking` is authoritative.
 function withAutomaticChunking(program: ProgramModel): ProgramModel {
-  const base = { ...program };
+  const base: ProgramModel = {
+    ...program,
+    build: { ...buildConfigOf(program), chunking: { kind: "automatic" } },
+  };
   delete (base as { manualChunkGroups?: unknown }).manualChunkGroups;
   delete (base as { organicChunkGroups?: unknown }).organicChunkGroups;
   return base;
 }
 
-/// Empty-array boundary cases: an automatic base plus an explicit empty `manualChunkGroups` /
-/// `organicChunkGroups`. Both build automatic, so `effectiveCodeSplitting` must record `true` — the
-/// durable guard that no reader records `{ groups: [] }` for an empty array again.
+/// Empty-groups boundary cases: an automatic base whose `build.chunking` is an empty manual / organic
+/// union. Both build automatic, so `effectiveCodeSplitting` (through `programChunking`) must record
+/// `true` — the durable guard that no reader records `{ groups: [] }` for an empty groups union again.
 function boundaryCases(): readonly CaseManifest[] {
   const cases: CaseManifest[] = [];
   for (let index = 0; index < BOUNDARY_CASES; index += 1) {
     const seed = BOUNDARY_SEED_BASE + index;
     const size = sampleCaseSize(new SeededRng(seed));
     const base = withAutomaticChunking(generateCase(seed, size, "mixed").program);
+    const baseBuild = buildConfigOf(base);
     cases.push(
       renderCase("boundary:empty-manual", seed, size, "random-mixed", {
         ...base,
-        manualChunkGroups: [],
+        build: { ...baseBuild, chunking: { kind: "manual", groups: [] } },
       }),
       renderCase("boundary:empty-organic", seed, size, "random-mixed", {
         ...base,
-        organicChunkGroups: [],
+        build: { ...baseBuild, chunking: { kind: "organic", groups: [] } },
       }),
     );
   }

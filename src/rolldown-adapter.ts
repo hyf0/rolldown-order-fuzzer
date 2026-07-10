@@ -18,7 +18,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { ProgramModel, ScheduleOperation } from "./model.ts";
-import { programChunking } from "./model.ts";
+import { buildConfigOf, programChunking } from "./model.ts";
 import {
   EXECUTION_PROTOCOL_VERSION,
   type ExecutionManifest,
@@ -53,10 +53,11 @@ const DEFAULT_BUILD_CHILD_TIMEOUT_MS = 60_000;
 const BUILD_CHILD_TERMINATION_GRACE_MS = 250;
 const BUILD_CHILD_FINAL_CLOSE_GRACE_MS = 250;
 
+/// The fixed Rolldown build constants that are NOT per-case axes. `preserveEntrySignatures` and
+/// `strictExecutionOrder` moved out of here into the persisted `BuildConfig` (W14a) — the adapter reads
+/// them from `buildConfigOf(program)` now, so a future axis can vary them without touching this constant.
 export const ROLLDOWN_BUILD_OPTIONS = {
-  preserveEntrySignatures: "allow-extension",
   format: "esm",
-  strictExecutionOrder: true,
   entryFileNames: "entries/[name].js",
   chunkFileNames: "chunks/[name].js",
   assetFileNames: "assets/[name][extname]",
@@ -672,6 +673,12 @@ async function buildWithChild(
   // (the other array empty) instead of both raw arrays — an empty `manualChunkGroups: []` no longer
   // leaks as a fourth state, matching what the child and the artifact identity resolve.
   const chunking = programChunking(program);
+  // The persisted BuildConfig (W14a) supplies the bundle-side axes the request threads to the child:
+  // preserveEntrySignatures (moved in from the hardcoded constant), the global
+  // includeDependenciesRecursively fallback, lazyBarrel, and strictExecutionOrder. `buildConfigOf`
+  // resolves a legacy (schema-16) model's config from its top-level arrays + defaults, so an old
+  // artifact still builds.
+  const build = buildConfigOf(program);
   const request: BuildChildRequest = {
     version: BUILD_CHILD_PROTOCOL_VERSION,
     packageSpecifier,
@@ -681,7 +688,9 @@ async function buildWithChild(
         resolve(sourceDirectory, requiredPath(rendered.entryPaths, entry.name, "entry")),
       ]),
     ),
-    preserveEntrySignatures: ROLLDOWN_BUILD_OPTIONS.preserveEntrySignatures,
+    preserveEntrySignatures: build.preserveEntrySignatures,
+    includeDependenciesRecursively: build.includeDependenciesRecursively,
+    lazyBarrel: build.lazyBarrel,
     onDemandWrapping,
     bundleDirectory,
     manualChunkGroups: (chunking.kind === "manual" ? chunking.groups : []).map((group) => ({
@@ -705,7 +714,7 @@ async function buildWithChild(
     })),
     output: {
       format: ROLLDOWN_BUILD_OPTIONS.format,
-      strictExecutionOrder: ROLLDOWN_BUILD_OPTIONS.strictExecutionOrder,
+      strictExecutionOrder: build.strictExecutionOrder,
       entryFileNames: ROLLDOWN_BUILD_OPTIONS.entryFileNames,
       chunkFileNames: ROLLDOWN_BUILD_OPTIONS.chunkFileNames,
       assetFileNames: ROLLDOWN_BUILD_OPTIONS.assetFileNames,

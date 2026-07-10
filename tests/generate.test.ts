@@ -11,6 +11,7 @@ import {
 } from "../src/generate.ts";
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
+import { buildConfigOf, programChunking } from "../src/model.ts";
 import { SeededRng } from "../src/rng.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 
@@ -615,18 +616,38 @@ describe("organic chunking axis (wave 6)", () => {
       const generated = generateCase(seed, 16);
       const chunkingTags = generated.coverageTags.filter((tag) => tag.startsWith("chunking:"));
       expect(chunkingTags).toHaveLength(1);
-      // A program never carries both group fields (validated), and the tag matches the fields.
-      const hasOrganic = (generated.program.organicChunkGroups?.length ?? 0) > 0;
-      const hasManual = (generated.program.manualChunkGroups?.length ?? 0) > 0;
-      expect(hasOrganic && hasManual).toBe(false);
-      if (hasOrganic) {
+      // The chunking tag matches the single resolved `build.chunking` mode (organic/manual/automatic).
+      const chunking = programChunking(generated.program);
+      if (chunking.kind === "organic") {
         expect(chunkingTags).toEqual(["chunking:organic"]);
-      } else if (hasManual) {
+      } else if (chunking.kind === "manual") {
         expect(chunkingTags).toEqual(["chunking:explicit"]);
       } else {
         expect(chunkingTags).toEqual(["chunking:default"]);
       }
     }
+  });
+
+  test("rolls the BuildConfig axes and tags both values of each (W14a)", () => {
+    const idrValues = new Set<string>();
+    const lazyValues = new Set<string>();
+    for (let seed = 0; seed < 300; seed += 1) {
+      const generated = generateCase(seed, 16);
+      const build = buildConfigOf(generated.program);
+      // Every case carries a persisted BuildConfig with the fixed axes at their W14a values.
+      expect(build.strictExecutionOrder).toBe(true);
+      expect(build.preserveEntrySignatures).toBe("allow-extension");
+      // Exactly one tag per rolled axis, matching the persisted value.
+      expect(generated.coverageTags).toContain(
+        `axis:include-dependencies-recursively:${String(build.includeDependenciesRecursively)}`,
+      );
+      expect(generated.coverageTags).toContain(`axis:lazy-barrel:${String(build.lazyBarrel)}`);
+      idrValues.add(String(build.includeDependenciesRecursively));
+      lazyValues.add(String(build.lazyBarrel));
+    }
+    // Both settings of each rolled axis appear across the seed range (a live axis, not a constant).
+    expect(idrValues).toEqual(new Set(["true", "false"]));
+    expect(lazyValues).toEqual(new Set(["true", "false"]));
   });
 
   test("organic chunking covers at least ~40% of random-mixed cases and stays valid", () => {
@@ -641,7 +662,8 @@ describe("organic chunking axis (wave 6)", () => {
       if (generated.coverageTags.includes("chunking:organic")) {
         organic += 1;
         // Every organic group has a name; the whole program validates.
-        for (const group of generated.program.organicChunkGroups ?? []) {
+        const chunking = programChunking(generated.program);
+        for (const group of chunking.kind === "organic" ? chunking.groups : []) {
           expect(group.name.length).toBeGreaterThan(0);
         }
         expect(validateProgramModel(generated.analyzed)).toEqual([]);

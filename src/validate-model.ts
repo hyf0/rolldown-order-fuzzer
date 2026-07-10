@@ -16,8 +16,15 @@ import type {
   ProgramModel,
   ValueRead,
 } from "./model.ts";
-import { moduleProfile } from "./model.ts";
+import { moduleProfile, programChunking } from "./model.ts";
 import type { ProgramFacts } from "./program-facts.ts";
+
+/// The `preserveEntrySignatures` values rolldown accepts. The generator only ever produces
+/// `"allow-extension"`; the rest are permitted so a future axis (or a hand-crafted model) is not
+/// rejected for a legal value.
+const VALID_PRESERVE_ENTRY_SIGNATURES: ReadonlySet<
+  false | "strict" | "allow-extension" | "exports-only"
+> = new Set([false, "strict", "allow-extension", "exports-only"] as const);
 
 const JAVASCRIPT_IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
 
@@ -118,6 +125,7 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
 
   const entriesByName = collectEntries(program.entries, modulesById, errors);
   validateSchedule(program, entriesByName, modulesById, facts, dynamicRegistrationOwners, errors);
+  validateBuildConfig(program, errors);
   validateManualChunkGroups(program, modulesById, errors);
   validateOrganicChunkGroups(program, errors);
 
@@ -1003,14 +1011,47 @@ function validateSchedule(
   }
 }
 
+/// The persisted BuildConfig axes (W14a). `strictExecutionOrder` must be `true` in W14a: every generated
+/// case keeps strict order, and a hand-crafted `seo:false` model is REJECTED here (the full-order oracle
+/// would false-positive on the accepted relaxed-order divergences a `seo:false` cell exhibits — that cell
+/// needs the weaker order oracle that lands in W14b, so `seo:false` is unrepresentable until then).
+/// `preserveEntrySignatures` must be one of rolldown's accepted values; the two rolled boolean axes must
+/// be booleans. Legacy (schema-16) models carry no `build` and resolve to defaults, so they pass.
+function validateBuildConfig(program: ProgramModel, errors: string[]): void {
+  const build = program.build;
+  if (build === undefined) {
+    return;
+  }
+  if (build.strictExecutionOrder !== true) {
+    errors.push(
+      `build.strictExecutionOrder: must be true in W14a (a seo:false case needs the W14b relaxed-order oracle), received ${String(build.strictExecutionOrder)}`,
+    );
+  }
+  if (!VALID_PRESERVE_ENTRY_SIGNATURES.has(build.preserveEntrySignatures)) {
+    errors.push(
+      `build.preserveEntrySignatures: invalid value ${quote(String(build.preserveEntrySignatures))}`,
+    );
+  }
+  if (typeof build.includeDependenciesRecursively !== "boolean") {
+    errors.push("build.includeDependenciesRecursively: must be a boolean");
+  }
+  if (typeof build.lazyBarrel !== "boolean") {
+    errors.push("build.lazyBarrel: must be a boolean");
+  }
+}
+
 function validateManualChunkGroups(
   program: ProgramModel,
   modulesById: ReadonlyMap<string, ModuleModel>,
   errors: string[],
 ): void {
+  const chunking = programChunking(program);
+  if (chunking.kind !== "manual") {
+    return;
+  }
   const groupNames = new Set<string>();
 
-  for (const [groupIndex, group] of (program.manualChunkGroups ?? []).entries()) {
+  for (const [groupIndex, group] of chunking.groups.entries()) {
     if (groupNames.has(group.name)) {
       errors.push(
         `manualChunkGroups[${groupIndex}].name: duplicate group name ${quote(group.name)}`,
@@ -1031,17 +1072,27 @@ function validateManualChunkGroups(
 
 /// The organic (size/share-driven) chunk groups: rolldown decides composition, so nothing references
 /// a module id. A program carries EITHER manual or organic groups, never both (the two are the
-/// distinct chunking-config modes). Each group needs a unique name, a compilable `test` regex source
-/// (when present), and finite non-negative numeric thresholds. Chunking is bundle-side only, so none
-/// of this can change source-run semantics.
+/// distinct chunking-config modes; a legacy schema-16 model with BOTH top-level arrays is rejected).
+/// Each group needs a unique name, a compilable `test` regex source (when present), and finite
+/// non-negative numeric thresholds. Chunking is bundle-side only, so none of this can change source-run
+/// semantics.
 function validateOrganicChunkGroups(program: ProgramModel, errors: string[]): void {
-  const organicGroups = program.organicChunkGroups ?? [];
-  if (organicGroups.length > 0 && (program.manualChunkGroups?.length ?? 0) > 0) {
+  // Legacy (schema-16) ambiguity: a program with no `build` but BOTH top-level arrays non-empty. A
+  // schema-17 program carries a single `build.chunking` union, so this can only fire on an old artifact.
+  if (
+    program.build === undefined &&
+    (program.organicChunkGroups?.length ?? 0) > 0 &&
+    (program.manualChunkGroups?.length ?? 0) > 0
+  ) {
     errors.push("a program may carry either manualChunkGroups or organicChunkGroups, not both");
   }
 
+  const chunking = programChunking(program);
+  if (chunking.kind !== "organic") {
+    return;
+  }
   const groupNames = new Set<string>();
-  for (const [groupIndex, group] of organicGroups.entries()) {
+  for (const [groupIndex, group] of chunking.groups.entries()) {
     const path = `organicChunkGroups[${groupIndex}]`;
     if (group.name.length === 0) {
       errors.push(`${path}.name: must not be empty`);
