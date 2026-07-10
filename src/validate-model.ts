@@ -144,10 +144,15 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
 /// or shrunk-invalid models.
 function validateExportDemand(plan: ExportDemandPlan, errors: string[]): void {
   for (const consumption of plan.consumptions) {
+    // Every demand — LIVE (read/called/captured) or LINK-REQUIRED (a named re-export Rolldown statically
+    // link-checks) — must resolve to a UNIQUE provider. An unsupplied link-required demand is exactly the
+    // model-authored MISSING_EXPORT channel this closes: a named re-export of a name a star-only barrel
+    // cannot forward now fails validation instead of rendering an invalid source.
+    const demandNoun = consumption.purpose === "link-required" ? "re-exported name" : "export";
     const where = `module ${quote(consumption.consumerModuleId)} demand ${quote(consumption.demandedName)} on ${quote(consumption.target)}`;
     if (consumption.supply.status === "unsupplied") {
       errors.push(
-        `${where}: the export is unsupplied — no provider (a star re-export never forwards \`default\`, and a barrel carrying a star synthesizes nothing locally)`,
+        `${where}: the ${demandNoun} is unsupplied — no provider (a star re-export never forwards \`default\`, and a barrel carrying a star synthesizes nothing locally)`,
       );
       continue;
     }
@@ -157,15 +162,19 @@ function validateExportDemand(plan: ExportDemandPlan, errors: string[]): void {
         .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0))
         .join(", ");
       errors.push(
-        `${where}: the export is ambiguous — it resolves to more than one definer (${origins}); duplicate named exports or two conflicting star re-exports`,
+        `${where}: the ${demandNoun} is ambiguous — it resolves to more than one definer (${origins}); duplicate named exports or two conflicting star re-exports`,
       );
       continue;
     }
-    // Supplied: the consumption's SHAPE must match the single FORM its resolved definer renders — the
-    // per-shape numeric/callable/object soundness read from the ONE plan's `renderedForm` instead of the
-    // old direct-target `resolveExportOrigin` capability walk. Folding a function's source text, calling a
-    // number, or comparing folded numbers for identity all surface here; callability-not-forwarded is the
-    // callable case (a call routed through a barrel to a numeric definer renders a value, not a function).
+    // Supplied AND live: the consumption's SHAPE must match the single FORM its resolved definer renders —
+    // the per-shape numeric/callable/object soundness read from the ONE plan's `renderedForm` instead of
+    // the old direct-target `resolveExportOrigin` capability walk. Folding a function's source text,
+    // calling a number, or comparing folded numbers for identity all surface here; callability-not-forwarded
+    // is the callable case. A LINK-REQUIRED demand is supply-checked only — a named re-export imposes no
+    // runtime form — so it is never shape-checked (its `shape` is an inert placeholder).
+    if (consumption.purpose !== "live") {
+      continue;
+    }
     const demand = plan.resolvedDemands.get(resolvedExportKey(consumption.supply.origin));
     if (demand !== undefined && formConsumptionShape(demand.renderedForm) !== consumption.shape) {
       errors.push(consumptionMismatchMessage(consumption, demand.renderedForm));
@@ -1037,6 +1046,19 @@ function validateBuildConfig(program: ProgramModel, errors: string[]): void {
   }
   if (typeof build.lazyBarrel !== "boolean") {
     errors.push("build.lazyBarrel: must be a boolean");
+  }
+  // The chunking discriminant must be one of the three modes. An unknown `kind` (e.g. `{ kind: "bogus" }`)
+  // otherwise falls through `programChunking` / the adapter switch to AUTOMATIC silently — a crafted or
+  // shrunk model would build a different chunking than it names. Reject it here so the union stays sound.
+  const chunking: unknown = build.chunking;
+  const chunkingKind =
+    typeof chunking === "object" && chunking !== null && "kind" in chunking
+      ? (chunking as { readonly kind: unknown }).kind
+      : undefined;
+  if (chunkingKind !== "automatic" && chunkingKind !== "manual" && chunkingKind !== "organic") {
+    errors.push(
+      `build.chunking: unknown chunking kind ${quote(String(chunkingKind))} (expected automatic, manual, or organic)`,
+    );
   }
 }
 

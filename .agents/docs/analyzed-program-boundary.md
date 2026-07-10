@@ -51,11 +51,16 @@ what is frozen when, and who consumes what.
   (propagated through re-export chains, in demand order) and which a DIRECT call import marked callable.
   Callability is marked only on a direct edge, never forwarded through a barrel — this is the ONE source
   of truth the renderer and the validator both obey.
-- **`consumptions`** — every readable consumer demand, each with its `ConsumptionShape`
-  (`numeric | callable | reference`) and its `ExportSupply` (the ACTUAL route, via
-  `ProgramFacts.resolveExportRoute`): `supplied` (a unique definer), `ambiguous` (duplicate named exports
-  or two conflicting stars), or `unsupplied` (a `default` import through a star-only barrel — a star never
-  forwards `default`, and a star-carrying barrel synthesizes nothing local).
+- **`consumptions`** — every demand on an export, each with its `ConsumptionShape`
+  (`numeric | callable | reference`), its `DemandPurpose` (`live` vs `link-required`, W14a.1), and its
+  `ExportSupply` (the ACTUAL route, via `ProgramFacts.resolveExportRoute`): `supplied` (a unique definer),
+  `ambiguous` (duplicate named exports or two conflicting stars), or `unsupplied` (a `default` import
+  through a star-only barrel — a star never forwards `default`, and a star-carrying barrel synthesizes
+  nothing local). A `live` demand (value import / namespace member / readable require) is READ at runtime,
+  so it is checked for BOTH supply and shape; a `link-required` demand (a named re-export Rolldown
+  statically link-checks but does not observe) is checked for supply ONLY (its shape is an inert
+  placeholder). Only `live` demands aggregate into `resolvedDemands`, so the shape/incompatibility
+  reasoning is unchanged.
 - **`resolvedDemands`** — per resolved definer export, the aggregation across ALL consumers: the definer's
   export shape, the rendered form (see below), the set of consumption shapes (a set larger than one is an
   incompatible-consumption conflict), and whether any route reaches it through a barrel.

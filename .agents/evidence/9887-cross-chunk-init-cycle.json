@@ -1,0 +1,282 @@
+{
+  "proof": "rolldown#9887 cross-chunk init-cycle live catch",
+  "generatedAt": "2026-07-10T16:18:00.790Z",
+  "head": "e770741bc6bfbc71db57e27ae9851457ab8de9d6",
+  "dirty": true,
+  "node": "v24.18.0",
+  "cases": 20,
+  "catchTag": "mechanism:barrel-cross-chunk-init-cycle",
+  "targets": {
+    "buggy": {
+      "path": "/tmp/w14-red-targets/pkgs/npm-latest/node_modules/rolldown/dist/index.mjs",
+      "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+    },
+    "fixed": {
+      "path": "/tmp/rolldown-strict-order-study/pr10104-runtime-snapshot/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    }
+  },
+  "accepted": true,
+  "cells": {
+    "buggy": {
+      "red": 20,
+      "redInitFamily": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"TypeError\",\"init_module_0003 is not a function\"]",
+          "tagged": true
+        }
+      ]
+    },
+    "fixed": {
+      "red": 0,
+      "redInitFamily": 0,
+      "green": 20,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass",
+          "tagged": true
+        }
+      ]
+    }
+  }
+}

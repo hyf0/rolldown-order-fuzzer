@@ -51,8 +51,9 @@ the differential oracle stays valid.
 - **Smoke-verified honored by the frozen snapshot.** Both `includeDependenciesRecursively` (chunk-graph
   changes) and `lazyBarrel` (wrapped-chunk changes under strict order) produce different snapshot output
   when toggled, so both are real axes worth rolling. The GLOBAL `includeDependenciesRecursively` rides on
-  the `codeSplitting` object; current generated groups set it per-group, so the global is inert for them —
-  it becomes load-bearing for the #9887 shape (whose groups let the global control it).
+  the `codeSplitting` object. As of **W14a.1** manual groups NEVER set it per-group, so this persisted
+  global is the SINGLE source of the effective value for every manual-group case (the earlier build did
+  set a per-group `false` that shadowed the global — blocker 1 below).
 - **RNG placement.** The two boolean axes roll at the END of `finalizeProgram` (after every
   source-affecting roll), so the rendered-source corpus is byte-identical — the axes never perturbed a
   single earlier draw (`corpus:check` stayed 458 green through steps 2–6). Coverage tags
@@ -69,15 +70,16 @@ barrel-coverage spec) that upgrades family-A/B from shared-chunk stand-ins to re
 side-effect-free directory rendering (`render.ts` `SIDE_EFFECT_FREE_DIRECTORY`) already proves fixture-local
 `package.json` resolution works under the build child.
 
-## 4. Plan enrichment — RESIDUAL (deferred to W14b)
+## 4. Plan enrichment — PARTIALLY LANDED (W14a.1), rest deferred to W14b
 
-NOT landed in this pass. Intended: (a) a demand purpose/liveness dimension in `ExportDemandPlan`
-distinguishing link-required from live/observed demand (foundation for W14b dead-hop witnesses; NO
-`deadHop` flag anywhere); (b) `RouteHop` provenance carrying each hop's target module + exported/imported
-name pair; (c) a NEW `export * as ns from` dependency operation (M7 of the spec) through model /
-generation / render / validation / plan routes / shrink / tags. All via the plan, keeping the boundary
-guard tests passing. The [AnalyzedProgram boundary](./analyzed-program-boundary.md) is the seam these
-extend.
+Item (a) LANDED EARLY in **W14a.1** (blocker 2 below): the `ExportDemandPlan`'s `ConsumptionRecord` now
+carries a `purpose` dimension (`live` vs `link-required`) — named re-exports are `link-required` demands,
+supply-checked but not shape-checked — so an unsupplied named re-export is rejected at validation (NO
+`deadHop` flag, no validator-side route walk; the purpose lives on the ONE plan). Still deferred to W14b:
+(b) `RouteHop` provenance carrying each hop's target module + exported/imported name pair; (c) a NEW
+`export * as ns from` dependency operation (M7 of the spec) through model / generation / render /
+validation / plan routes / shrink / tags. All via the plan, keeping the boundary guard tests passing. The
+[AnalyzedProgram boundary](./analyzed-program-boundary.md) is the seam these extend.
 
 ## 5. Build/link-failure verdict class (`program-run.ts`)
 
@@ -138,3 +140,107 @@ its regression-guard machinery.)
 regenerated at the two labeled points only); `npm run catching-power` in-band (23.7%); a 6000-case
 validate sweep across all regimes 0 rejections; the #9887 directed campaign RED 20/20 (npm 1.1.5) /
 GREEN 20/20 (snapshot).
+
+## W14a.1 — codex review patch round (three blockers + adjacent notes)
+
+The codex review of W14a cleared the renderer array-order fix, the #9887 directed shape, and the golden
+discipline, but flagged THREE blockers plus cheaper adjacent notes. This round closes all three and folds
+in the notes. It is behavior-affecting only where noted (blocker 1); the golden regenerated ONCE, labeled
+`golden: IDR single-source`.
+
+### Blocker 1 — manual groups shadowed the persisted IDR axis
+
+`createOutputOptions` (`rolldown-build-child.ts`) hardcoded `includeDependenciesRecursively: false` on
+EVERY manual group, so rolldown consumed the group value and IGNORED the persisted global
+`build.includeDependenciesRecursively` — the tags/artifact/golden recorded the global while the build ran
+the constant. FIX: the child-side per-group override is REMOVED — manual groups omit the field, so the
+global fallback (set from the persisted `BuildConfig`) is the SINGLE source of the effective value.
+v16 replay is preserved by `buildConfigOf` (`model.ts`): a LEGACY (schema-16, no `build`) manual-group
+artifact now resolves its global IDR to `false` (the old effective build), NOT the rolldown default
+`true` in `DEFAULT_BUILD_CONFIG` — automatic/organic legacy configs keep `true` (the hardcode never
+applied to them). The RULE: `DEFAULT_BUILD_CONFIG.includeDependenciesRecursively` stays `true` (rolldown's
+real default); the legacy-manual override lives in `buildConfigOf`. Golden delta: exactly the 25
+`template:manual-chunk-separation` cases, `buildAxes.includeDependenciesRecursively` `true → false` (the
+manifest now records the EFFECTIVE global; the rendered files and `codeSplitting` are byte-identical, and
+every other case is unchanged). Generated manual-group cases whose persisted global is `true` now actually
+BUILD with `true` (previously forced `false`) — a real effective-build change invisible to the
+source-only golden, so the #9887 proof was re-run (below) to confirm the catch still holds now that the
+control is the persisted axis, not the hardcode.
+
+### Blocker 2 — named re-exports were not supply-validated
+
+`buildExportDemandPlan` recorded value imports / namespace members / readable requires as consumptions but
+OMITTED named re-exports, so `validateExportDemand` never supply-checked them — a model-authored
+`MISSING_EXPORT` channel (`export { default as x } from` a star-only barrel rendered an invalid source
+Rolldown link-errored on, then classified as a catch). FIX: the ONE `ExportDemandPlan` gained a demand
+PURPOSE dimension (`live` vs `link-required`) on `ConsumptionRecord`; named re-exports are `link-required`
+demands (supply-checked, never shape-checked — a re-export imposes no runtime form, and only `live`
+demands aggregate into `resolvedDemands`, keeping the shape reasoning byte-identical). `validateExportDemand`
+now rejects an unsupplied/ambiguous link-required name (crafted test pins the codex probe). The
+requested-name FIXPOINT (`analyzed-program.ts`) no longer forwards `default` through a star, agreeing with
+the supply rule in `ProgramFacts.#collectDefiners` (`program-facts.ts`) — the two projections had drifted.
+NO validator-side route walk. The 6000-case sweep confirms zero generated-corpus rejections (the generator
+never emits the illegal shape).
+
+### Blocker 3 — link detection accepted harness failures
+
+`buildFailureVerdict` (`program-run.ts`) called `detectLinkFailure` for EVERY non-panic adapter failure,
+so a harness failure whose message merely contained `MISSING_EXPORT` (e.g. a package that failed to LOAD,
+`status: harness-error`, `stage: load-package`) was mis-classified as `build-failure:link` — a false catch
+poisoning artifacts/shrink/dedup. FIX: link detection is GATED to `status === "build-error" && stage ===
+"build"` (the only path that reaches the linker). Regression test pins the harness-error/load-package
+probe.
+
+### Adjacent notes folded in
+
+- **#9887 re-run + committed evidence.** `scripts/cross-chunk-init-cycle-catch.ts` now validates
+  `CASES > 0` (a `CASES=0` vacuous pass is rejected) and FAILS on any `other` signature (a stray/untagged
+  verdict no longer slips through), and writes a machine-readable evidence file
+  (`.agents/evidence/9887-cross-chunk-init-cycle.json`: per-seed verdicts, HEAD + dirty status, node
+  version, target `dist` sha256s, signature histogram). The 4-module variant (consumer removed) builds
+  GREEN on rolldown@1.1.5 — the consumer/witness is load-bearing — so the "minimal 5-module repro" claim
+  stands (confirmed empirically, not just by the module count).
+- **Mechanism tag tightened.** `mechanism:barrel-cross-chunk-init-cycle` (`generate.ts`) now requires an
+  actual grouped QUOTIENT cycle (the ESM target's chunk reaches back to the requiring chunk), not merely a
+  cross-group CJS→ESM require — codex's acyclic 2-module probe no longer receives it, while the #9887 shape
+  still does.
+- **Configuration/freeze seam for fixed templates.** Every fixed template now routes through
+  `configureFixedTemplate` (`generate.ts`), persisting its resolved `BuildConfig` on `program.build` so a
+  persisted object is GENUINELY present on every case (not left to the `buildConfigOf` fallback);
+  `manual-chunk-separation` expresses its split on `build.chunking` instead of a legacy top-level
+  `manualChunkGroups` array. Corpus-neutral apart from blocker 1's IDR delta; the manifest/axes record the
+  effective config (a test asserts persisted === effective).
+- **`validateBuildConfig` rejects an unknown `chunking.kind`** (`{ kind: "bogus" }` no longer falls
+  through to automatic silently) + test.
+- **Link identity + shrink normalization.** `detectLinkFailure` returns an explicit `unknown`-identity
+  variant (`build-failure:link:unknown`, a stable identity-free signature) instead of a fabricated
+  `("<unknown>", <whole message>)` pair; the shrink signature normalizer also canonicalizes rendered
+  module FILENAMES (`module-NNNN.mjs`) by the same numeric identity, so a renumbering shrink is accepted
+  (+ regression test).
+
+### Re-run #9887 proof (post blocker-1)
+
+Re-run at 20 seeds vs the npm rolldown@1.1.5 tarball and the frozen PR-10104 snapshot, AFTER blocker 1
+made the persisted `includeDependenciesRecursively: false` the effective control (previously the child
+hardcode forced it): **RED 20/20 (init-family) on npm 1.1.5, GREEN 20/20 on the snapshot** — the catch
+holds on the persisted axis. Machine-readable evidence committed at
+`.agents/evidence/9887-cross-chunk-init-cycle.json`.
+
+### W14a.1 verification
+
+`vp check` + `vp test` (331 tests, +6 regression tests) green; `corpus:check` 458 byte-identical to the
+regenerated `golden: IDR single-source`; a 6000-case validate sweep 0 rejections; `npm run catching-power`
+in-band (23.7%, unchanged from the pre-round baseline); the #9887 directed campaign RED 20/20 / GREEN
+20/20 (evidence file committed).
+
+## W14b must-not-repeat list (carried verbatim from the codex W14a findings)
+
+The next wave inherits these constraints in-repo so the W14a.1 fixes are not undone:
+
+- No child-side option overrides absent from persisted BuildConfig.
+- Fixed/directed builders must not bypass the common configuration/freeze/analyze seam.
+- No deadHop flag, no validator-only supply walk — link/live purpose lives on the canonical plan.
+- Don't extend shrink's manual barrel switch (shrink.ts:433); enrich canonical RouteHop (program-facts.ts:38) with target + name mapping.
+- No parallel namespace-member representation for `export * as ns` — extend ValueRead to ONE canonical member path threaded through render/validation/plan/tags/shrink.
+- No second CLI/evaluator switch for seo:false — one relaxed-order oracle policy derived from persisted BuildConfig, identical in campaign/replay/shrink/identity/tags.
+- Package model replaces (migrates) module-level sideEffectFree + synthetic directory via one legacy-normalization seam — never two live representations; package sideEffects metadata belongs to the package/layout model, NOT BuildConfig.

@@ -24,15 +24,38 @@ export interface AnalyzedProgram {
 ///   is a type error.
 export type ConsumptionShape = "numeric" | "callable" | "reference";
 
-/// One consumer's demand on ONE readable edge: the demanding module, the edge, the direct-target export
-/// it names, how it consumes it, and the supply resolution of that name from the direct target (through
-/// barrels). The route provenance is the ACTUAL resolution, not a guessed first route.
+/// WHY a name is demanded on a target — the purpose dimension the validator uses to decide what soundness
+/// to enforce:
+///
+/// - `live` — the name is READ / CALLED / CAPTURED at runtime (a value import, namespace member, or
+///   readable require). Checked for SUPPLY (a unique provider) AND for SHAPE (its `shape` must match the
+///   definer's rendered form).
+/// - `link-required` — the name is STATICALLY LINK-CHECKED only, never read: a named re-export
+///   (`export { s as e } from`) forwards the name, so Rolldown's linker requires the target to export
+///   `s`, but the barrel itself observes no value. Checked for SUPPLY only — a re-export imposes no
+///   runtime form, so it never constrains (or aggregates into) the definer's shape.
+///
+/// The distinction is what closes the model-authored `MISSING_EXPORT` channel: a named re-export of an
+/// unsupplied name (e.g. `export { default as x } from` a star-only barrel) is now REJECTED at validation
+/// as an unsupplied link-required demand, instead of rendering an invalid source Rolldown then link-errors
+/// on. See `.agents/docs/build-panic-verdict.md`.
+export type DemandPurpose = "live" | "link-required";
+
+/// One consumer's demand on ONE edge: the demanding module, the edge, the direct-target export it names,
+/// its PURPOSE (live vs link-required), how a live consumer uses it, and the supply resolution of that
+/// name from the direct target (through barrels). The route provenance is the ACTUAL resolution, not a
+/// guessed first route.
 export interface ConsumptionRecord {
   readonly consumerModuleId: string;
   readonly dependency: DependencyOperation;
   readonly target: string;
   readonly demandedName: string;
+  /// How a LIVE consumer uses the value. INERT for a `link-required` demand (a named re-export imposes
+  /// no runtime form): the shape-soundness check and the resolved-demand aggregation both run only for
+  /// `live` purpose, so a link-required record's shape is never consulted. Held as `numeric` (a neutral
+  /// placeholder) rather than made optional so the field stays a plain `ConsumptionShape` everywhere.
   readonly shape: ConsumptionShape;
+  readonly purpose: DemandPurpose;
   readonly supply: ExportSupply;
 }
 
@@ -205,6 +228,7 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
     target: string,
     demandedName: string,
     shape: ConsumptionShape,
+    purpose: DemandPurpose,
   ): void => {
     consumptions.push({
       consumerModuleId,
@@ -212,6 +236,7 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
       target,
       demandedName,
       shape,
+      purpose,
       supply: facts.resolveExportRoute(target, demandedName),
     });
   };
@@ -227,13 +252,29 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
             dependency.target,
             member,
             callMembers.has(member) ? "callable" : "numeric",
+            "live",
           );
         }
         continue;
       }
+      if (dependency.kind === "esm-reexport-named") {
+        // A named re-export forwards `sourceName` from its target: Rolldown statically link-checks that
+        // the target exports it, but nothing READS the value here. A LINK-REQUIRED demand — supply-checked
+        // (a unique provider must exist), never shape-checked (a re-export imposes no runtime form). The
+        // `numeric` shape is the inert placeholder link-required demands never consult.
+        push(
+          module.id,
+          dependency,
+          dependency.target,
+          dependency.sourceName,
+          "numeric",
+          "link-required",
+        );
+        continue;
+      }
       const demand = directDemandOf(dependency);
       if (demand !== undefined) {
-        push(module.id, dependency, dependency.target, demand.name, demand.shape);
+        push(module.id, dependency, dependency.target, demand.name, demand.shape, "live");
       }
     }
   }
@@ -241,7 +282,10 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
   const modulesById = new Map(program.modules.map((module) => [module.id, module]));
   const resolvedDemands = new Map<string, ResolvedExportDemand>();
   for (const consumption of consumptions) {
-    if (consumption.supply.status !== "supplied") {
+    // Only LIVE consumptions aggregate a rendered-form / shape here — a link-required named re-export
+    // observes no value, so it contributes no consumption shape (keeping the aggregation, and the
+    // incompatible-consumption diagnostic it drives, byte-identical to before the purpose dimension).
+    if (consumption.supply.status !== "supplied" || consumption.purpose !== "live") {
       continue;
     }
     const { origin, hops } = consumption.supply;
@@ -370,7 +414,11 @@ function collectRequestedExports(program: ProgramModel): {
   }
 
   // Fixpoint: a `export * from target` barrel forwards every name demanded on it (that a named
-  // re-export does not already provide) to its target, so demand reaches the defining module.
+  // re-export does not already provide) to its target, so demand reaches the defining module. `default`
+  // is NEVER forwarded — a star re-export does not re-export the default export (ES semantics) — so this
+  // AGREES with the supply rule in `ProgramFacts.#collectDefiners` (`program-facts.ts`), which also skips
+  // `default` through stars. Forwarding it here would let the renderer synthesize a `default` on a definer
+  // the supply route reports as unsupplied — the two projections disagreeing, the drift this closes.
   let changed = true;
   while (changed) {
     changed = false;
@@ -389,7 +437,7 @@ function collectRequestedExports(program: ProgramModel): {
       const demandedHere = requestedExports.get(module.id);
       for (let index = 0; index < (demandedHere?.length ?? 0); index += 1) {
         const name = demandedHere?.[index];
-        if (name === undefined || namedProvided.has(name)) {
+        if (name === undefined || name === "default" || namedProvided.has(name)) {
           continue;
         }
         for (const starTarget of starTargets) {

@@ -319,6 +319,59 @@ describe("runCampaign", () => {
     });
   });
 
+  test("does NOT classify a harness-stage MISSING_EXPORT as a link failure (W14a.1)", () => {
+    // A package that fails to LOAD with a message that merely CONTAINS MISSING_EXPORT is an environment
+    // problem, never a Rolldown linker bug. Link detection is gated to a genuine BUILD-stage build error;
+    // a harness-error at stage load-package keeps its stage identity, so the false `build-failure:link` no
+    // longer poisons the artifacts / shrink / dedup (the CLI exit code already recovered separately).
+    const bundleOutcome = {
+      status: "not-run",
+      reason: "adapter-failure",
+      adapterFailure: {
+        status: "harness-error",
+        stage: "load-package",
+        packageSpecifier: "rolldown",
+        error: {
+          name: "Error",
+          message:
+            '[MISSING_EXPORT] "RESET" is not exported by "node_modules/@griffel/core/src/index.js".',
+        },
+      },
+    } as const satisfies BundleNotRunOutcome;
+
+    const verdict = classifyCampaignVerdict(ok([event("entry", 1)]), bundleOutcome);
+    expect(verdict.kind).toBe("build-failure");
+    if (verdict.kind === "build-failure") {
+      expect(verdict.reason).not.toBe("link");
+      expect(verdict.reason).toBe("load-package");
+      expect(verdict.signature.startsWith("build-failure:harness-error:load-package:")).toBe(true);
+    }
+  });
+
+  test("classifies a build-stage MISSING_EXPORT with no parseable identity as build-failure:link:unknown", () => {
+    // A link failure whose message carries only the MISSING_EXPORT code (no `"X" is not exported by "Y"`
+    // phrase) is still a link failure, but with no parseable (export, module) identity. It gets a STABLE
+    // identity-free signature — not the old fabricated `("<unknown>", <whole message>)` pair whose volatile
+    // message defeated deduplication.
+    const bundleOutcome = {
+      status: "not-run",
+      reason: "adapter-failure",
+      adapterFailure: {
+        status: "build-error",
+        stage: "build",
+        packageSpecifier: "rolldown",
+        error: { name: "MISSING_EXPORT", message: "the linker could not resolve an export" },
+      },
+    } as const satisfies BundleNotRunOutcome;
+
+    const verdict = classifyCampaignVerdict(ok([event("entry", 1)]), bundleOutcome);
+    expect(verdict).toEqual({
+      kind: "build-failure",
+      reason: "link",
+      signature: "build-failure:link:unknown",
+    });
+  });
+
   test("keeps source invalidity ahead of an adapter failure", () => {
     const bundleOutcome = {
       status: "not-run",

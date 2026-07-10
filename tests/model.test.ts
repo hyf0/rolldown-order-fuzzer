@@ -1580,6 +1580,46 @@ describe("validateProgramModel", () => {
       expect(() => renderProgram(analyzeProgram(program))).toThrow(/Cannot render invalid program/);
     });
 
+    test("rejects a named re-export of default through a star-only barrel (link-required, unsupplied)", () => {
+      // The model-authored MISSING_EXPORT channel W14a.1 closes: `export { default as x } from` a star-only
+      // barrel. The named re-export demands `default` on the barrel; a star never forwards `default` and a
+      // barrel carrying a star synthesizes nothing local, so the demand is unsupplied. Named re-exports are
+      // now LINK-REQUIRED demands on the ONE plan (checked for supply), so this fails validation — before,
+      // named re-exports were omitted from the plan, so the invalid source reached Rolldown and link-errored
+      // (a model-authored `build-failure:link` false positive). The fixpoint no longer forwards `default`
+      // through the star either, agreeing with the supply rule.
+      const program = {
+        modules: [
+          {
+            id: "facade",
+            format: "esm",
+            dependencies: [
+              {
+                kind: "esm-reexport-named",
+                target: "barrel",
+                sourceName: "default",
+                exportedName: "x",
+              },
+            ],
+            events: [],
+          },
+          {
+            id: "barrel",
+            format: "esm",
+            dependencies: [{ kind: "esm-reexport-star", target: "def" }],
+            events: [],
+          },
+          leaf("def"),
+        ],
+        entries: [{ name: "main", moduleId: "facade" }],
+        schedule: [{ kind: "import-entry", entry: "main" }],
+      } satisfies ProgramModel;
+      expect(
+        validateProgramModel(analyzeProgram(program)).some((error) => error.includes("unsupplied")),
+      ).toBe(true);
+      expect(() => renderProgram(analyzeProgram(program))).toThrow(/Cannot render invalid program/);
+    });
+
     test("rejects a name provided by two star re-exports (ambiguous)", () => {
       const program = {
         modules: [
@@ -2080,20 +2120,30 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     });
   });
 
-  test("buildConfigOf derives defaults + legacy chunking for a v16 program (no build)", () => {
-    // A legacy (schema-16) artifact carries top-level chunk arrays and NO `build`; the reader resolves
-    // it to defaults + the derived chunking, so an old artifact still replays.
-    const legacy: ProgramModel = {
+  test("buildConfigOf derives a v16 program's config: legacy manual resolves IDR to false (W14a.1)", () => {
+    // A legacy (schema-16) artifact carries top-level chunk arrays and NO `build`; the reader resolves it
+    // to defaults + the derived chunking, so an old artifact still replays. A legacy MANUAL-group artifact
+    // historically built with the per-group `includeDependenciesRecursively: false` the child hardcoded on
+    // every manual group (W14a.1 made that value the persisted single source), so its resolved global is
+    // `false` — NOT the rolldown default `true` in DEFAULT_BUILD_CONFIG.
+    const legacyManual: ProgramModel = {
       ...baseModules(),
       manualChunkGroups: [{ name: "legacy", moduleIds: ["leaf"] }],
     };
-    expect(buildConfigOf(legacy)).toEqual({
+    expect(buildConfigOf(legacyManual)).toEqual({
       ...DEFAULT_BUILD_CONFIG,
       chunking: { kind: "manual", groups: [{ name: "legacy", moduleIds: ["leaf"] }] },
+      includeDependenciesRecursively: false,
     });
-    expect(programChunking(legacy).kind).toBe("manual");
+    expect(programChunking(legacyManual).kind).toBe("manual");
     // The legacy model still validates and round-trips (replay).
-    expect(validateProgramModel(analyzeProgram(legacy))).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(legacyManual))).toEqual([]);
+
+    // A legacy AUTOMATIC artifact keeps the rolldown default `true` — the per-group hardcode never applied
+    // (automatic carries no groups), so the reconciliation is manual-only.
+    const legacyAutomatic: ProgramModel = { ...baseModules() };
+    expect(buildConfigOf(legacyAutomatic).chunking).toEqual({ kind: "automatic" });
+    expect(buildConfigOf(legacyAutomatic).includeDependenciesRecursively).toBe(true);
   });
 
   test("programChunking normalizes an empty groups union to automatic", () => {
@@ -2144,6 +2194,20 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     };
     expect(validateProgramModel(analyzeProgram(program))).toContain(
       'build.preserveEntrySignatures: invalid value "bogus"',
+    );
+  });
+
+  test("rejects an unknown chunking kind discriminant", () => {
+    // A `{ kind: "bogus" }` chunking otherwise falls through `programChunking` / the adapter switch to
+    // AUTOMATIC silently — a crafted or shrunk model would build a different chunking than it names. The
+    // validator rejects the unknown discriminant so the union stays sound.
+    const program: ProgramModel = {
+      ...baseModules(),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      build: { ...build, chunking: { kind: "bogus" } as any },
+    };
+    expect(validateProgramModel(analyzeProgram(program))).toContain(
+      'build.chunking: unknown chunking kind "bogus" (expected automatic, manual, or organic)',
     );
   });
 });

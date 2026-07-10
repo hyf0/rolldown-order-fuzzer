@@ -391,8 +391,9 @@ export function createOutputOptions(request: BuildChildRequest): OutputOptions {
   const groups = organicCodeSplitting(request) ?? manualCodeSplitting(request);
   // The GLOBAL `codeSplitting.includeDependenciesRecursively` fallback applies to any group that does
   // not set it per-group; it is meaningless for automatic chunking (`true`), which carries no groups.
-  // (Current generated groups set it per-group, so the global is inert for them; it becomes load-bearing
-  // for the #9887 cross-chunk-cycle shape, whose groups omit the per-group setting.)
+  // Manual groups always omit their own value (W14a.1), so this global — resolved from the persisted
+  // `BuildConfig` — is the single source of the effective IDR for them (load-bearing for the #9887
+  // cross-chunk-cycle shape). Organic groups may still set it per-group, overriding this fallback.
   const codeSplitting =
     groups === true
       ? true
@@ -427,12 +428,15 @@ function organicCodeSplitting(request: BuildChildRequest): { groups: CodeSplitti
 }
 
 function manualCodeSplitting(request: BuildChildRequest): true | { groups: CodeSplittingGroup[] } {
+  // Manual groups omit their own `includeDependenciesRecursively` so the GLOBAL fallback that
+  // `createOutputOptions` sets from the persisted `BuildConfig` is the single source of the effective
+  // value (W14a.1 removed the per-group `false` hardcode that used to shadow the global on every manual
+  // group, decoupling the persisted axis from what rolldown actually built).
   const groups = request.manualChunkGroups.map((group): CodeSplittingGroup => {
     const paths = new Set(group.modulePaths.map((path) => resolve(path)));
     return {
       name: group.name,
       test: (moduleId) => paths.has(resolve(moduleId)),
-      includeDependenciesRecursively: false,
     };
   });
   return groups.length === 0 ? true : { groups };

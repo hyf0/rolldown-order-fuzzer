@@ -378,13 +378,23 @@ function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailure
   // identity is the missing (export, module) pair, not the volatile full message, so a link-time
   // regression deduplicates to one signature. Only fires on a genuine linker bug — the plan's
   // supply-status validation rejects any unsupplied model before it ever reaches the build.
-  const link = detectLinkFailure(failure.error.name, failure.error.message);
-  if (link !== undefined) {
-    return {
-      kind: "build-failure",
-      reason: "link",
-      signature: `build-failure:link:${JSON.stringify([link.exportName, link.module])}`,
-    };
+  //
+  // GATED to a genuine BUILD-stage build error. A HARNESS failure (a package that fails to LOAD with a
+  // message that merely contains `MISSING_EXPORT`, stage `load-package`) is an environment problem, never
+  // a Rolldown linker bug — classifying it as `link` would poison the artifacts/shrink/dedup with a false
+  // catch. Only `status: "build-error"` at `stage: "build"` reaches the linker at all.
+  if (failure.status === "build-error" && failure.stage === "build") {
+    const link = detectLinkFailure(failure.error.name, failure.error.message);
+    if (link !== undefined) {
+      return {
+        kind: "build-failure",
+        reason: "link",
+        signature:
+          link.kind === "identified"
+            ? `build-failure:link:${JSON.stringify([link.exportName, link.module])}`
+            : "build-failure:link:unknown",
+      };
+    }
   }
   return {
     kind: "build-failure",
@@ -397,22 +407,30 @@ function buildFailureVerdict(failure: FailedRolldownAdapterResult): BuildFailure
 }
 
 /// A Rolldown link-time MISSING_EXPORT failure: `[MISSING_EXPORT] "<name>" is not exported by
-/// "<module>"`. Returns the missing (export name, normalized module) pair, or `undefined` when the
-/// build error is not a link failure. Matches the `is not exported by` phrase (the stable core of the
-/// message across Rolldown versions), and also accepts a bare `MISSING_EXPORT` error name/code.
+/// "<module>"`. Returns an `identified` variant carrying the missing (export name, normalized module)
+/// pair when the quoted phrase parses, an `unknown` variant when only the `MISSING_EXPORT` code is
+/// present (a link failure whose identity cannot be parsed), or `undefined` when the error is not a link
+/// failure. The two variants stay DISTINCT rather than collapsing an unparseable failure into a fake
+/// `("<unknown>", <whole message>)` pair: an unknown-identity link failure carries a stable
+/// identity-free `build-failure:link:unknown` signature instead of the volatile full message.
+export type LinkFailureIdentity =
+  | { readonly kind: "identified"; readonly exportName: string; readonly module: string }
+  | { readonly kind: "unknown" };
+
 const MISSING_EXPORT_PATTERN = /"([^"]+)"\s+is not exported by\s+"([^"]+)"/;
-export function detectLinkFailure(
-  name: string,
-  message: string,
-): { readonly exportName: string; readonly module: string } | undefined {
+export function detectLinkFailure(name: string, message: string): LinkFailureIdentity | undefined {
   const match = MISSING_EXPORT_PATTERN.exec(message);
   if (match !== null && match[1] !== undefined && match[2] !== undefined) {
-    return { exportName: match[1], module: normalizeBuildFailureMessage(match[2]) };
+    return {
+      kind: "identified",
+      exportName: match[1],
+      module: normalizeBuildFailureMessage(match[2]),
+    };
   }
   // A message that only carries the code, no quoted phrase — still a link failure, but without a
-  // parseable identity; fall back to the normalized message so it is at least classified as `link`.
+  // parseable identity. An explicit `unknown` variant, NOT a fabricated (export, module) pair.
   if (name.includes("MISSING_EXPORT") || message.includes("MISSING_EXPORT")) {
-    return { exportName: "<unknown>", module: normalizeBuildFailureMessage(message) };
+    return { kind: "unknown" };
   }
   return undefined;
 }

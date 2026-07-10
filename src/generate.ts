@@ -16,7 +16,13 @@ import type {
   ValueRead,
 } from "./model.ts";
 import { analyzeProgram, type AnalyzedProgram, type ExportDemandPlan } from "./analyzed-program.ts";
-import { buildConfigOf, moduleProfile, programChunking, readableBindingsOf } from "./model.ts";
+import {
+  buildConfigOf,
+  DEFAULT_BUILD_CONFIG,
+  moduleProfile,
+  programChunking,
+  readableBindingsOf,
+} from "./model.ts";
 import { ProgramFacts, type ExportSupply } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
 
@@ -97,11 +103,13 @@ export function generateCase(
       ? buildRandomMixed(rng, size, forcedRegime)
       : TEMPLATE_BUILDERS[template](rng, size);
   // The ONE AnalyzedProgram for the case: finalizeProgram already produced it (and deep-froze its program)
-  // for random-mixed; a fixed template's program is a plain literal, so it is DEEP-FROZEN here on the same
-  // path before being analyzed ONCE — every GeneratedCase then carries a frozen program + analysis, so an
-  // accidental post-generation mutation throws whatever the template. Everything downstream (tags,
-  // validation, render, evaluation) reads THIS instance, so demand analysis runs exactly once per case.
-  const analyzed = built.analyzed ?? analyzeProgram(deepFreeze(built.program));
+  // for random-mixed; a fixed template's program is a plain literal, so it is routed through the SAME
+  // configuration/freeze seam (`configureFixedTemplate`) that persists its resolved `BuildConfig` and
+  // deep-freezes it before being analyzed ONCE — so `program.build` is genuinely persisted on EVERY
+  // generated case, not left to the `buildConfigOf` fallback. Every GeneratedCase then carries a frozen
+  // program + analysis, so an accidental post-generation mutation throws whatever the template, and
+  // everything downstream reads THIS instance, so demand analysis runs exactly once per case.
+  const analyzed = built.analyzed ?? analyzeProgram(configureFixedTemplate(built.program));
   const coverageTags = deriveCoverageTags(analyzed);
   // `template:*` tags stay purely structural; only fixed templates promise their own shape.
   if (template !== "random-mixed" && !coverageTags.includes(`template:${template}`)) {
@@ -113,9 +121,26 @@ export function generateCase(
     size,
     template,
     coverageTags,
-    program: built.program,
+    program: analyzed.program,
     analyzed,
   };
+}
+
+/// The common configuration/freeze seam for a FIXED-template program (a plain object literal the template
+/// builders assemble). It PERSISTS the resolved `BuildConfig` onto `program.build` — resolved defaults
+/// only, via `buildConfigOf`, so it is corpus-neutral apart from making the persisted object genuinely
+/// present — and DROPS any legacy top-level chunk arrays so `build.chunking` is the single chunking
+/// source, then deep-freezes. The random-mixed path already persists `build` inside `finalizeProgram`, so
+/// it never reaches here (its `TemplateResult` carries `analyzed`); this closes the one gap where a fixed
+/// template relied on the `buildConfigOf` fallback instead of a persisted object.
+function configureFixedTemplate(program: ProgramModel): ProgramModel {
+  const configured: ProgramModel = {
+    modules: program.modules,
+    entries: program.entries,
+    schedule: program.schedule,
+    build: buildConfigOf(program),
+  };
+  return deepFreeze(configured);
 }
 
 interface TemplateResult {
@@ -291,10 +316,22 @@ function buildManualChunkSeparation(rng: SeededRng, size: number): TemplateResul
       modules: [entry, ...carriers, ...interopModules],
       entries: [{ name: "main", moduleId: entry.id }],
       schedule: [{ kind: "import-entry", entry: "main" }],
-      manualChunkGroups: [
-        { name: "carriers", moduleIds: carriers.map((carrier) => carrier.id) },
-        { name: "interop", moduleIds: interopModules.map((module) => module.id) },
-      ],
+      // The manual split expressed on the persisted `BuildConfig` (not a legacy top-level
+      // `manualChunkGroups` array, which the configuration seam would otherwise have to migrate).
+      // `includeDependenciesRecursively: false` preserves this template's historical effective build: it
+      // predates the persisted axis, when the build child hardcoded per-group `false` on every manual
+      // group (W14a.1 made that value the persisted single source).
+      build: {
+        ...DEFAULT_BUILD_CONFIG,
+        chunking: {
+          kind: "manual",
+          groups: [
+            { name: "carriers", moduleIds: carriers.map((carrier) => carrier.id) },
+            { name: "interop", moduleIds: interopModules.map((module) => module.id) },
+          ],
+        },
+        includeDependenciesRecursively: false,
+      },
     },
   };
 }
@@ -2102,10 +2139,14 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   tags.add(`axis:lazy-barrel:${String(build.lazyBarrel)}`);
 
   // The #9887 cross-chunk init-cycle structural signature (W14-10 / ingredient D4): a manual chunk split
-  // with a CJS module that `require()`s an ESM module placed in a DIFFERENT manual group — a cross-chunk
-  // CJS-requires-ESM edge. With `includeDependenciesRecursively: false` this is the shape that
-  // manufactures the chunk cycle rolldown mis-orders (`init_dep is not a function`). Purely structural, so
-  // it holds for a handwritten or shrunk model that preserves the cross-group require edge.
+  // where a cross-group CJS-requires-ESM edge CLOSES an actual chunk cycle rolldown mis-orders
+  // (`init_dep is not a function`). It is NOT enough that the CJS→ESM require crosses groups — an acyclic
+  // cross-group edge (a plain `cjs → esm` in two groups with no return path) does not manufacture the
+  // cycle. So the predicate requires a grouped QUOTIENT cycle: the ESM target's chunk must reach back to
+  // the requiring module's chunk through the static dependency graph, quotiented by manual group
+  // (ungrouped modules are singleton chunks; async `import()` edges are excluded — they do not close an
+  // eager chunk cycle). With `includeDependenciesRecursively: false` this is the shape rolldown mis-orders.
+  // Purely structural, so it holds for a handwritten or shrunk model that preserves the cycle.
   if (chunking.kind === "manual" && build.includeDependenciesRecursively === false) {
     const groupOf = new Map<string, string>();
     for (const group of chunking.groups) {
@@ -2113,20 +2154,62 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
         groupOf.set(id, group.name);
       }
     }
-    const hasCrossChunkCjsRequiresEsm = program.modules.some(
+    // The chunk-quotient node a module belongs to: its manual group, else the module as a singleton
+    // chunk. Prefix-tagged so a group name can never collide with a module id.
+    const nodeOf = (moduleId: string): string =>
+      groupOf.has(moduleId) ? `group:${groupOf.get(moduleId) ?? ""}` : `module:${moduleId}`;
+    const quotientEdges = new Map<string, Set<string>>();
+    for (const module of program.modules) {
+      const from = nodeOf(module.id);
+      for (const dependency of module.dependencies) {
+        if (dependency.kind === "esm-dynamic-import" || !modulesById.has(dependency.target)) {
+          continue;
+        }
+        const to = nodeOf(dependency.target);
+        if (from === to) {
+          continue;
+        }
+        let targets = quotientEdges.get(from);
+        if (targets === undefined) {
+          targets = new Set();
+          quotientEdges.set(from, targets);
+        }
+        targets.add(to);
+      }
+    }
+    const reachesInQuotient = (start: string, goal: string): boolean => {
+      const seen = new Set<string>();
+      const stack = [start];
+      while (stack.length > 0) {
+        const node = stack.pop();
+        if (node === undefined || seen.has(node)) {
+          continue;
+        }
+        seen.add(node);
+        for (const next of quotientEdges.get(node) ?? []) {
+          if (next === goal) {
+            return true;
+          }
+          stack.push(next);
+        }
+      }
+      return false;
+    };
+    const closesQuotientCycle = program.modules.some(
       (module) =>
         module.format === "cjs" &&
+        groupOf.has(module.id) &&
         module.dependencies.some((dependency) => {
-          if (dependency.kind !== "cjs-require") {
+          if (dependency.kind !== "cjs-require" || !groupOf.has(dependency.target)) {
             return false;
           }
           const target = modulesById.get(dependency.target);
-          const from = groupOf.get(module.id);
-          const to = groupOf.get(dependency.target);
-          return target?.format === "esm" && from !== undefined && to !== undefined && from !== to;
+          const from = nodeOf(module.id);
+          const to = nodeOf(dependency.target);
+          return target?.format === "esm" && from !== to && reachesInQuotient(to, from);
         }),
     );
-    if (hasCrossChunkCjsRequiresEsm) {
+    if (closesQuotientCycle) {
       tags.add("mechanism:barrel-cross-chunk-init-cycle");
     }
   }

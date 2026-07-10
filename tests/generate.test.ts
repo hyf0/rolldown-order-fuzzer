@@ -448,7 +448,10 @@ function assertTemplateGraph(template: MixedTemplateName, program: ProgramModel)
     return;
   }
 
-  const groups = program.manualChunkGroups ?? [];
+  // manual-chunk-separation now expresses its split on the persisted `build.chunking` (not a legacy
+  // top-level `manualChunkGroups` array), so read the groups through the canonical chunking resolver.
+  const chunking = programChunking(program);
+  const groups = chunking.kind === "manual" ? chunking.groups : [];
   expect(groups.length).toBeGreaterThanOrEqual(2);
   const groupFormats = groups.map(
     (group) =>
@@ -601,15 +604,14 @@ describe("format regimes", () => {
 
 describe("organic chunking axis (wave 6)", () => {
   test("rolls the chunking config deterministically from the seed", () => {
-    // Same seed + size must produce byte-identical chunking config (part of overall determinism).
+    // Same seed + size must produce byte-identical chunking config (part of overall determinism). Read
+    // it through the canonical resolver so both random-mixed (persisted `build.chunking`) and fixed
+    // templates are compared the same way, not the legacy top-level arrays.
     for (let seed = 0; seed < 50; seed += 1) {
       const first = generateCase(seed, 16);
       const second = generateCase(seed, 16);
-      expect(JSON.stringify(second.program.organicChunkGroups)).toBe(
-        JSON.stringify(first.program.organicChunkGroups),
-      );
-      expect(JSON.stringify(second.program.manualChunkGroups)).toBe(
-        JSON.stringify(first.program.manualChunkGroups),
+      expect(JSON.stringify(buildConfigOf(second.program).chunking)).toBe(
+        JSON.stringify(buildConfigOf(first.program).chunking),
       );
     }
   });
@@ -637,7 +639,13 @@ describe("organic chunking axis (wave 6)", () => {
     for (let seed = 0; seed < 300; seed += 1) {
       const generated = generateCase(seed, 16);
       const build = buildConfigOf(generated.program);
-      // Every case carries a persisted BuildConfig with the fixed axes at their W14a values.
+      // Every case GENUINELY persists its BuildConfig on `program.build` (W14a.1 routed the fixed
+      // templates through the configuration/freeze seam too — no case relies on the `buildConfigOf`
+      // fallback), and the resolved (effective) config equals the persisted object, so the manifest/axes
+      // record the effective build.
+      expect(generated.program.build).toBeDefined();
+      expect(build).toEqual(generated.program.build);
+      // The fixed axes stay at their W14a values.
       expect(build.strictExecutionOrder).toBe(true);
       expect(build.preserveEntrySignatures).toBe("allow-extension");
       // Exactly one tag per rolled axis, matching the persisted value.
@@ -1155,6 +1163,48 @@ describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
     expect(generated.coverageTags).toContain("axis:include-dependencies-recursively:false");
   });
 
+  test("an ACYCLIC cross-group cjs→esm probe does NOT get the cross-chunk-init-cycle tag (W14a.1)", () => {
+    // The over-claim W14a.1 tightened: the tag used to fire on ANY cross-group CJS-requires-ESM edge under
+    // idr:false, even when the chunk graph is acyclic. This 2-module probe (`a` cjs requires `b` esm, in two
+    // manual groups) has NO return path (`b` has no dependencies), so no chunk cycle is manufactured — the
+    // tag must NOT fire, even though the CJS→ESM require crosses groups. It now requires a grouped quotient
+    // cycle (the ESM target's chunk reaching back to the requiring chunk).
+    const acyclicProbe = {
+      modules: [
+        {
+          id: "a",
+          format: "cjs",
+          dependencies: [{ kind: "cjs-require", target: "b" }],
+          events: [{ module: "a", phase: "evaluate", value: 1 }],
+        },
+        { id: "b", format: "esm", dependencies: [], events: [] },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "require-entry", entry: "main" }],
+      build: {
+        chunking: {
+          kind: "manual",
+          groups: [
+            { name: "ga", moduleIds: ["a"] },
+            { name: "gb", moduleIds: ["b"] },
+          ],
+        },
+        includeDependenciesRecursively: false,
+        preserveEntrySignatures: "allow-extension",
+        lazyBarrel: false,
+        strictExecutionOrder: true,
+      },
+    } satisfies ProgramModel;
+    const analyzed = analyzeProgram(acyclicProbe);
+    expect(validateProgramModel(analyzed)).toEqual([]);
+    const tags = deriveCoverageTags(analyzed);
+    // It IS a manual-chunk case with a cross-group CJS→ESM require...
+    expect(tags).toContain("chunking:explicit");
+    expect(tags).toContain("mechanism:cjs-requires-esm");
+    // ...but there is no manufactured chunk cycle, so the #9887 tag stays off.
+    expect(tags).not.toContain("mechanism:barrel-cross-chunk-init-cycle");
+  });
+
   test("renders the #9887 shape: CJS interop requires ESM dep, hub named+star re-exports", () => {
     const generated = generateCrossChunkInitCycleCase(1);
     const rendered = renderProgram(generated.analyzed);
@@ -1173,9 +1223,12 @@ describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
     expect(shared).toContain("as extend");
   });
 
-  test("the generated shape is already the minimal 5-module repro (matches the pre-pin shape)", () => {
-    // The builder emits exactly the pre-pin repro's 5 modules (consumer, hub, interop, dep, shared);
-    // removing any one dissolves the chunk cycle, so this is already the shrunken shape.
+  test("the generated shape is the minimal 5-module repro (matches the pre-pin shape)", () => {
+    // The builder emits exactly the pre-pin repro's 5 modules (consumer, hub, interop, dep, shared). This
+    // STRUCTURAL check only pins the module set; minimality was confirmed EMPIRICALLY out-of-band: the
+    // 4-module variant with the consumer removed builds GREEN on the buggy rolldown@1.1.5 (with no witness
+    // folding the mis-ordered values into an observed event, the cycle no longer manifests), so the
+    // consumer is load-bearing and this is already the shrunken shape. See the #9887 evidence file.
     const generated = generateCrossChunkInitCycleCase(1);
     expect(generated.program.modules).toHaveLength(5);
     expect(generated.program.modules.map((m) => m.id).sort()).toEqual([

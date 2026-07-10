@@ -425,11 +425,26 @@ export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
 /// The resolved `BuildConfig` of a program: its persisted `build` if present (schema 17), else derived
 /// from the legacy top-level chunk arrays + defaults (schema 16). This is the ONE place the two persisted
 /// shapes reconcile, so every consumer reads the config the same way whatever the artifact vintage.
+///
+/// v16 replay rule for `includeDependenciesRecursively` (W14a.1): a legacy MANUAL-group artifact
+/// resolves its global IDR to `false`, NOT the rolldown default `true` in `DEFAULT_BUILD_CONFIG`. Such an
+/// artifact was built when the build child hardcoded `includeDependenciesRecursively: false` on every
+/// manual group (the per-group value that shadowed the global). W14a.1 removed that hardcode so the
+/// persisted global is the SINGLE source of the effective IDR; this default preserves the OLD effective
+/// build for artifacts predating the persisted axis. Automatic/organic legacy configs keep the rolldown
+/// default `true` (the hardcode never applied to them — automatic carries no groups, organic set the
+/// global per-group only when the roll asked).
 export function buildConfigOf(program: ProgramModel): BuildConfig {
   if (program.build !== undefined) {
     return program.build;
   }
-  return { ...DEFAULT_BUILD_CONFIG, chunking: legacyChunking(program) };
+  const chunking = legacyChunking(program);
+  return {
+    ...DEFAULT_BUILD_CONFIG,
+    chunking,
+    includeDependenciesRecursively:
+      chunking.kind === "manual" ? false : DEFAULT_BUILD_CONFIG.includeDependenciesRecursively,
+  };
 }
 
 /// Derive a legacy (schema-16) program's chunking from its top-level arrays. Organic groups win over

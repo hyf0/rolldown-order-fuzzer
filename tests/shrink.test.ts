@@ -271,6 +271,24 @@ describe("shrink exact-equivalence normalizer (finding D)", () => {
     expect(sameFailure(before, after)).toBe(true);
   });
 
+  test("rendered module FILENAMES (module-NNNN.mjs) normalize across renumbering (W14a.1)", () => {
+    // A shrink drops modules and RENUMBERS survivors, renaming their rendered files. A signature that
+    // names the filename (`module-NNNN.mjs`) alongside a chunk-internal `init_module_NNNN` must compare
+    // equal after a consistent renumbering — the false negative that made a renumbering shrink reject a
+    // valid step because the literal filename number no longer matched.
+    const before =
+      'bundle-only-crash:["TypeError","module-0002.mjs: init_module_0002 is not a function"]';
+    const after =
+      'bundle-only-crash:["TypeError","module-0001.mjs: init_module_0001 is not a function"]';
+    expect(sameFailure(before, after)).toBe(true);
+    // But a filename and an init that name DIFFERENT modules (0001 vs 0002) must NOT collapse — the
+    // filename is keyed by the SAME numeric identity as the chunk-internal forms, so the two roles stay
+    // distinct.
+    const twoModules =
+      'bundle-only-crash:["TypeError","module-0001.mjs: init_module_0002 is not a function"]';
+    expect(sameFailure(before, twoModules)).toBe(false);
+  });
+
   test("a structurally different two-module failure does not collapse to a one-module one", () => {
     const twoModules =
       "events-reordered:source=[[init_module_0001,a,1]]:bundle=[[init_module_0002,b,2]]";

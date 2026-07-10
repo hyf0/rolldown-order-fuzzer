@@ -704,17 +704,30 @@ function normalizeSignature(signature: string): string {
   const withoutPaths = signature.replaceAll(/(?:\/[^\s"':]+)+\/(module-\d+\.[mc]js)/g, "$1");
   let counter = 0;
   const canonicalByNumber = new Map<string, string>();
-  return withoutPaths.replaceAll(
-    /(init_module_|require_module_|module_)(\d+)/g,
-    (_match, prefix: string, digits: string) => {
-      let index = canonicalByNumber.get(digits);
-      if (index === undefined) {
-        index = `N${counter}`;
-        counter += 1;
-        canonicalByNumber.set(digits, index);
-      }
-      return `${prefix}${index}`;
-    },
+  const indexFor = (digits: string): string => {
+    let index = canonicalByNumber.get(digits);
+    if (index === undefined) {
+      index = `N${counter}`;
+      counter += 1;
+      canonicalByNumber.set(digits, index);
+    }
+    return index;
+  };
+  return (
+    withoutPaths
+      // Rolldown's chunk-internal identifiers, derived from the numeric basename.
+      .replaceAll(
+        /(init_module_|require_module_|module_)(\d+)/g,
+        (_match, prefix: string, digits: string) => `${prefix}${indexFor(digits)}`,
+      )
+      // The rendered module FILENAME (`module-NNNN.mjs` / `.cjs`) itself, keyed by the SAME numeric
+      // identity so a renumbering shrink that renames files still compares equal to its pre-shrink
+      // signature — the `module-NNNN.mjs` false-negative this closes (a survivor renamed module-0002 to
+      // module-0001 kept a literal number and no longer matched, so the shrink rejected a valid step).
+      .replaceAll(
+        /module-(\d+)(\.[mc]js)/g,
+        (_match, digits: string, extension: string) => `module-${indexFor(digits)}${extension}`,
+      )
   );
 }
 
