@@ -4,6 +4,7 @@ import {
   deriveCoverageTags,
   deriveRegistrationSequence,
   generateCase,
+  generateCrossChunkInitCycleCase,
   MAX_CASE_SIZE,
   MIXED_TEMPLATE_NAMES,
   sampleCaseSize,
@@ -12,6 +13,8 @@ import {
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
 import { buildConfigOf, programChunking } from "../src/model.ts";
+import { ProgramFacts } from "../src/program-facts.ts";
+import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 
@@ -1120,5 +1123,67 @@ describe("dynamic-import registration sequence (finding 5)", () => {
         { owner: "a", registration: "r0" },
       ]),
     ).toThrow(/duplicate dynamic-import registration ordinal/);
+  });
+});
+
+describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
+  test("produces a valid, module-ACYCLIC model with the manufactured-chunk-cycle build config", () => {
+    const generated = generateCrossChunkInitCycleCase(1);
+    // The model is VALID — the manufactured chunk cycle is a build-side split, not a source-level cycle.
+    expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    // The MODULE graph is ACYCLIC (dep imports its value from shared, not from the hub), so there is no
+    // mixed-format module cycle — only the CHUNK graph is cyclic.
+    const facts = ProgramFacts.from(generated.program.modules);
+    expect(facts.cycles().cyclicMembers.size).toBe(0);
+    // The build config: a manual split placing dep alone vs {hub, interop, shared}, with idr:false.
+    const build = buildConfigOf(generated.program);
+    expect(build.includeDependenciesRecursively).toBe(false);
+    expect(build.strictExecutionOrder).toBe(true);
+    expect(build.chunking.kind).toBe("manual");
+    if (build.chunking.kind === "manual") {
+      const groups = build.chunking.groups.map((g) => [...g.moduleIds].sort());
+      expect(groups).toContainEqual(["cc-dep"]);
+      expect(groups).toContainEqual(["cc-hub", "cc-interop", "cc-shared"]);
+    }
+  });
+
+  test("carries the structural cross-chunk-init-cycle and cjs-requires-esm tags", () => {
+    const generated = generateCrossChunkInitCycleCase(1);
+    expect(generated.coverageTags).toContain("mechanism:barrel-cross-chunk-init-cycle");
+    expect(generated.coverageTags).toContain("mechanism:cjs-requires-esm");
+    expect(generated.coverageTags).toContain("chunking:explicit");
+    expect(generated.coverageTags).toContain("axis:include-dependencies-recursively:false");
+  });
+
+  test("renders the #9887 shape: CJS interop requires ESM dep, hub named+star re-exports", () => {
+    const generated = generateCrossChunkInitCycleCase(1);
+    const rendered = renderProgram(generated.analyzed);
+    const byId = generated.program.modules.map(
+      (m) => rendered.files.find((f) => f.path === rendered.modulePaths.get(m.id))?.contents ?? "",
+    );
+    const [consumer, hub, interop, dep, shared] = byId;
+    // interop is CJS and require()s the ESM dep and shared (the eager CJS init of ESM).
+    expect(interop).toContain('require("');
+    // hub NAMED-re-exports shared's extend and STAR-re-exports dep (disjoint, so unambiguous).
+    expect(hub).toContain("export { extend } from");
+    expect(hub).toContain("export * from");
+    // dep imports extend from shared (forward, acyclic) and the consumer folds the values into an event.
+    expect(dep).toContain("import { extend as e }");
+    expect(consumer).toContain("globalThis.__orderEvent");
+    expect(shared).toContain("as extend");
+  });
+
+  test("the generated shape is already the minimal 5-module repro (matches the pre-pin shape)", () => {
+    // The builder emits exactly the pre-pin repro's 5 modules (consumer, hub, interop, dep, shared);
+    // removing any one dissolves the chunk cycle, so this is already the shrunken shape.
+    const generated = generateCrossChunkInitCycleCase(1);
+    expect(generated.program.modules).toHaveLength(5);
+    expect(generated.program.modules.map((m) => m.id).sort()).toEqual([
+      "cc-consumer",
+      "cc-dep",
+      "cc-hub",
+      "cc-interop",
+      "cc-shared",
+    ]);
   });
 });

@@ -663,6 +663,135 @@ function buildRandomMixed(
   return { program: analyzed.program, analyzed };
 }
 
+/// The barrel/CJS cross-chunk `init_*` cycle shape (rolldown #9887, ingredient D4) — the W14a live catch.
+///
+/// A MODULE-ACYCLIC graph whose manual chunk split MANUFACTURES a chunk cycle: an `export *` hub barrel
+/// with a CJS interop sibling that `require()`s two ESM leaves, split so the hub chunk eagerly calls the
+/// dep chunk's `init_dep` before the dep chunk (which imports a binding back out of the hub chunk) has
+/// assigned it. Under `includeDependenciesRecursively: false` + strict order this throws
+/// `init_dep is not a function` at module-eval on npm rolldown (RED), while the fixed PR-snapshot greens
+/// it at strict order (a bidirectional proof pair). The module graph stays ACYCLIC (dep imports its value
+/// from `shared`, NOT from the hub — the acyclic variant of the issue's own repro), so the validator
+/// agrees there is no mixed-format module cycle: only the CHUNK graph is cyclic, manufactured by the
+/// split (rolldown's own #9225-class in-contract shape).
+///
+/// - `shared` (ESM leaf): a value definer of `extend`.
+/// - `dep` (ESM): imports `extend` from `shared` (forward, acyclic) and exports `useDep` folding it.
+/// - `interop` (CJS): side-effect `require()`s of `shared` AND `dep` — the eager CJS init of ESM.
+/// - `hub` (ESM barrel): side-effect-imports `interop`, then `export *` re-exports `shared` and `dep`.
+/// - `consumer` (ESM entry): imports `useDep` + `extend` through the hub barrel and folds them into an
+///   event — the witness. The bundle throws before the event fires (bundle-only-crash); the source emits it.
+///
+/// The manual chunk split places `dep` alone and `{hub, interop, shared}` together, so `hub-chunk` needs
+/// `dep-chunk` (interop requires dep) while `dep-chunk` needs `hub-chunk` (dep imports shared's `extend`)
+/// — the chunk cycle. `includeDependenciesRecursively: false` keeps `dep` in its own chunk rather than
+/// pulling it recursively into the hub chunk (which would dissolve the cycle and green it).
+export function buildCrossChunkInitCycle(rng: SeededRng): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const consumerBase = 1 + rng.integer(900_000);
+  const modules: readonly ModuleModel[] = [
+    {
+      id: "cc-consumer",
+      format: "esm",
+      dependencies: [
+        { kind: "esm-value-import", target: "cc-hub", importedName: "useDep", localName: "u" },
+        { kind: "esm-value-import", target: "cc-hub", importedName: "extend", localName: "x" },
+      ],
+      events: [
+        {
+          module: "cc-consumer",
+          phase: "evaluate",
+          value: consumerBase,
+          reads: [{ binding: "u" }, { binding: "x" }],
+        },
+      ],
+    },
+    {
+      id: "cc-hub",
+      format: "esm",
+      dependencies: [
+        { kind: "esm-side-effect-import", target: "cc-interop" },
+        // NAMED re-export of shared's `extend` and STAR re-export of dep's `useDep`. Disjoint (one named,
+        // one star) so the fuzzer's demand-driven definers stay unambiguous — two STAR re-exports over two
+        // demand-synthesizing definers would make every name resolve to both (rejected as ambiguous). The
+        // star to dep is load-bearing: it keeps dep un-flattened as a real re-exported chunk.
+        {
+          kind: "esm-reexport-named",
+          target: "cc-shared",
+          sourceName: "extend",
+          exportedName: "extend",
+        },
+        { kind: "esm-reexport-star", target: "cc-dep" },
+      ],
+      events: [],
+    },
+    {
+      id: "cc-interop",
+      format: "cjs",
+      dependencies: [
+        { kind: "cjs-require", target: "cc-shared" },
+        { kind: "cjs-require", target: "cc-dep" },
+      ],
+      events: [],
+    },
+    {
+      id: "cc-dep",
+      format: "esm",
+      dependencies: [
+        { kind: "esm-value-import", target: "cc-shared", importedName: "extend", localName: "e" },
+      ],
+      events: [],
+    },
+    { id: "cc-shared", format: "esm", dependencies: [], events: [] },
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [
+      { name: "entry-cc-consumer", moduleId: "cc-consumer" },
+      { name: "entry-cc-hub", moduleId: "cc-hub" },
+    ],
+    schedule: [
+      { kind: "import-entry", entry: "entry-cc-consumer" },
+      { kind: "import-entry", entry: "entry-cc-hub" },
+    ],
+    build: {
+      // The manual split that manufactures the chunk cycle: dep alone vs {hub, interop, shared}.
+      chunking: {
+        kind: "manual",
+        groups: [
+          { name: "cc-dep-chunk", moduleIds: ["cc-dep"] },
+          { name: "cc-hub-chunk", moduleIds: ["cc-hub", "cc-interop", "cc-shared"] },
+        ],
+      },
+      // The load-bearing axis: false keeps dep in its own chunk so the cross-chunk init cycle forms.
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the #9887 cross-chunk init-cycle shape (used by the directed W14-10 campaign).
+/// The seed only varies the cosmetic fold value, so the structural shape — and its red/green verdict pair
+/// — is identical across seeds. Tagged `mechanism:barrel-cross-chunk-init-cycle`.
+export function generateCrossChunkInitCycleCase(seed: number): GeneratedCase {
+  const { program, analyzed } = buildCrossChunkInitCycle(new SeededRng(seed));
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
 /// has been wired — the mutable graph the random generator built, ready to be FROZEN. `finalizeProgram`
 /// is the single point that consumes it.
@@ -1971,6 +2100,36 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   const build = buildConfigOf(program);
   tags.add(`axis:include-dependencies-recursively:${String(build.includeDependenciesRecursively)}`);
   tags.add(`axis:lazy-barrel:${String(build.lazyBarrel)}`);
+
+  // The #9887 cross-chunk init-cycle structural signature (W14-10 / ingredient D4): a manual chunk split
+  // with a CJS module that `require()`s an ESM module placed in a DIFFERENT manual group — a cross-chunk
+  // CJS-requires-ESM edge. With `includeDependenciesRecursively: false` this is the shape that
+  // manufactures the chunk cycle rolldown mis-orders (`init_dep is not a function`). Purely structural, so
+  // it holds for a handwritten or shrunk model that preserves the cross-group require edge.
+  if (chunking.kind === "manual" && build.includeDependenciesRecursively === false) {
+    const groupOf = new Map<string, string>();
+    for (const group of chunking.groups) {
+      for (const id of group.moduleIds) {
+        groupOf.set(id, group.name);
+      }
+    }
+    const hasCrossChunkCjsRequiresEsm = program.modules.some(
+      (module) =>
+        module.format === "cjs" &&
+        module.dependencies.some((dependency) => {
+          if (dependency.kind !== "cjs-require") {
+            return false;
+          }
+          const target = modulesById.get(dependency.target);
+          const from = groupOf.get(module.id);
+          const to = groupOf.get(dependency.target);
+          return target?.format === "esm" && from !== undefined && to !== undefined && from !== to;
+        }),
+    );
+    if (hasCrossChunkCjsRequiresEsm) {
+      tags.add("mechanism:barrel-cross-chunk-init-cycle");
+    }
+  }
 
   const registrations = program.modules.flatMap((module) =>
     module.dependencies.flatMap((dependency) =>
