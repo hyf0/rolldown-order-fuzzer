@@ -14,6 +14,7 @@ import type {
   ValueRead,
 } from "./model.ts";
 import { readableBindingsOf } from "./model.ts";
+import { ProgramFacts } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
 
 export const FIXED_TEMPLATE_NAMES = [
@@ -1342,33 +1343,6 @@ function augmentSlot(kind: DependencyOperation["kind"]): string | undefined {
   }
 }
 
-/// Synchronous (non-dynamic) reachability over drafts, for the forward-only augmentation gate.
-function draftSyncReachability(
-  drafts: readonly RandomModuleDraft[],
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const draftsById = new Map(drafts.map((draft) => [draft.id, draft]));
-  const reachability = new Map<string, ReadonlySet<string>>();
-  for (const start of draftsById.keys()) {
-    const reached = new Set<string>();
-    const pending = [start];
-    while (pending.length > 0) {
-      const id = pending.pop();
-      if (id === undefined) {
-        continue;
-      }
-      for (const dependency of draftsById.get(id)?.dependencies ?? []) {
-        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
-          continue;
-        }
-        reached.add(dependency.target);
-        pending.push(dependency.target);
-      }
-    }
-    reachability.set(start, reached);
-  }
-  return reachability;
-}
-
 /// Turn a meaningful minority of FORWARD pairs into real multi-kind pairs — the shape real code
 /// constantly writes: `import { a } from "./x"` AND `import("./x")` (static + lazy), or a side-effect
 /// import plus a value import of one module. The same (importer, target), already joined by one edge,
@@ -1394,7 +1368,7 @@ function augmentMultiEdgePairs(
       .filter((draft) => draft.dependencies.some(isReexportDependency))
       .map((draft) => draft.id),
   );
-  const reach = draftSyncReachability(drafts);
+  const facts = ProgramFacts.from(drafts);
 
   for (const importer of drafts) {
     if (barrelIds.has(importer.id)) {
@@ -1407,7 +1381,7 @@ function augmentMultiEdgePairs(
       if (
         targetId === importer.id ||
         barrelIds.has(targetId) ||
-        reach.get(targetId)?.has(importer.id) === true
+        facts.edgeClosesCycle(importer.id, targetId)
       ) {
         continue; // self-edge, a barrel, or a cycle-closing pair — never augment.
       }
@@ -1692,6 +1666,7 @@ function buildRandomManualGroups(
 export function deriveCoverageTags(program: ProgramModel): readonly string[] {
   const tags = new Set<string>();
   const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  const facts = ProgramFacts.from(program.modules);
   const formats = new Set(program.modules.map((module) => module.format));
   const esmCarriersByCjsTarget = new Map<string, Set<string>>();
   let requiresSynchronousEsm = false;
@@ -1725,7 +1700,7 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
         target?.format === "esm"
       ) {
         tags.add("mechanism:cjs-requires-esm");
-        if (!reachesTopLevelAwait(target.id, modulesById)) {
+        if (!facts.reachesTopLevelAwait(target.id)) {
           requiresSynchronousEsm = true;
         }
       }
@@ -1740,7 +1715,7 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     tags.add("mechanism:synchronous-esm");
   }
 
-  const hasOverlappingEntries = entriesOverlap(program, modulesById);
+  const hasOverlappingEntries = entriesOverlap(program, facts);
   if (program.entries.length > 1) {
     tags.add("mechanism:multiple-entries");
   }
@@ -1782,7 +1757,7 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     if (registrations.some((registration) => !triggeredRegistrations.has(registration))) {
       tags.add("mechanism:untriggered-dynamic-import");
     }
-    if (hasNestedDynamicChain(program, modulesById)) {
+    if (hasNestedDynamicChain(program, facts)) {
       tags.add("mechanism:nested-dynamic");
     }
   }
@@ -1794,7 +1769,7 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
     tags.add("mechanism:entry-also-imported");
   }
 
-  const cycles = analyzeCycles(modulesById);
+  const cycles = facts.cycles();
   if (cycles.cyclicMembers.size > 0) {
     tags.add("mechanism:cycle");
     if (cycles.formats.size === 1 && cycles.formats.has("esm")) {
@@ -1969,13 +1944,10 @@ export function deriveCoverageTags(program: ProgramModel): readonly string[] {
 /// target of a dynamic import — i.e. a dynamic import inside a dynamically-imported module. This is
 /// the dense route-splitting shape wave 6 deliberately produces; before, it occurred only by rare
 /// accident.
-function hasNestedDynamicChain(
-  program: ProgramModel,
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): boolean {
+function hasNestedDynamicChain(program: ProgramModel, facts: ProgramFacts): boolean {
   const syncReachableFromEntries = new Set<string>();
   for (const entry of program.entries) {
-    for (const reached of synchronouslyReachable(entry.moduleId, modulesById)) {
+    for (const reached of facts.closureFrom(entry.moduleId)) {
       syncReachableFromEntries.add(reached);
     }
   }
@@ -2103,13 +2075,8 @@ function deriveTemplateName(
   return undefined;
 }
 
-function entriesOverlap(
-  program: ProgramModel,
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): boolean {
-  const reachedByEntry = program.entries.map((entry) =>
-    synchronouslyReachable(entry.moduleId, modulesById),
-  );
+function entriesOverlap(program: ProgramModel, facts: ProgramFacts): boolean {
+  const reachedByEntry = program.entries.map((entry) => facts.closureFrom(entry.moduleId));
   for (let leftIndex = 0; leftIndex < reachedByEntry.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < reachedByEntry.length; rightIndex += 1) {
       const left = reachedByEntry[leftIndex];
@@ -2120,170 +2087,6 @@ function entriesOverlap(
     }
   }
   return false;
-}
-
-function synchronouslyReachable(
-  rootId: string,
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): ReadonlySet<string> {
-  const reached = new Set<string>();
-  const pending = [rootId];
-  while (pending.length > 0) {
-    const moduleId = pending.pop();
-    if (moduleId === undefined || reached.has(moduleId)) {
-      continue;
-    }
-    reached.add(moduleId);
-    for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
-      if (dependency.kind !== "esm-dynamic-import") {
-        pending.push(dependency.target);
-      }
-    }
-  }
-  return reached;
-}
-
-function reachesTopLevelAwait(
-  rootId: string,
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): boolean {
-  return [...synchronouslyReachable(rootId, modulesById)].some(
-    (moduleId) =>
-      modulesById.get(moduleId)?.format === "esm" &&
-      modulesById.get(moduleId)?.hasTopLevelAwait === true,
-  );
-}
-
-interface CycleAnalysis {
-  /// Every module sitting on a synchronous (non-dynamic) cycle.
-  readonly cyclicMembers: ReadonlySet<string>;
-  /// The strongly connected components of size >= 2 (each a distinct cyclic cluster).
-  readonly sccs: readonly (readonly string[])[];
-  /// Formats present among cyclic members (single-format cycles keep this size 1).
-  readonly formats: ReadonlySet<ModuleFormat>;
-  /// A cluster with more internal edges than a bare ring needs (a chord), and no shared hub.
-  readonly hasChord: boolean;
-  /// A cluster with a shared hub node (internal in-degree >= 2 and out-degree >= 2) joining two
-  /// cycles — a figure-eight of interlocking cycles.
-  readonly hasInterlocking: boolean;
-  /// A cluster entered by external synchronous edges at two or more distinct members.
-  readonly hasMultiEnter: boolean;
-}
-
-/// Synchronous (non-dynamic) reachability from each module, for cycle analysis.
-function synchronousReachability(
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): Map<string, Set<string>> {
-  const reachability = new Map<string, Set<string>>();
-  for (const start of modulesById.keys()) {
-    const reached = new Set<string>();
-    const pending = [start];
-    while (pending.length > 0) {
-      const moduleId = pending.pop();
-      if (moduleId === undefined) {
-        continue;
-      }
-      for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
-        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
-          continue;
-        }
-        reached.add(dependency.target);
-        pending.push(dependency.target);
-      }
-    }
-    reachability.set(start, reached);
-  }
-  return reachability;
-}
-
-/// Analyze the synchronous cycle structure: which modules are on a cycle, their clusters (SCCs), and
-/// the richer topologies (chord, interlocking figure-eight, multiple entry members). Two modules
-/// share a cluster when each synchronously reaches the other; a module is cyclic when it reaches
-/// itself through at least one edge.
-function analyzeCycles(modulesById: ReadonlyMap<string, ModuleModel>): CycleAnalysis {
-  const reach = synchronousReachability(modulesById);
-  const syncTargets = (id: string): string[] =>
-    (modulesById.get(id)?.dependencies ?? []).flatMap((dependency) =>
-      dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
-    );
-
-  const cyclicMembers = new Set<string>();
-  for (const id of modulesById.keys()) {
-    if (syncTargets(id).some((target) => reach.get(target)?.has(id) === true)) {
-      cyclicMembers.add(id);
-    }
-  }
-
-  // Group cyclic members into clusters by mutual reachability.
-  const sccs: string[][] = [];
-  const assigned = new Set<string>();
-  for (const id of cyclicMembers) {
-    if (assigned.has(id)) {
-      continue;
-    }
-    const cluster = [...cyclicMembers].filter(
-      (other) => reach.get(id)?.has(other) === true && reach.get(other)?.has(id) === true,
-    );
-    cluster.push(id);
-    const unique = [...new Set(cluster)];
-    for (const member of unique) {
-      assigned.add(member);
-    }
-    sccs.push(unique);
-  }
-
-  const formats = new Set<ModuleFormat>();
-  for (const id of cyclicMembers) {
-    const format = modulesById.get(id)?.format;
-    if (format !== undefined) {
-      formats.add(format);
-    }
-  }
-
-  let hasChord = false;
-  let hasInterlocking = false;
-  let hasMultiEnter = false;
-  for (const scc of sccs) {
-    const members = new Set(scc);
-    let internalEdges = 0;
-    const internalOut = new Map<string, Set<string>>(scc.map((id) => [id, new Set<string>()]));
-    const internalIn = new Map<string, Set<string>>(scc.map((id) => [id, new Set<string>()]));
-    for (const id of scc) {
-      for (const target of syncTargets(id)) {
-        if (members.has(target)) {
-          internalEdges += 1;
-          internalOut.get(id)?.add(target);
-          internalIn.get(target)?.add(id);
-        }
-      }
-    }
-    const interlocking = scc.some(
-      (id) => (internalOut.get(id)?.size ?? 0) >= 2 && (internalIn.get(id)?.size ?? 0) >= 2,
-    );
-    if (interlocking) {
-      hasInterlocking = true;
-    } else if (internalEdges > scc.length) {
-      hasChord = true;
-    }
-    const enteringMembers = new Set<string>();
-    for (const [id, module] of modulesById) {
-      if (members.has(id)) {
-        continue;
-      }
-      for (const target of (module.dependencies ?? []).flatMap((dependency) =>
-        dependency.kind === "esm-dynamic-import" ? [] : [dependency.target],
-      )) {
-        if (members.has(target)) {
-          enteringMembers.add(target);
-        }
-      }
-    }
-    if (enteringMembers.size >= 2) {
-      hasMultiEnter = true;
-    }
-  }
-
-  return { cyclicMembers, sccs, formats, hasChord, hasInterlocking, hasMultiEnter };
 }
 
 function manualGroupsSeparateFormats(

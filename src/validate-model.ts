@@ -5,6 +5,7 @@ import type {
   ModuleModel,
   ProgramModel,
 } from "./model.ts";
+import { ProgramFacts } from "./program-facts.ts";
 
 const JAVASCRIPT_IDENTIFIER_PATTERN = /^[$_\p{ID_Start}][$\u200C\u200D\p{ID_Continue}]*$/u;
 
@@ -75,8 +76,9 @@ type ReadableBinding =
 export function validateProgramModel(program: ProgramModel): readonly string[] {
   const errors: string[] = [];
   const modulesById = collectModules(program.modules, errors);
+  const facts = ProgramFacts.from(program.modules);
   const dynamicRegistrationOwners = new Map<string, string>();
-  const modulesReachingTopLevelAwait = computeTopLevelAwaitReachability(modulesById);
+  const modulesReachingTopLevelAwait = facts.topLevelAwaitReachers();
 
   validateModules(
     program.modules,
@@ -86,42 +88,14 @@ export function validateProgramModel(program: ProgramModel): readonly string[] {
     errors,
   );
 
-  validateCycleValueFlow(program.modules, modulesById, errors);
+  validateCycleValueFlow(program.modules, facts, errors);
 
   const entriesByName = collectEntries(program.entries, modulesById, errors);
-  validateSchedule(program, entriesByName, modulesById, dynamicRegistrationOwners, errors);
+  validateSchedule(program, entriesByName, modulesById, facts, dynamicRegistrationOwners, errors);
   validateManualChunkGroups(program, modulesById, errors);
   validateOrganicChunkGroups(program, errors);
 
   return errors;
-}
-
-/// The modules each module can reach through SYNCHRONOUS dependency edges (everything except a
-/// dynamic import, which defers). A dependency `A -> B` closes a cycle exactly when `B` can
-/// synchronously reach `A`; the read across such an edge may observe a still-evaluating target.
-function computeSynchronousReachability(
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): ReadonlyMap<string, ReadonlySet<string>> {
-  const reachability = new Map<string, ReadonlySet<string>>();
-  for (const start of modulesById.keys()) {
-    const reached = new Set<string>();
-    const pending: string[] = [start];
-    while (pending.length > 0) {
-      const moduleId = pending.pop();
-      if (moduleId === undefined) {
-        continue;
-      }
-      for (const dependency of modulesById.get(moduleId)?.dependencies ?? []) {
-        if (dependency.kind === "esm-dynamic-import" || reached.has(dependency.target)) {
-          continue;
-        }
-        reached.add(dependency.target);
-        pending.push(dependency.target);
-      }
-    }
-    reachability.set(start, reached);
-  }
-  return reachability;
 }
 
 /// Cycle value-flow soundness (Node-legal, TDZ-free, NaN-free). A read across a cycle-closing edge
@@ -139,15 +113,14 @@ function computeSynchronousReachability(
 /// `call`/`guard` there is harmless, and a plain read is sound because the target is fully evaluated.
 function validateCycleValueFlow(
   modules: readonly ModuleModel[],
-  modulesById: ReadonlyMap<string, ModuleModel>,
+  facts: ProgramFacts,
   errors: string[],
 ): void {
-  const reachability = computeSynchronousReachability(modulesById);
   for (const [moduleIndex, module] of modules.entries()) {
     for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
       const path = `modules[${moduleIndex}].dependencies[${dependencyIndex}]`;
-      const target = modulesById.get(dependency.target);
-      const closesCycle = reachability.get(dependency.target)?.has(module.id) === true;
+      const target = facts.module(dependency.target);
+      const closesCycle = facts.edgeClosesCycle(module.id, dependency.target);
 
       if (dependency.kind === "esm-value-import") {
         if (dependency.call === true && target !== undefined && target.format !== "esm") {
@@ -531,50 +504,6 @@ function validateEventReads(
   }
 }
 
-function computeTopLevelAwaitReachability(
-  modulesById: ReadonlyMap<string, ModuleModel>,
-): ReadonlySet<string> {
-  const synchronousDependents = new Map<string, string[]>();
-  const modulesReachingTopLevelAwait = new Set<string>();
-  const pending: string[] = [];
-
-  for (const module of modulesById.values()) {
-    if (module.format === "esm" && module.hasTopLevelAwait === true) {
-      modulesReachingTopLevelAwait.add(module.id);
-      pending.push(module.id);
-    }
-
-    for (const dependency of module.dependencies) {
-      if (dependency.kind === "esm-dynamic-import" || !modulesById.has(dependency.target)) {
-        continue;
-      }
-
-      const dependents = synchronousDependents.get(dependency.target);
-      if (dependents === undefined) {
-        synchronousDependents.set(dependency.target, [module.id]);
-      } else {
-        dependents.push(module.id);
-      }
-    }
-  }
-
-  for (let index = 0; index < pending.length; index += 1) {
-    const moduleId = pending[index];
-    if (moduleId === undefined) {
-      continue;
-    }
-
-    for (const dependentId of synchronousDependents.get(moduleId) ?? []) {
-      if (!modulesReachingTopLevelAwait.has(dependentId)) {
-        modulesReachingTopLevelAwait.add(dependentId);
-        pending.push(dependentId);
-      }
-    }
-  }
-
-  return modulesReachingTopLevelAwait;
-}
-
 function validateDependencyBinding(
   dependency: DependencyOperation,
   path: string,
@@ -792,10 +721,16 @@ function validateSchedule(
   program: ProgramModel,
   entriesByName: ReadonlyMap<string, EntryModel>,
   modulesById: ReadonlyMap<string, ModuleModel>,
+  facts: ProgramFacts,
   dynamicRegistrationOwners: ReadonlyMap<string, string>,
   errors: string[],
 ): void {
   const evaluatedModules = new Set<string>();
+  const markEvaluated = (rootId: string): void => {
+    for (const reached of facts.closureFrom(rootId)) {
+      evaluatedModules.add(reached);
+    }
+  };
 
   for (const [scheduleIndex, operation] of program.schedule.entries()) {
     const path = `schedule[${scheduleIndex}]`;
@@ -822,7 +757,7 @@ function validateSchedule(
           );
         const targetModule = target === undefined ? undefined : modulesById.get(target.target);
         if (targetModule !== undefined) {
-          markSynchronouslyEvaluated(targetModule, modulesById, evaluatedModules);
+          markEvaluated(targetModule.id);
         }
       }
       continue;
@@ -844,34 +779,7 @@ function validateSchedule(
     } else if (operation.kind === "require-entry" && entryModule.format !== "cjs") {
       errors.push(`${path}: cannot require ESM entry ${quote(operation.entry)}`);
     } else {
-      markSynchronouslyEvaluated(entryModule, modulesById, evaluatedModules);
-    }
-  }
-}
-
-function markSynchronouslyEvaluated(
-  root: ModuleModel,
-  modulesById: ReadonlyMap<string, ModuleModel>,
-  evaluatedModules: Set<string>,
-): void {
-  const pending = [root];
-
-  while (pending.length > 0) {
-    const module = pending.pop();
-    if (module === undefined || evaluatedModules.has(module.id)) {
-      continue;
-    }
-    evaluatedModules.add(module.id);
-
-    for (const dependency of module.dependencies) {
-      if (dependency.kind === "esm-dynamic-import") {
-        continue;
-      }
-
-      const target = modulesById.get(dependency.target);
-      if (target !== undefined) {
-        pending.push(target);
-      }
+      markEvaluated(entryModule.id);
     }
   }
 }
