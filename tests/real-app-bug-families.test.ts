@@ -311,6 +311,103 @@ describe("family-A conjunction coverage tag", () => {
     } as ProgramModel;
     expect(deriveCoverageTags(notPure)).not.toContain("mechanism:pure-definer-behind-barrel");
   });
+
+  // Regression for the family-A false tag (finding C): the barrel carries an UNUSED `export * from`
+  // a pure definer (so the old structural star-walk gate passed) AND a CONSUMED NAMED route to a
+  // (second) pure definer. A named route resolves the binding DIRECTLY, so the family-A bug does not
+  // fire — yet the old greedy walk counted "a consumed member resolves to a pure definer" without
+  // checking the route, and tagged it. The route-based check requires the pure-definer read to travel
+  // through a STAR, so this must NOT tag.
+  test("does not fire on an unused star to a pure definer plus a consumed NAMED pure route", () => {
+    const program: ProgramModel = {
+      modules: [
+        {
+          id: "pdefA",
+          format: "esm",
+          inferredPure: true,
+          pureBase: 5,
+          events: [],
+          dependencies: [],
+        },
+        {
+          id: "pdefB",
+          format: "esm",
+          inferredPure: true,
+          pureBase: 7,
+          events: [],
+          dependencies: [],
+        },
+        {
+          id: "sib",
+          format: "esm",
+          events: [{ module: "sib", phase: "evaluate", value: 3 }],
+          dependencies: [],
+        },
+        {
+          id: "bar",
+          format: "esm",
+          events: [],
+          dependencies: [
+            // The unused star to a pure definer — nothing reads pdefA's export through it.
+            { kind: "esm-reexport-star", target: "pdefA" },
+            // The consumed pure-definer read is a NAMED route (resolves directly; bug does not fire).
+            {
+              kind: "esm-reexport-named",
+              target: "pdefB",
+              sourceName: "vpdefB",
+              exportedName: "vpdefB",
+            },
+            { kind: "esm-reexport-named", target: "sib", sourceName: "vsib", exportedName: "vsib" },
+          ],
+        },
+        {
+          id: "e1",
+          format: "esm",
+          events: [
+            {
+              module: "e1",
+              phase: "evaluate",
+              value: 10,
+              reads: [{ binding: "n1", member: "vpdefB" }],
+            },
+          ],
+          dependencies: [
+            {
+              kind: "esm-namespace-import",
+              target: "bar",
+              localName: "n1",
+              readMembers: ["vpdefB"],
+            },
+          ],
+        },
+        {
+          id: "e2",
+          format: "esm",
+          events: [
+            {
+              module: "e2",
+              phase: "evaluate",
+              value: 20,
+              reads: [{ binding: "n2", member: "vsib" }],
+            },
+          ],
+          dependencies: [
+            { kind: "esm-namespace-import", target: "bar", localName: "n2", readMembers: ["vsib"] },
+          ],
+        },
+      ],
+      entries: [
+        { name: "entry-e1", moduleId: "e1" },
+        { name: "entry-e2", moduleId: "e2" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "entry-e1" },
+        { kind: "import-entry", entry: "entry-e2" },
+      ],
+    } as ProgramModel;
+    expect(validateProgramModel(program)).toEqual([]);
+    expect(deriveCoverageTags(program)).not.toContain("mechanism:pure-definer-behind-barrel");
+  });
 });
 
 describe("family-A/B generation", () => {

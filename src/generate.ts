@@ -1413,7 +1413,13 @@ function augmentMultiEdgePairs(
       if (
         targetId === importer.id ||
         barrelIds.has(targetId) ||
-        facts.edgeClosesCycle(importer.id, targetId)
+        // Whether ADDING a synchronous edge here would close a cycle — the forward question a mutator
+        // needs. `edgeClosesCycle` is an SCC-membership test valid only for an already-synchronous edge;
+        // for a pair joined only DYNAMICALLY (dynamic importer -> target, target sync-reaches importer)
+        // it wrongly returns false, so the augmenter would add a synchronous value/side-effect edge that
+        // silently closes a cycle. The corpus's dynamic edges are forward-only, so this is byte-identical
+        // there; it only excludes the dynamic-only back-edge pair a future/handwritten graph could hit.
+        facts.wouldCloseSynchronousEdge(importer.id, targetId)
       ) {
         continue; // self-edge, a barrel, or a cycle-closing pair — never augment.
       }
@@ -2058,40 +2064,7 @@ function hasCompletePureDefinerConjunction(
   if (pureDefinerIds.size === 0) {
     return false;
   }
-  // Whether a module star-re-exports (transitively) a pure definer. Barrels are forward-only acyclic,
-  // so a visited set is enough to guard the recursion.
-  const memo = new Map<string, boolean>();
-  const starReachesPureDefiner = (id: string, visited: Set<string>): boolean => {
-    const cached = memo.get(id);
-    if (cached !== undefined) {
-      return cached;
-    }
-    if (visited.has(id)) {
-      return false;
-    }
-    visited.add(id);
-    let result = false;
-    for (const dependency of modulesById.get(id)?.dependencies ?? []) {
-      if (
-        dependency.kind === "esm-reexport-star" &&
-        (pureDefinerIds.has(dependency.target) ||
-          starReachesPureDefiner(dependency.target, visited))
-      ) {
-        result = true;
-        break;
-      }
-    }
-    visited.delete(id);
-    memo.set(id, result);
-    return result;
-  };
-
   for (const barrel of program.modules) {
-    // The definer is reached through a STAR re-export (the load-bearing ingredient — a named
-    // re-export resolves the binding directly and the bug does not fire). Handles a multi-hop chain.
-    if (!starReachesPureDefiner(barrel.id, new Set())) {
-      continue;
-    }
     const entryNamespaceImporters = program.modules.filter(
       (module) =>
         entryModuleIds.has(module.id) &&
@@ -2103,25 +2076,36 @@ function hasCompletePureDefinerConjunction(
     if (entryNamespaceImporters.length < 2) {
       continue;
     }
-    // Resolve each entry's read members THROUGH the barrel chain to their origin, so both hops and
-    // named-vs-star forwarding are handled uniformly. The SPLIT that makes on-demand drop the definer's
-    // init: one entry reads a member resolving to the pure definer, another reads a member resolving to
-    // a SIDE-EFFECTFUL sibling (which keeps the barrel a wrapped chunk).
-    const readsMemberResolving = (predicate: (originId: string) => boolean): boolean =>
+    // Resolve each entry's read members THROUGH the barrel to their GENUINE definer via the supply-aware
+    // route (not a greedy first-star guess that could misattribute a consumed named/second-star member to
+    // an UNUSED star path to some pure definer — the false tag this replaces). The SPLIT that makes
+    // on-demand drop the definer's init: one entry reads a member that routes THROUGH A STAR to the pure
+    // definer (the star is load-bearing — a named route resolves the binding directly and the bug does
+    // not fire) AND one reads a member routing to a SIDE-EFFECTFUL sibling (which keeps the barrel a
+    // wrapped chunk).
+    const readsMemberVia = (
+      wantOrigin: (originId: string) => boolean,
+      requireStar: boolean,
+    ): boolean =>
       entryNamespaceImporters.some((module) =>
         module.dependencies.some(
           (dependency) =>
             dependency.kind === "esm-namespace-import" &&
             dependency.target === barrel.id &&
             dependency.readMembers.some((member) => {
-              const origin = facts.resolveExportOrigin(barrel.id, member);
-              return origin !== undefined && predicate(origin.moduleId);
+              const supply = facts.resolveExportRoute(barrel.id, member);
+              return (
+                supply.status === "supplied" &&
+                wantOrigin(supply.origin.moduleId) &&
+                (!requireStar || supply.hops.some((hop) => hop.via === "star"))
+              );
             }),
         ),
       );
-    const readsPureDefiner = readsMemberResolving((originId) => pureDefinerIds.has(originId));
-    const readsSideEffectfulSibling = readsMemberResolving(
+    const readsPureDefiner = readsMemberVia((originId) => pureDefinerIds.has(originId), true);
+    const readsSideEffectfulSibling = readsMemberVia(
       (originId) => (modulesById.get(originId)?.events.length ?? 0) > 0,
+      false,
     );
     if (readsPureDefiner && readsSideEffectfulSibling) {
       return true;
