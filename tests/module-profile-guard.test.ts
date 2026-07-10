@@ -87,3 +87,24 @@ describe("ModuleProfile is the single interpreter of purity/export-shape (findin
     expect(rawFlagLineNumbers(readFileSync(join(SRC, "render.ts"), "utf8"))).toEqual([]);
   });
 });
+
+/// The mirrored export-form switch the renderer used to carry alongside `renderedFormOf` — the forced
+/// parallel dispatch that could drift from the analyzer's classification.
+const EXPORT_SHAPE_ACCESS = /\bexportShape\b/;
+
+describe("the analyzer's renderedFormOf is the renderer's SINGLE export-form dispatch (finding: mirrored form switch)", () => {
+  test("render.ts never branches on the profile's exportShape — the mirrored switch stays deleted", () => {
+    // The blocker was a moduleProfile export-form switch INSIDE the renderer
+    // (`profile.exportShape.kind === "fresh-object" | "callable-own-state"`, plus a `purity.kind ===
+    // "inferred"` arm), classifying export shape a SECOND time in parallel with `renderedFormOf`.
+    // Export-shape classification now lives ONLY in the analyzer; the renderer maps the analyzer's
+    // `renderedFormOf` form directly to an emission template. A raw `exportShape` read reappearing
+    // anywhere in render.ts (code or comment) means the mirrored switch is back — fail loudly.
+    const source = readFileSync(join(SRC, "render.ts"), "utf8");
+    expect(EXPORT_SHAPE_ACCESS.test(source)).toBe(false);
+  });
+
+  test("the renderer's ONE export-form input is the analyzer's renderedFormOf classifier", () => {
+    expect(readFileSync(join(SRC, "render.ts"), "utf8")).toContain("renderedFormOf");
+  });
+});

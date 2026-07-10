@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import { sideEffectFreeTransitiveProgram } from "./fixtures.ts";
@@ -67,7 +68,7 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("accepts value-carrying events and readable requires", () => {
@@ -136,11 +137,11 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("accepts a side-effect-free transitive value module", () => {
-    expect(validateProgramModel(sideEffectFreeTransitiveProgram())).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(sideEffectFreeTransitiveProgram()))).toEqual([]);
   });
 
   test("rejects a side-effect-free module that emits events, is CJS, or carries non-value dependencies", () => {
@@ -166,7 +167,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       "modules[0]: a side-effect-free module must be ESM, received cjs",
       "modules[0]: a side-effect-free module must not emit events; its events can be legally dropped under sideEffects:false",
       "modules[0].dependencies[0]: a side-effect-free module may only carry value-only ESM dependencies, received cjs-require",
@@ -214,7 +215,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("rejects a namespace read of an undeclared member", () => {
@@ -246,7 +247,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].events[0].reads[0].member: expected a namespace member for binding "ns0", received "b"',
       'modules[0].events[0].reads[1].member: expected a namespace member for binding "ns0", received no member',
     ]);
@@ -288,7 +289,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("accepts a side-effect-free (flagged) barrel re-exporting a value-only definer", () => {
@@ -317,7 +318,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("rejects invalid re-export identifier names", () => {
@@ -348,7 +349,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[0].exportedName: invalid JavaScript identifier "not ok"',
       'modules[0].dependencies[1].sourceName: invalid JavaScript identifier "no-dash"',
     ]);
@@ -374,7 +375,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       "modules[0].dependencies[0]: CJS modules cannot use esm-namespace-import",
       "modules[0].dependencies[1]: CJS modules cannot use esm-reexport-star",
     ]);
@@ -420,7 +421,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].events[0].reads[0].binding: unknown readable binding "missing" in this module',
       'modules[0].events[0].reads[1].member: expected no member for binding "sourceValue", received "notAMember"',
       "modules[0].events[1].value: expected a finite JSON number when the event carries reads",
@@ -456,7 +457,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].events[0].reads[0].member: expected "vt" for binding "targetExports", received no member',
     ]);
   });
@@ -492,7 +493,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[1].resultBinding: duplicate module local binding "shared"',
       "modules[0].dependencies[2]: resultBinding and readName must be set together on a readable require",
     ]);
@@ -527,7 +528,7 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'schedule[0].registration: dynamic import registration "load-lazy" is unavailable before module "entry" is evaluated',
     ]);
   });
@@ -573,7 +574,7 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("treats an awaited trigger's dynamic subtree as evaluated", () => {
@@ -618,7 +619,7 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
 
     const nestedBeforeParent = {
       ...program,
@@ -629,7 +630,7 @@ describe("validateProgramModel", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(nestedBeforeParent)).toEqual([
+    expect(validateProgramModel(analyzeProgram(nestedBeforeParent))).toEqual([
       'schedule[1].registration: dynamic import registration "load-nested" is unavailable before module "lazy" is evaluated',
     ]);
   });
@@ -673,7 +674,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[0].importedName: invalid JavaScript identifier "not-valid"',
       'modules[0].dependencies[1].localName: invalid JavaScript binding identifier "not-valid"',
       'modules[0].dependencies[2].localName: invalid JavaScript binding identifier "await"',
@@ -719,7 +720,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[1].localName: duplicate module local binding "shared"',
     ]);
   });
@@ -751,7 +752,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("rejects dangling dependency targets", () => {
@@ -768,7 +769,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[0].target: unknown module id "missing"',
     ]);
   });
@@ -793,7 +794,7 @@ describe("validateProgramModel", () => {
       schedule: [],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[1].id: duplicate module id "duplicate"',
     ]);
   });
@@ -805,7 +806,7 @@ describe("validateProgramModel", () => {
       schedule: [],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'entries[0].moduleId: unknown module id "missing"',
     ]);
   });
@@ -831,7 +832,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[0]: cannot require ESM module "async-esm" because it has top-level await',
     ]);
   });
@@ -863,7 +864,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[0]: cannot require ESM module "esm-wrapper" because it has top-level await',
     ]);
   });
@@ -906,7 +907,7 @@ describe("validateProgramModel", () => {
         schedule: [{ kind: "require-entry", entry: "main" }],
       } satisfies ProgramModel;
 
-      expect(validateProgramModel(program)).toEqual([
+      expect(validateProgramModel(analyzeProgram(program))).toEqual([
         'modules[0].dependencies[0]: cannot require ESM module "esm-0" because it has top-level await',
       ]);
     },
@@ -929,7 +930,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       "modules[0].events[0].value: expected a finite JSON number",
       "modules[0].events[1].value: expected a finite JSON number",
     ]);
@@ -949,7 +950,7 @@ describe("validateProgramModel", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].events[0].module: expected containing module id "entry", received "other"',
     ]);
   });
@@ -974,7 +975,7 @@ describe("validateProgramModel", () => {
       schedule: [],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[1].id: duplicate module id "entry"',
       'modules[0].dependencies[0].target: unknown module id "missing-dependency"',
       'entries[0].moduleId: unknown module id "missing-entry"',
@@ -1020,7 +1021,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(esmCycle)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(esmCycle))).toEqual([]);
 
     const cjsCycle = {
       modules: [
@@ -1058,7 +1059,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(cjsCycle)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(cjsCycle))).toEqual([]);
   });
 
   test("rejects unsound cycle reads: plain value/namespace closing a cycle, unguarded partial require, call to CJS", () => {
@@ -1092,7 +1093,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(plainValueCycle)).toEqual([
+    expect(validateProgramModel(analyzeProgram(plainValueCycle))).toEqual([
       "modules[0].dependencies[0]: an ESM value import that closes a cycle must be a hoisted-function call import (call: true) to avoid TDZ",
     ]);
 
@@ -1123,7 +1124,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(namespaceCycle)).toEqual([
+    expect(validateProgramModel(analyzeProgram(namespaceCycle))).toEqual([
       "modules[0].dependencies[0]: an ESM namespace import cannot close a cycle; a member read would hit TDZ",
     ]);
 
@@ -1149,7 +1150,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(unguardedCycle)).toEqual([
+    expect(validateProgramModel(analyzeProgram(unguardedCycle))).toEqual([
       "modules[0].dependencies[0]: a readable require that closes a cycle must be guarded (guard: true) so a partial export folds to a sentinel instead of NaN",
     ]);
 
@@ -1181,7 +1182,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(callToCjs)).toEqual([
+    expect(validateProgramModel(analyzeProgram(callToCjs))).toEqual([
       'modules[0].dependencies[0]: a hoisted-function call import must target an ESM module, target "b" is cjs',
       // The plan (finding 3) also rejects the call itself: a CJS definer renders numeric exports only, so
       // `fb` is a `value`, not a callable — calling it is a TypeError, not a witness.
@@ -1212,7 +1213,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("permits a CJS {require + dynamic} multi-kind pair to one target", () => {
@@ -1244,7 +1245,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("permits repeated value imports for one pair (two named imports)", () => {
@@ -1276,7 +1277,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
   });
 
   test("rejects a second side-effect import for one pair", () => {
@@ -1296,7 +1297,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[1]: a (importer, target) pair to "t" may carry at most one side-effect dependency',
     ]);
   });
@@ -1318,7 +1319,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[1]: a (importer, target) pair to "t" may carry at most one dynamic dependency',
     ]);
   });
@@ -1351,7 +1352,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(callingANumber)).toEqual([
+    expect(validateProgramModel(analyzeProgram(callingANumber))).toEqual([
       'modules[0].events[0].reads[0].call: read of "a_vb" must not be a call to match its binding\'s capability',
     ]);
 
@@ -1382,7 +1383,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(foldingFunctionSource)).toEqual([
+    expect(validateProgramModel(analyzeProgram(foldingFunctionSource))).toEqual([
       'modules[0].events[0].reads[0].call: read of "a_fb" must be a call (call: true) to match its binding\'s capability',
     ]);
   });
@@ -1424,7 +1425,7 @@ describe("validateProgramModel", () => {
     } satisfies ProgramModel;
     // The plan resolves the member through the star barrel to the callable-own-state definer and rejects
     // the numeric fold — the definer renders a function, so folding its member concatenates source text.
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'export "vdef" on "def": folded numerically consumed by module "consumer" (demand "vdef" on "barrel") but the definer renders a function; folding a function (a function\'s source text or an object) is unsound',
     ]);
   });
@@ -1460,7 +1461,7 @@ describe("validateProgramModel", () => {
     } satisfies ProgramModel;
     // The plan rejects the call: an object-export definer renders an object literal, not a function, so
     // calling it is a TypeError — a call must reach a callable-own-state or directly call-marked export.
-    expect(validateProgramModel(program)).toContain(
+    expect(validateProgramModel(analyzeProgram(program))).toContain(
       'export "vobj" on "obj": called consumed by module "consumer" (demand "vobj" on "obj") but the definer renders a object — a call must reach a callable-own-state definer or a directly call-marked export',
     );
   });
@@ -1493,7 +1494,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toContain(
+    expect(validateProgramModel(analyzeProgram(program))).toContain(
       'modules[0].dependencies[0]: a readable require cannot read "default" from CJS module "b"; a CommonJS provider supplies no default property',
     );
   });
@@ -1523,7 +1524,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "barrel" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'modules[0].dependencies[1].exportedName: duplicate named re-export of "shared"; a module may export a name at most once (Node: Duplicate export)',
     ]);
   });
@@ -1566,9 +1567,9 @@ describe("validateProgramModel", () => {
         entries: [{ name: "main", moduleId: "consumer" }],
         schedule: [{ kind: "import-entry", entry: "main" }],
       } satisfies ProgramModel;
-      expect(validateProgramModel(program).some((error) => error.includes("unsupplied"))).toBe(
-        true,
-      );
+      expect(
+        validateProgramModel(analyzeProgram(program)).some((error) => error.includes("unsupplied")),
+      ).toBe(true);
     });
 
     test("rejects a name provided by two star re-exports (ambiguous)", () => {
@@ -1597,7 +1598,9 @@ describe("validateProgramModel", () => {
         entries: [{ name: "main", moduleId: "consumer" }],
         schedule: [{ kind: "import-entry", entry: "main" }],
       } satisfies ProgramModel;
-      expect(validateProgramModel(program).some((error) => error.includes("ambiguous"))).toBe(true);
+      expect(
+        validateProgramModel(analyzeProgram(program)).some((error) => error.includes("ambiguous")),
+      ).toBe(true);
     });
 
     test("rejects one numeric export consumed as BOTH a call and a plain fold (incompatible shapes)", () => {
@@ -1646,7 +1649,9 @@ describe("validateProgramModel", () => {
       // The direct-target capability walk sees a plain numeric definer for BOTH consumers and passes;
       // only the whole-program aggregation catches the conflict.
       expect(
-        validateProgramModel(program).some((error) => error.includes("incompatible consumption")),
+        validateProgramModel(analyzeProgram(program)).some((error) =>
+          error.includes("incompatible consumption"),
+        ),
       ).toBe(true);
     });
 
@@ -1686,7 +1691,7 @@ describe("validateProgramModel", () => {
         schedule: [{ kind: "import-entry", entry: "main" }],
       } satisfies ProgramModel;
       expect(
-        validateProgramModel(program).some((error) =>
+        validateProgramModel(analyzeProgram(program)).some((error) =>
           error.includes("callability is not forwarded through a barrel"),
         ),
       ).toBe(true);
@@ -1733,7 +1738,7 @@ describe("validateProgramModel", () => {
         entries: [{ name: "main", moduleId: "consumer" }],
         schedule: [{ kind: "import-entry", entry: "main" }],
       } satisfies ProgramModel;
-      expect(validateProgramModel(program)).toContain(
+      expect(validateProgramModel(analyzeProgram(program))).toContain(
         'export "vp" on "pure": called consumed by module "consumer" (demand "vp" on "pure") but the definer renders a value — a call must reach a callable-own-state definer or a directly call-marked export',
       );
     });
@@ -1773,7 +1778,7 @@ describe("validateProgramModel", () => {
         entries: [{ name: "main", moduleId: "consumer" }],
         schedule: [{ kind: "import-entry", entry: "main" }],
       } satisfies ProgramModel;
-      expect(validateProgramModel(program)).toContain(
+      expect(validateProgramModel(analyzeProgram(program))).toContain(
         'export "vx" on "cjsdef": called consumed by module "consumer" (demand "vx" on "cjsdef") but the definer renders a value — a call must reach a callable-own-state definer or a directly call-marked export',
       );
     });
@@ -1862,7 +1867,7 @@ describe("validateProgramModel", () => {
           entries: [{ name: "main", moduleId: "consumer" }],
           schedule: [{ kind: "import-entry", entry: "main" }],
         } satisfies ProgramModel;
-        expect(validateProgramModel(program).length === 0).toBe(sound);
+        expect(validateProgramModel(analyzeProgram(program)).length === 0).toBe(sound);
       });
     }
   });
@@ -1904,7 +1909,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       "modules[0].events[0].identityCheck: leftBinding and rightBinding must capture the SAME object export; they resolve to different origins",
     ]);
   });
@@ -1928,7 +1933,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       'synchronous cycle {"a", "b"} mixes module formats (cjs, esm); a mixed-format cycle is Node-illegal',
     ]);
   });
@@ -1955,7 +1960,7 @@ describe("validateProgramModel", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([
       "modules[1]: a module cannot be both sideEffectFree and callableOwnState; a legal DCE may drop the state a callable-own-state export reads",
     ]);
   });
@@ -1998,12 +2003,12 @@ describe("organic chunk groups (wave 6)", () => {
         { name: "organic-sized", minShareCount: 1, minSize: 128 },
       ],
     };
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
     // Serialize -> parse -> identical, and still valid (byte-identical replay through model.json).
     const roundTripped = JSON.parse(JSON.stringify(program)) as ProgramModel;
     expect(roundTripped).toEqual(program);
     expect(JSON.stringify(roundTripped)).toBe(JSON.stringify(program));
-    expect(validateProgramModel(roundTripped)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(roundTripped))).toEqual([]);
   });
 
   test("rejects carrying both manual and organic chunk groups", () => {
@@ -2012,7 +2017,7 @@ describe("organic chunk groups (wave 6)", () => {
       manualChunkGroups: [{ name: "manual", moduleIds: ["leaf"] }],
       organicChunkGroups: [{ name: "organic", minShareCount: 1 }],
     };
-    expect(validateProgramModel(program)).toContain(
+    expect(validateProgramModel(analyzeProgram(program))).toContain(
       "a program may carry either manualChunkGroups or organicChunkGroups, not both",
     );
   });
@@ -2022,7 +2027,7 @@ describe("organic chunk groups (wave 6)", () => {
       ...baseProgram(),
       organicChunkGroups: [{ name: "dup" }, { name: "dup", test: "([unclosed", minShareCount: -1 }],
     };
-    const errors = validateProgramModel(program);
+    const errors = validateProgramModel(analyzeProgram(program));
     expect(errors).toContain('organicChunkGroups[1].name: duplicate group name "dup"');
     expect(errors).toContain(
       'organicChunkGroups[1].test: invalid regular-expression source "([unclosed"',

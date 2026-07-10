@@ -231,7 +231,7 @@ describe("runCampaign", () => {
       executeCase: async () => ({
         generated,
         options: campaignOptions(),
-        rendered: renderProgram(generated.program),
+        rendered: renderProgram(generated.analyzed),
         sourceOutcome,
         bundleOutcome,
         bundleManifest: null,
@@ -276,7 +276,7 @@ describe("runCampaign", () => {
       executeCase: async () => ({
         generated,
         options: campaignOptions(),
-        rendered: renderProgram(generated.program),
+        rendered: renderProgram(generated.analyzed),
         sourceOutcome: ok([event("entry", 1)]),
         bundleOutcome,
         bundleManifest: null,
@@ -654,7 +654,7 @@ describe("runCampaign", () => {
       ].join("\n"),
     );
     const generated = generateCase(2, DEFAULT_CASE_SIZE);
-    const rendered = renderProgram(generated.program);
+    const rendered = renderProgram(generated.analyzed);
     let copied = "";
 
     try {
@@ -1363,7 +1363,7 @@ describe("writeFailureArtifacts", () => {
         signature: "stable-signature",
       },
       bundleOutcome: ok([event("bundle", 1)]),
-      bundleManifest: renderProgram(generated.program).schedule,
+      bundleManifest: renderProgram(generated.analyzed).schedule,
       bundleFiles: [{ path: "entry.js", contents: Buffer.from("first\n") }],
     } as const satisfies CampaignCaseResult;
     const changedOutcome = {
@@ -1448,7 +1448,7 @@ function campaignOptions(overrides: Partial<CampaignOptions> = {}): CampaignOpti
 }
 
 function passedCase(generated: GeneratedCase): CampaignCaseResult {
-  const rendered = renderProgram(generated.program);
+  const rendered = renderProgram(generated.analyzed);
   return {
     generated,
     options: campaignOptions({ seed: generated.seed }),
@@ -1474,7 +1474,7 @@ function failedCase(generated: GeneratedCase): CampaignCaseResult {
   return {
     generated,
     options: campaignOptions({ seed: generated.seed }),
-    rendered: renderProgram(generated.program),
+    rendered: renderProgram(generated.analyzed),
     sourceOutcome,
     bundleOutcome,
     bundleManifest: null,

@@ -120,6 +120,33 @@ sweep. The [boundary contract](./analyzed-program-boundary.md) now reflects the 
   frozen snapshot) builds a fixed 2×300 seed set (mixed od/wa) against
   `pr10104-runtime-snapshot/rolldown/dist/index.mjs` and asserts the family-A red-rate band (21–27%).
 
+## Round 4 — the clearance-gate final two
+
+A codex clearance re-review named two residual blockers; round 4 closed exactly those, still
+byte-identity-preserving (458 golden, `npm run corpus:check`) with `vp check` + `vp test` green and the
+catching-power red-rate inside its committed 21–27% band. The [boundary contract](./analyzed-program-boundary.md)
+now records the consumer contract and the single form dispatch.
+
+- **Consumers take the `AnalyzedProgram` ONLY (mismatched-pair blocker).** `renderProgram`,
+  `validateProgramModel`, and `deriveCoverageTags` no longer take a separate `program` argument — they read
+  it from `analyzed.program`, so an analysis of program A can never be supplied alongside program B (the
+  mismatch is unrepresentable at the call site, not merely asserted). The codex probe (an ESM-derived
+  analysis over an otherwise-identical CJS numeric-definer program → validation `[]`, then `ns.vx()` against
+  `exports.vx = 5`) can no longer be formed. The one transition seam that still carries both,
+  `executeProgram(program, options, overrides, analyzed?)`, hard-asserts `analysis.program === program` and
+  throws otherwise. Fixed-template programs are now deep-frozen on the SAME path as random-mixed
+  (`generateCase` deep-freezes before `analyzeProgram`), so every `GeneratedCase` carries a frozen program.
+  A compile-time `@ts-expect-error` regression + the transition-throw + a frozen-fixed-template test pin it.
+- **`renderedFormOf` is the renderer's SINGLE export-form dispatch (mirrored-switch blocker).** The renderer
+  had a moduleProfile export-form switch (`profile.exportShape.kind === …`) in parallel with the analyzer's
+  classification. `RenderedExportForm` is now a FIVE-way discriminated form (`numeric-value` /
+  `callable-constant` / `inferred-pure` / `callable-own-state` / `fresh-object`) the analyzer returns and the
+  renderer maps DIRECTLY to one emission template; the mirrored switch in `render.ts` is deleted (it never
+  reads `exportShape` again — a grep guard fails if it does). The validator collapses the fine form to a
+  consumption category (`formConsumptionShape`) for soundness and to a `value|function|object` noun
+  (`renderedFormNoun`) for diagnostics, so the crafted-violation messages are unchanged. Byte-identical: the
+  fine forms derive from the same profile the deleted switch read.
+
 ## Deferred (corpus-semantic — needs its own re-acceptance wave)
 
 The renderer's category-ordered dependency emission (see

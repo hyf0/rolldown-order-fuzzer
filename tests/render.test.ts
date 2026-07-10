@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
 import type { ExecutionEvent } from "../src/protocol.ts";
@@ -52,7 +53,7 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(rendered.files.map((file) => file.path).sort()).toEqual(
       [...rendered.modulePaths.values(), rendered.schedulePath].sort(),
@@ -95,7 +96,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main/raw" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(rendered.files.map((file) => file.path)).toEqual([
       "module-0000.mjs",
@@ -199,7 +200,7 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0000.cjs")).toBe(
       [
@@ -270,7 +271,7 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
@@ -324,7 +325,7 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const entryFile = rendered.files.find(
       (file) => file.path === rendered.modulePaths.get("entry"),
     );
@@ -350,7 +351,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(() => renderProgram(program)).toThrowError(
+    expect(() => renderProgram(analyzeProgram(program))).toThrowError(
       [
         "Cannot render invalid program:",
         '- modules[0].dependencies[0].target: unknown module id "missing"',
@@ -398,7 +399,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
       [
@@ -438,7 +439,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
       ['Object.defineProperty(exports, "__proto__", { value: 0, enumerable: true });', ""].join(
@@ -479,7 +480,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
       ["module.exports = 0;", ""].join("\n"),
@@ -530,7 +531,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0001.cjs")).toBe(
       [
@@ -596,7 +597,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    expect(() => renderProgram(program)).toThrowError(
+    expect(() => renderProgram(analyzeProgram(program))).toThrowError(
       [
         "Cannot render invalid program:",
         '- modules[0].dependencies[0].localName: reserved renderer binding identifier "globalThis"',
@@ -640,7 +641,7 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const source = fileContents(rendered.files, "module-0000.mjs");
 
     expect(rendered.files.map((file) => file.path)).toEqual([
@@ -688,7 +689,9 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(renderProgram(program)).toEqual(renderProgram(structuredClone(program)));
+    expect(renderProgram(analyzeProgram(program))).toEqual(
+      renderProgram(analyzeProgram(structuredClone(program))),
+    );
   });
 
   test("clones schedule operations so later model mutation cannot diverge from schedule.json", () => {
@@ -713,7 +716,7 @@ describe("renderProgram", () => {
       schedule,
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     scheduleOperation.entry = "alternate";
     schedule.push({ kind: "import-entry", entry: "alternate" });
@@ -752,7 +755,7 @@ describe("renderProgram", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     await withRenderedProgram(rendered.files, async (directory) => {
       const namespace = await import(pathToFileURL(join(directory, "module-0001.cjs")).href);
@@ -807,7 +810,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
       [
@@ -884,7 +887,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(rendered.files.map((file) => file.path)).toEqual([
       "module-0000.mjs",
@@ -963,7 +966,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0000.cjs")).toBe(
       [
@@ -1029,7 +1032,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
@@ -1092,7 +1095,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     // The barrels forward the value; only the definer synthesizes it, so a dropped barrel init is
     // observable downstream (rolldown #8777 / #9299 shape).
@@ -1162,7 +1165,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0001.mjs")).toBe(
       ['export { default as vdef } from "./module-0002.mjs";', ""].join("\n"),
@@ -1224,7 +1227,7 @@ describe("renderProgram", () => {
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0000.cjs")).toBe(
       [
@@ -1278,7 +1281,7 @@ describe("renderProgram", () => {
       ],
     } satisfies ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     expect(fileContents(rendered.files, "module-0000.mjs")).toBe(
       [
@@ -1337,7 +1340,7 @@ describe("renderProgram", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    const contents = fileContents(renderProgram(program).files, "module-0000.mjs");
+    const contents = fileContents(renderProgram(analyzeProgram(program)).files, "module-0000.mjs");
     const importAt = contents.indexOf("import { v as entryV }");
     const dynamicAt = contents.indexOf("__orderDynamicImports");
     expect(importAt).toBeGreaterThanOrEqual(0);
@@ -1376,7 +1379,7 @@ describe("renderProgram", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "require-entry", entry: "main" }],
     } satisfies ProgramModel;
-    const contents = fileContents(renderProgram(program).files, "module-0000.cjs");
+    const contents = fileContents(renderProgram(analyzeProgram(program)).files, "module-0000.cjs");
     const requireAt = contents.indexOf("const d = require(");
     const dynamicAt = contents.indexOf("__orderDynamicImports");
     expect(requireAt).toBeGreaterThanOrEqual(0);
@@ -1442,8 +1445,8 @@ describe("reserved export-name declarations (finding 2.3)", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
-    const def = fileContents(renderProgram(program).files, "module-0001.mjs");
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const def = fileContents(renderProgram(analyzeProgram(program)).files, "module-0001.mjs");
     // `export function default()` is a syntax error; a fresh local aliased to `default` is valid.
     expect(def).not.toContain("export function default(");
     expect(def).toContain("as default };");
@@ -1478,8 +1481,8 @@ describe("reserved export-name declarations (finding 2.3)", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
-    const obj = fileContents(renderProgram(program).files, "module-0001.mjs");
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const obj = fileContents(renderProgram(analyzeProgram(program)).files, "module-0001.mjs");
     // `export const default = …` is a syntax error; a fresh local aliased to `default` is valid.
     expect(obj).not.toContain("export const default ");
     expect(obj).toContain("as default };");

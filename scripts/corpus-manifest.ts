@@ -43,6 +43,7 @@ import {
   type FormatRegime,
   type MixedTemplateName,
 } from "../src/generate.ts";
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import { programChunking, type ProgramModel } from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
@@ -107,7 +108,7 @@ function renderCase(
   program: ProgramModel,
 ): CaseManifest {
   try {
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const files = [...rendered.files]
       .map((file) => ({ path: file.path, sha256: sha256(file.contents) }))
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import { executeManifest } from "../src/execute.ts";
 import { deriveCoverageTags, generateCase, sampleCaseSize } from "../src/generate.ts";
 import type { ProgramModel } from "../src/model.ts";
@@ -102,7 +103,7 @@ function conjunctionProgram(): ProgramModel {
 
 describe("inferred-pure definer rendering", () => {
   test("emits only pure statements: a build function, a PURE-annotated call, no events", () => {
-    const rendered = renderProgram(conjunctionProgram());
+    const rendered = renderProgram(analyzeProgram(conjunctionProgram()));
     const definer = fileContents(rendered.files, "module-0000.mjs");
 
     // A local build function + a /* @__PURE__ */-annotated call assigned to a const, then exported.
@@ -117,14 +118,14 @@ describe("inferred-pure definer rendering", () => {
   });
 
   test("the barrel star-re-exports the definer and named-re-exports the sibling", () => {
-    const rendered = renderProgram(conjunctionProgram());
+    const rendered = renderProgram(analyzeProgram(conjunctionProgram()));
     const barrel = fileContents(rendered.files, "module-0002.mjs");
     expect(barrel).toContain('export * from "./module-0000.mjs";');
     expect(barrel).toContain('export { vm_sib } from "./module-0001.mjs";');
   });
 
   test("the source graph runs cleanly (the oracle baseline): the definer's value flows", async () => {
-    const rendered = renderProgram(conjunctionProgram());
+    const rendered = renderProgram(analyzeProgram(conjunctionProgram()));
     await withRenderedProgram(rendered.files, async (directory) => {
       const outcome = await executeManifest(join(directory, rendered.schedulePath));
       expect(outcome.status).toBe("ok");
@@ -174,7 +175,7 @@ describe("function-hidden and computed-member read rendering", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const entry = fileContents(rendered.files, "module-0001.mjs");
     // The read is lexically inside a function body; top-level code calls it in the payload.
     expect(entry).toContain("function __hiddenRead0() { return leafValue; }");
@@ -225,7 +226,7 @@ describe("function-hidden and computed-member read rendering", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as ProgramModel;
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const entry = fileContents(rendered.files, "module-0001.mjs");
     // A computed access `ns[<runtime key>]`, not `ns.vleaf` — the member name is built at runtime.
     expect(entry).toContain('ns["vl" + "eaf"]');
@@ -245,8 +246,12 @@ describe("function-hidden and computed-member read rendering", () => {
 describe("family-A conjunction coverage tag", () => {
   test("fires only when ALL ingredients are present", () => {
     const complete = conjunctionProgram();
-    expect(deriveCoverageTags(complete)).toContain("mechanism:pure-definer-behind-barrel");
-    expect(deriveCoverageTags(complete)).toContain("variation:inferred-pure-definer");
+    expect(deriveCoverageTags(analyzeProgram(complete))).toContain(
+      "mechanism:pure-definer-behind-barrel",
+    );
+    expect(deriveCoverageTags(analyzeProgram(complete))).toContain(
+      "variation:inferred-pure-definer",
+    );
   });
 
   test("a NAMED (not star) re-export of the definer does NOT fire the tag (the bug needs the star)", () => {
@@ -276,8 +281,10 @@ describe("family-A conjunction coverage tag", () => {
           : module,
       ),
     } as ProgramModel;
-    expect(validateProgramModel(named)).toEqual([]);
-    expect(deriveCoverageTags(named)).not.toContain("mechanism:pure-definer-behind-barrel");
+    expect(validateProgramModel(analyzeProgram(named))).toEqual([]);
+    expect(deriveCoverageTags(analyzeProgram(named))).not.toContain(
+      "mechanism:pure-definer-behind-barrel",
+    );
   });
 
   test("a single barrel importer does NOT fire the tag (needs >= 2 importers)", () => {
@@ -290,8 +297,10 @@ describe("family-A conjunction coverage tag", () => {
         (op) => op.kind === "trigger-dynamic-import" || op.entry !== "entry-m_e2",
       ),
     } as ProgramModel;
-    expect(validateProgramModel(oneImporter)).toEqual([]);
-    expect(deriveCoverageTags(oneImporter)).not.toContain("mechanism:pure-definer-behind-barrel");
+    expect(validateProgramModel(analyzeProgram(oneImporter))).toEqual([]);
+    expect(deriveCoverageTags(analyzeProgram(oneImporter))).not.toContain(
+      "mechanism:pure-definer-behind-barrel",
+    );
   });
 
   test("no inferred-pure definer means no tag", () => {
@@ -309,7 +318,9 @@ describe("family-A conjunction coverage tag", () => {
           : module,
       ),
     } as ProgramModel;
-    expect(deriveCoverageTags(notPure)).not.toContain("mechanism:pure-definer-behind-barrel");
+    expect(deriveCoverageTags(analyzeProgram(notPure))).not.toContain(
+      "mechanism:pure-definer-behind-barrel",
+    );
   });
 
   // Regression for the family-A false tag (finding C): the barrel carries an UNUSED `export * from`
@@ -405,8 +416,10 @@ describe("family-A conjunction coverage tag", () => {
         { kind: "import-entry", entry: "entry-e2" },
       ],
     } as ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
-    expect(deriveCoverageTags(program)).not.toContain("mechanism:pure-definer-behind-barrel");
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    expect(deriveCoverageTags(analyzeProgram(program))).not.toContain(
+      "mechanism:pure-definer-behind-barrel",
+    );
   });
 });
 
@@ -417,7 +430,7 @@ describe("family-A/B generation", () => {
     for (let seed = 20_000; seed < 21_000; seed += 1) {
       const size = sampleCaseSize(new SeededRng(seed));
       const { program } = generateCase(seed, size);
-      expect(validateProgramModel(program)).toEqual([]);
+      expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
       const pureDefiners = program.modules.filter((module) => module.inferredPure === true);
       for (const definer of pureDefiners) {
         checkedDefiners += 1;
@@ -438,7 +451,9 @@ describe("family-A/B generation", () => {
         );
         expect(read).toBe(true);
       }
-      if (deriveCoverageTags(program).includes("mechanism:pure-definer-behind-barrel")) {
+      if (
+        deriveCoverageTags(analyzeProgram(program)).includes("mechanism:pure-definer-behind-barrel")
+      ) {
         checkedConjunctions += 1;
       }
     }
@@ -451,7 +466,7 @@ describe("family-A/B generation", () => {
     let sawHiddenOnEntry = false;
     for (let seed = 30_000; seed < 30_400; seed += 1) {
       const { program } = generateCase(seed, 12, "mixed");
-      expect(validateProgramModel(program)).toEqual([]);
+      expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
       const entryIds = new Set(program.entries.map((entry) => entry.moduleId));
       for (const module of program.modules) {
         if (entryIds.has(module.id) && module.events.some((event) => event.hiddenReadFn === true)) {
@@ -499,7 +514,7 @@ describe("model validation of the wave-7 shapes", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
-    const errors = validateProgramModel(invalid);
+    const errors = validateProgramModel(analyzeProgram(invalid));
     expect(errors).toContain(
       "modules[0]: an inferred-pure module must not emit events; an event is a top-level side effect",
     );
@@ -541,7 +556,7 @@ describe("model validation of the wave-7 shapes", () => {
       entries: [{ name: "main", moduleId: "reader" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
-    const errors = validateProgramModel(invalid);
+    const errors = validateProgramModel(analyzeProgram(invalid));
     expect(errors).toContain("modules[1].events[0]: hiddenReadFn requires a non-empty reads array");
     expect(
       errors.some((error) =>

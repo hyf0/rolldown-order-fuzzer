@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ProgramModel } from "../src/model.ts";
 import { candidates, parseArgs, sameFailure } from "../src/shrink.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
@@ -10,7 +11,7 @@ function findValidCandidate(
   predicate: (candidate: ProgramModel) => boolean,
 ): ProgramModel | undefined {
   for (const candidate of candidates(program)) {
-    if (validateProgramModel(candidate).length === 0 && predicate(candidate)) {
+    if (validateProgramModel(analyzeProgram(candidate)).length === 0 && predicate(candidate)) {
       return candidate;
     }
   }
@@ -86,7 +87,7 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
     // A candidate that drops one member must leave a VALID model (callMembers followed readMembers).
     const shrunk = findValidCandidate(program, (candidate) => {
       const dep = candidate.modules[0]?.dependencies[0];
@@ -141,7 +142,7 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
     // The rewired candidate must target `def` directly AND read the source member `inner` — the event
     // read member must follow the rename, or the candidate would be invalid and silently skipped.
     const rewired = findValidCandidate(program, (candidate) => {
@@ -338,7 +339,7 @@ describe("shrink candidate fixes (finding E)", () => {
       entries: [{ name: "main", moduleId: "consumer" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
     // The rewired candidate must target def directly, read "inner", AND carry "inner" in callMembers —
     // else callMembers still names "outer" (no longer a read member) and the candidate is invalid.
     const rewired = findValidCandidate(program, (candidate) => {
@@ -369,7 +370,7 @@ describe("shrink candidate fixes (finding E)", () => {
       ],
       manualChunkGroups: [{ name: "g", moduleIds: ["a", "b"] }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
 
     // Mirror the shrinker's greedy loop (accept ANY candidate that stays "failing"): here the only
     // structure-preserving edit is dropping the group. With the old bug the group-drop candidate was
@@ -383,7 +384,7 @@ describe("shrink candidate fixes (finding E)", () => {
     for (let step = 0; step < 200; step += 1) {
       let progressed = false;
       for (const candidate of candidates(current)) {
-        if (validateProgramModel(candidate).length === 0 && accept(candidate)) {
+        if (validateProgramModel(analyzeProgram(candidate)).length === 0 && accept(candidate)) {
           current = candidate;
           progressed = true;
           break;

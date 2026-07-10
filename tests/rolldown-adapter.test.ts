@@ -18,6 +18,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import { executeManifest } from "../src/execute.ts";
 import { generateCase } from "../src/generate.ts";
 import type { EventValue, ProgramModel } from "../src/model.ts";
@@ -70,22 +71,26 @@ describe("withRolldownBuild", () => {
     } satisfies ProgramModel;
     let temporaryDirectory = "";
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      temporaryDirectory = artifacts.temporaryDirectory;
-      await expect(access(artifacts.sourceDirectory)).resolves.toBeUndefined();
-      await expect(access(artifacts.bundleDirectory)).resolves.toBeUndefined();
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        temporaryDirectory = artifacts.temporaryDirectory;
+        await expect(access(artifacts.sourceDirectory)).resolves.toBeUndefined();
+        await expect(access(artifacts.bundleDirectory)).resolves.toBeUndefined();
 
-      const [sourceOutcome, bundleOutcome] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-      ]);
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
 
-      return {
-        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        manifest: artifacts.manifest,
-        outputFiles: artifacts.outputFiles,
-      };
-    });
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          manifest: artifacts.manifest,
+          outputFiles: artifacts.outputFiles,
+        };
+      },
+    );
 
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
@@ -102,8 +107,10 @@ describe("withRolldownBuild", () => {
   test("writes an explicit ESM package boundary in the bundle directory", async () => {
     const program = singleEntryProgram();
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) =>
-      readFile(join(artifacts.bundleDirectory, "package.json"), "utf8"),
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => readFile(join(artifacts.bundleDirectory, "package.json"), "utf8"),
     );
 
     expect(successValue(result)).toBe('{\n  "type": "module"\n}\n');
@@ -136,11 +143,15 @@ describe("withRolldownBuild", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const sourceOutcome = await executeManifest(artifacts.sourceManifestPath);
-      const bundleOutcome = await executeManifest(artifacts.bundleManifestPath);
-      return classifyVerdict(sourceOutcome, bundleOutcome);
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const sourceOutcome = await executeManifest(artifacts.sourceManifestPath);
+        const bundleOutcome = await executeManifest(artifacts.bundleManifestPath);
+        return classifyVerdict(sourceOutcome, bundleOutcome);
+      },
+    );
 
     expect(successValue(result)).toEqual({ kind: "pass", signature: "pass" });
   });
@@ -159,16 +170,20 @@ describe("withRolldownBuild", () => {
       schedule: [{ kind: "require-entry", entry: "worker" }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const [sourceOutcome, bundleOutcome] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-      ]);
-      return {
-        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        manifest: artifacts.manifest,
-      };
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          manifest: artifacts.manifest,
+        };
+      },
+    );
 
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
@@ -203,7 +218,7 @@ describe("withRolldownBuild", () => {
       ],
       schedule: [operation],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     operation.entry = "alternate";
 
     const result = await withRolldownBuild(program, rendered, async (artifacts) => {
@@ -244,16 +259,20 @@ describe("withRolldownBuild", () => {
       manualChunkGroups: [{ name: "forced-shared", moduleIds: ["shared"] }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const [sourceOutcome, bundleOutcome] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-      ]);
-      return {
-        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        outputFiles: artifacts.outputFiles,
-      };
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          outputFiles: artifacts.outputFiles,
+        };
+      },
+    );
 
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
@@ -270,7 +289,7 @@ describe("withRolldownBuild", () => {
     { timeout: 30_000 },
     async () => {
       const generated = findManualChunkCase();
-      const rendered = renderProgram(generated.program);
+      const rendered = renderProgram(generated.analyzed);
       const expectedSourceFiles = [...rendered.modulePaths.values(), rendered.schedulePath].sort();
 
       expect(rendered.files.map((file) => file.path).sort()).toEqual(expectedSourceFiles);
@@ -317,7 +336,7 @@ describe("withRolldownBuild", () => {
       for (const onDemandWrapping of [false, true]) {
         await withRolldownBuild(
           program,
-          renderProgram(program),
+          renderProgram(analyzeProgram(program)),
           async (): Promise<never> => {
             throw new Error("build callback must not run");
           },
@@ -371,7 +390,7 @@ describe("withRolldownBuild", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     const result = await withRolldownBuild(program, rendered, async (artifacts) => {
       const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
@@ -433,16 +452,20 @@ describe("withRolldownBuild", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const [sourceOutcome, bundleOutcome] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-      ]);
-      return {
-        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: moduleEventPairs(sourceOutcome.events),
-      };
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          events: moduleEventPairs(sourceOutcome.events),
+        };
+      },
+    );
 
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
@@ -486,9 +509,9 @@ describe("withRolldownBuild", () => {
       ],
       manualChunkGroups: [{ name: "core", moduleIds: ["entry", "target"] }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const entryFile =
       rendered.files.find((file) => file.path === "module-0000.mjs")?.contents ?? "";
     // One specifier, a static value import AND a dynamic registration.
@@ -556,13 +579,17 @@ describe("withRolldownBuild", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const [sourceOutcome, bundleOutcome] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-      ]);
-      return classifyVerdict(sourceOutcome, bundleOutcome);
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return classifyVerdict(sourceOutcome, bundleOutcome);
+      },
+    );
 
     expect(successValue(result)).toEqual({ kind: "pass", signature: "pass" });
   });
@@ -606,16 +633,20 @@ describe("withRolldownBuild", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const [sourceOutcome, bundleOutcome] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-      ]);
-      return {
-        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: moduleEventPairs(sourceOutcome.events),
-      };
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          events: moduleEventPairs(sourceOutcome.events),
+        };
+      },
+    );
 
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
@@ -657,18 +688,22 @@ describe("withRolldownBuild", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    const result = await withRolldownBuild(program, renderProgram(program), async (artifacts) => {
-      const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
-        executeManifest(artifacts.sourceManifestPath),
-        executeManifest(artifacts.bundleManifestPath),
-        readFile(join(artifacts.sourceDirectory, "side-effect-free/package.json"), "utf8"),
-      ]);
-      return {
-        verdict: classifyVerdict(sourceOutcome, bundleOutcome),
-        events: moduleEventPairs(sourceOutcome.events),
-        packageJson,
-      };
-    });
+    const result = await withRolldownBuild(
+      program,
+      renderProgram(analyzeProgram(program)),
+      async (artifacts) => {
+        const [sourceOutcome, bundleOutcome, packageJson] = await Promise.all([
+          executeManifest(artifacts.sourceManifestPath),
+          executeManifest(artifacts.bundleManifestPath),
+          readFile(join(artifacts.sourceDirectory, "side-effect-free/package.json"), "utf8"),
+        ]);
+        return {
+          verdict: classifyVerdict(sourceOutcome, bundleOutcome),
+          events: moduleEventPairs(sourceOutcome.events),
+          packageJson,
+        };
+      },
+    );
 
     expect(successValue(result)).toEqual({
       verdict: { kind: "pass", signature: "pass" },
@@ -763,8 +798,8 @@ describe("withRolldownBuild", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
-    const rendered = renderProgram(program);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const rendered = renderProgram(analyzeProgram(program));
     // The cycle-edge reads render as hoisted function calls and callable exports, not `const`.
     expect(
       rendered.files.some((file) => file.contents.includes("export function w1() { return 20; }")),
@@ -857,8 +892,8 @@ describe("withRolldownBuild", () => {
       ],
     } satisfies ProgramModel;
 
-    expect(validateProgramModel(program)).toEqual([]);
-    const rendered = renderProgram(program);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const rendered = renderProgram(analyzeProgram(program));
     // The cycle-edge read renders with the finite guard so a partial export folds to a sentinel.
     expect(
       rendered.files.some((file) =>
@@ -917,7 +952,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           singleEntryProgram(),
-          renderProgram(singleEntryProgram()),
+          renderProgram(analyzeProgram(singleEntryProgram())),
           async (): Promise<never> => {
             throw new Error("panic build callback must not run");
           },
@@ -935,7 +970,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           singleEntryProgram(),
-          renderProgram(singleEntryProgram()),
+          renderProgram(analyzeProgram(singleEntryProgram())),
           async (): Promise<never> => {
             throw new Error("crash build callback must not run");
           },
@@ -961,7 +996,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           singleEntryProgram(),
-          renderProgram(singleEntryProgram()),
+          renderProgram(analyzeProgram(singleEntryProgram())),
           async (): Promise<never> => {
             throw new Error("startup crash callback must not run");
           },
@@ -982,7 +1017,7 @@ describe("withRolldownBuild", () => {
     try {
       const result = await withRolldownBuild(
         program,
-        renderProgram(program),
+        renderProgram(analyzeProgram(program)),
         async (): Promise<never> => {
           throw new Error("build callback must not run");
         },
@@ -1015,7 +1050,7 @@ describe("withRolldownBuild", () => {
 
     const result = await withRolldownBuild(
       program,
-      renderProgram(program),
+      renderProgram(analyzeProgram(program)),
       async (artifacts): Promise<never> => {
         throw new Error(`missing emitted file: ${artifacts.outputFiles[0]}`);
       },
@@ -1080,7 +1115,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           program,
-          renderProgram(program),
+          renderProgram(analyzeProgram(program)),
           async (): Promise<never> => {
             throw new Error("build callback must not run");
           },
@@ -1146,7 +1181,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           program,
-          renderProgram(program),
+          renderProgram(analyzeProgram(program)),
           async (artifacts) => artifacts.manifest.entries,
           { packageSpecifier },
         );
@@ -1189,7 +1224,7 @@ describe("withRolldownBuild", () => {
         { kind: "import-entry", entry: "alpha" },
       ],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
 
     const first = await withRolldownBuild(program, rendered, collectOutputIdentity);
     const second = await withRolldownBuild(program, rendered, collectOutputIdentity, {
@@ -1238,7 +1273,7 @@ describe("withRolldownBuild", () => {
         { kind: "import-entry", entry: "a_" },
       ],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const build = () =>
       withRolldownBuild(program, rendered, async (artifacts) => {
         const [sourceOutcome, bundleOutcome] = await Promise.all([
@@ -1279,7 +1314,7 @@ describe("withRolldownBuild", () => {
       ],
       schedule: [{ kind: "import-entry", entry: "a_" }],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const build = () =>
       withRolldownBuild(program, rendered, async (artifacts) => {
         const [sourceOutcome, bundleOutcome] = await Promise.all([
@@ -1327,7 +1362,7 @@ describe("withRolldownBuild", () => {
         { kind: "import-entry", entry: "beta" },
       ],
     } satisfies ProgramModel;
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const build = () =>
       withRolldownBuild(program, rendered, async (artifacts) => {
         const [sourceOutcome, bundleOutcome] = await Promise.all([
@@ -1499,7 +1534,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           program,
-          renderProgram(program),
+          renderProgram(analyzeProgram(program)),
           async (): Promise<never> => {
             callbackRan = true;
             throw new Error("escaped output callback must not run");
@@ -1616,7 +1651,7 @@ describe("withRolldownBuild", () => {
       async (packageSpecifier) => {
         const result = await withRolldownBuild(
           program,
-          renderProgram(program),
+          renderProgram(analyzeProgram(program)),
           async (): Promise<never> => {
             callbackRan = true;
             throw new Error("timed out child callback must not run");
@@ -1649,7 +1684,7 @@ describe("withRolldownBuild", () => {
     await withTemporaryModule(fakeHangingHelperRolldownModule(), async (packageSpecifier) => {
       const result = await withRolldownBuild(
         singleEntryProgram(),
-        renderProgram(singleEntryProgram()),
+        renderProgram(analyzeProgram(singleEntryProgram())),
         async (): Promise<never> => {
           throw new Error("timed out helper callback must not run");
         },
@@ -1800,9 +1835,9 @@ describe("organic chunk groups (wave 6)", () => {
         { name: "organic-shared", minShareCount: 2, includeDependenciesRecursively: false },
       ],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
 
-    const rendered = renderProgram(program);
+    const rendered = renderProgram(analyzeProgram(program));
     const result = await withRolldownBuild(program, rendered, async (artifacts) => {
       const [sourceOutcome, bundleOutcome] = await Promise.all([
         executeManifest(artifacts.sourceManifestPath),

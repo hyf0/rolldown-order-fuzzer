@@ -39,7 +39,10 @@ what is frozen when, and who consumes what.
    instead of a silently reordered, corpus-moving schedule.
 3. **The finalized `program` is DEEP-FROZEN** and `analyzeProgram` freezes the plan, so accidental
    post-finalization mutation throws in tests. From here nothing about the program changes; downstream
-   layers only READ.
+   layers only READ. This holds for EVERY case, not just random-mixed: `finalizeProgram` deep-freezes the
+   generated graph, and a fixed-template program (a plain object literal the template builders assemble) is
+   deep-frozen on the SAME path — `generateCase` deep-freezes it before `analyzeProgram`. So a
+   `GeneratedCase` always carries a frozen `program` that IS `analyzed.program`, whatever the template.
 
 ## The ExportDemandPlan (`analyzed-program.ts`), keyed by resolved `(moduleId, exportName)`
 
@@ -54,30 +57,61 @@ what is frozen when, and who consumes what.
   or two conflicting stars), or `unsupplied` (a `default` import through a star-only barrel — a star never
   forwards `default`, and a star-carrying barrel synthesizes nothing local).
 - **`resolvedDemands`** — per resolved definer export, the aggregation across ALL consumers: the definer's
-  export shape, the rendered form (`value | function | object`), the set of consumption shapes (a set
-  larger than one is an incompatible-consumption conflict), and whether any route reaches it through a
-  barrel.
+  export shape, the rendered form (see below), the set of consumption shapes (a set larger than one is an
+  incompatible-consumption conflict), and whether any route reaches it through a barrel.
+
+### `RenderedExportForm` — the analyzer's ONE export-shape classification
+
+`renderedFormOf(definer, exportName, callableNames)` is the SINGLE place export shape is classified, and it
+returns a FINE five-way form, not a value/function/object trichotomy — because two distinct emission
+templates share a category, so a coarser vocabulary could not select the template:
+
+- `numeric-value` — a folded numeric `const` (ESM) / `exports.x = <fold>` (CJS) / a definer-less name;
+- `callable-constant` — a numeric-fold definer's DIRECT-call-marked export: a hoisted `function` returning
+  the constant base (callability marked only on a direct edge, never forwarded through a barrel);
+- `inferred-pure` — an inferred-pure definer's non-inlinable `/* @__PURE__ */`-call `const`;
+- `callable-own-state` — a callable-own-state definer's state-reading `function`;
+- `fresh-object` — an `objectExport` definer's fresh object literal.
+
+The renderer maps this form DIRECTLY to a template (below). The validator collapses it two ways:
+`formConsumptionShape(form)` → the coarse consumption category (`numeric` / `callable` / `reference`) it
+soundly satisfies (the shape × form diagonal), and `renderedFormNoun(form)` → the `value | function | object`
+noun a diagnostic reads as (so a value-category mismatch still says "renders a value").
 
 ## Who consumes what — the ONE carried instance (round 3)
 
 Round 3 closed the last gap: the `AnalyzedProgram` `finalizeProgram` returns is now CARRIED on the
 `GeneratedCase` (`analyzed`, in-memory only — the persisted artifact is still just `program`) and THREADED
 into every downstream consumer, so a case path builds the plan EXACTLY ONCE (a counter in
-`analyzeProgram`, asserted by `tests/analyzed-program-boundary.test.ts`). `analyzeProgram` /
-`renderProgram` / `validateProgramModel` / `deriveCoverageTags` all take the analysis (a default builds one
-only for a standalone caller — a shrink candidate, a handwritten test). `collectRequestedExports` is now
+`analyzeProgram`, asserted by `tests/analyzed-program-boundary.test.ts`). `collectRequestedExports` is now
 PRIVATE to `analyzed-program.ts`; a grep test asserts it, plus `resolveExportOrigin` and the deleted
 capability walk, never appear outside their boundary module.
 
-- **Renderer (`render.ts`).** Reads the ONE plan's `requestedNames` (which names each module exposes) and
-  `resolvedDemands.renderedForm` as the SOLE value/function/object dispatch — its own demand fixpoint and
-  its separate callability set are both gone. The module's export SHAPE still picks the concrete renderer
-  (object literal / state-reading callable / inferred-pure `const`), which the plan's `renderedForm` agrees
-  with by construction. A reserved export name (`default`) renders via a fresh local + `export { local as
-name }`.
+**The consumer contract: `render` / `validate` / `tags` take the `AnalyzedProgram` ONLY** and read the
+program from `analyzed.program` (`renderProgram(analyzed)`, `validateProgramModel(analyzed)`,
+`deriveCoverageTags(analyzed)`). They do NOT take a separate `program` argument. This makes a mismatched
+`(program, analyzed)` pair — an analysis of program A supplied alongside program B — UNREPRESENTABLE at the
+call site, not merely asserted: the earlier two-argument form let an ESM-derived analysis be validated
+against an otherwise-identical CJS numeric-definer program, which returned `[]` and then rendered `ns.vx()`
+against `exports.vx = 5` (a guaranteed TypeError). A standalone caller (a shrink candidate, a handwritten
+test) wraps `analyzeProgram(program)`. The ONE transition seam that still carries both — `executeProgram`,
+which takes an OPTIONAL carried analysis so the case path reuses its one analysis — hard-asserts
+`analysis.program === program` and throws otherwise, so the mismatch is loud rather than silently wrong.
+
+- **Renderer (`render.ts`).** Reads the ONE plan's `requestedNames` (which names each module exposes) and,
+  for each local export, the analyzer's `renderedFormOf(module, name, callableNames)` as its SINGLE
+  export-form dispatch — its own demand fixpoint, its separate callability set, AND its mirrored
+  export-shape switch are all gone. `renderEsmExports` now maps the fine form to one emission template
+  (`fresh-object → renderObjectExports`, `callable-own-state → renderCallableOwnStateExports`,
+  `inferred-pure → renderInferredPureExports`, `callable-constant`/`numeric-value → renderNumericFoldExports`,
+  which splits per export). The renderer NEVER reads the profile's `exportShape` — a grep guard in
+  `tests/module-profile-guard.test.ts` fails if it reappears. A reserved export name (`default`) renders via
+  a fresh local + `export { local as name }`.
 - **Validator (`validate-model.ts`).** `validateExportDemand` over the plan is now the WHOLE per-shape
   soundness check: reject `unsupplied` / `ambiguous` demand, and every consumption whose SHAPE does not
-  match its resolved definer's `renderedForm` (`numeric↔value`, `callable↔function`, `reference↔object`) —
+  match `formConsumptionShape(renderedForm)` — the coarse category of its resolved definer's fine form
+  (`numeric↔value`, `callable↔function`, `reference↔object`), with `renderedFormNoun` supplying the
+  message noun —
   folding a function's source text, calling a number, calling an object, an identity capture of a non-object,
   and callability-not-forwarded-through-a-barrel all surface here. The legacy `resolveExportOrigin`
   capability walk (`describeCaptures` / `resolveExportCapability`) is DELETED; only the CJS-`default`-require
@@ -93,14 +127,17 @@ name }`.
   shared numeric module identity (preserving `init_`/`require_`/plain prefix), so a cross-prefix
   two-module failure never collapses to a one-module one.
 
-### The rendered form is the SOLE dispatch (finding 3)
+### The rendered form is the SOLE dispatch (finding 3, extended)
 
-`renderedFormOf` mirrors the renderer EXACTLY: a CJS definer and an inferred-pure numeric definer render a
-`value` (numeric export / non-inlinable `const`), NEVER a callable — even when a caller marked them callable.
-So a direct call of an inferred-pure numeric export, and a namespace `callMembers` against a numeric CJS
-export, are REJECTED at validation instead of rendering a value the caller then invokes (a `TypeError` —
-a degenerate both-sides crash). Byte-identical on the corpus: the generator never call-marks a CJS or
-inferred-pure export.
+`renderedFormOf` IS the renderer's dispatch — not a mirror of it — so the renderer and the plan cannot
+disagree by construction. A CJS definer and an inferred-pure numeric definer both classify to a
+VALUE-category form (`numeric-value` / `inferred-pure`), NEVER a callable, even when a caller marked them
+callable. So a direct call of an inferred-pure numeric export, and a namespace `callMembers` against a
+numeric CJS export, are REJECTED at validation (`formConsumptionShape` is `numeric`, the call demands
+`callable`) instead of rendering a value the caller then invokes (a `TypeError` — a degenerate both-sides
+crash). Byte-identical on the corpus: the generator never call-marks a CJS or inferred-pure export, and
+`renderedFormOf` applied to a definer module reproduces the old profile switch exactly (an unconsumed
+numeric-fold export is never call-marked, so it still renders a plain value).
 
 ## ProgramFacts supply-aware primitives (`program-facts.ts`)
 

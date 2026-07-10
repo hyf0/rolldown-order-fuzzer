@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { AnalyzedProgram } from "./analyzed-program.ts";
+import { analyzeProgram, type AnalyzedProgram } from "./analyzed-program.ts";
 import { executeManifest } from "./execute.ts";
 import type { FormatRegime, GeneratedCase } from "./generate.ts";
 import type { ProgramModel } from "./model.ts";
@@ -157,7 +157,17 @@ export async function executeProgram(
     buildBundle: buildAndExecuteBundle,
     ...overrides,
   };
-  const rendered = renderProgram(program, analyzed);
+  // This is a transition seam that still receives `program` and an OPTIONAL carried `analyzed` (so the
+  // case path reuses its one analysis). The consumers below take only an AnalyzedProgram, so normalize
+  // here — and assert the carried analysis is OF this program, making the finding-1 mismatch loud rather
+  // than a silently wrong render. A missing analysis is built from the program (identity holds trivially).
+  const analysis = analyzed ?? analyzeProgram(program);
+  if (analysis.program !== program) {
+    throw new Error(
+      "executeProgram: the supplied analysis is for a different program than the one being run",
+    );
+  }
+  const rendered = renderProgram(analysis);
   const sourceOutcome = await dependencies.executeSource(rendered);
   if (sourceOutcome.status === "timeout" || sourceOutcome.status === "harness-error") {
     const runtimeIdentity = await dependencies.inspectRuntimeIdentity(options.rolldownPackage);

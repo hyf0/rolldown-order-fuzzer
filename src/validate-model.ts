@@ -1,6 +1,6 @@
 import {
-  analyzeProgram,
-  requiredFormForShape,
+  formConsumptionShape,
+  renderedFormNoun,
   resolvedExportKey,
   type AnalyzedProgram,
   type ConsumptionRecord,
@@ -88,18 +88,17 @@ type ReadableBinding =
   // by an event's `identityCheck`, never a numeric read.
   | { readonly kind: "object" };
 
-export function validateProgramModel(
-  program: ProgramModel,
-  analyzed: AnalyzedProgram = analyzeProgram(program),
-): readonly string[] {
+export function validateProgramModel(analyzed: AnalyzedProgram): readonly string[] {
   const errors: string[] = [];
+  // The consumer takes ONLY the AnalyzedProgram and reads the program from it, so a program can never
+  // disagree with the analysis it is validated against (the mismatch is unrepresentable, not merely
+  // asserted). A standalone caller (a shrink candidate, a handwritten test) wraps `analyzeProgram(program)`.
+  const { program, facts, plan } = analyzed;
   const modulesById = collectModules(program.modules, errors);
   // The ONE analyzed view: graph facts plus the canonical export-demand plan the program-level export
   // soundness reads (supply status, per-consumption shape↔form soundness, cross-consumer aggregation).
   // Threaded in along the case path (finalizeProgram → renderProgram → here) so demand analysis runs
-  // EXACTLY ONCE per case; a standalone caller (a shrink candidate, a handwritten test) omits it and one
-  // is built here.
-  const { facts, plan } = analyzed;
+  // EXACTLY ONCE per case.
   const dynamicRegistrationOwners = new Map<string, string>();
   const modulesReachingTopLevelAwait = facts.topLevelAwaitReachers();
 
@@ -160,7 +159,7 @@ function validateExportDemand(plan: ExportDemandPlan, errors: string[]): void {
     // number, or comparing folded numbers for identity all surface here; callability-not-forwarded is the
     // callable case (a call routed through a barrel to a numeric definer renders a value, not a function).
     const demand = plan.resolvedDemands.get(resolvedExportKey(consumption.supply.origin));
-    if (demand !== undefined && demand.renderedForm !== requiredFormForShape(consumption.shape)) {
+    if (demand !== undefined && formConsumptionShape(demand.renderedForm) !== consumption.shape) {
       errors.push(consumptionMismatchMessage(consumption, demand.renderedForm));
     }
   }
@@ -194,15 +193,18 @@ function consumptionMismatchMessage(
       ? `demand ${quote(consumption.demandedName)} on ${quote(consumption.target)}`
       : `export ${quote(origin.exportName)} on ${quote(origin.moduleId)}`;
   const by = `consumed by module ${quote(consumption.consumerModuleId)} (demand ${quote(consumption.demandedName)} on ${quote(consumption.target)})`;
+  // The coarse value/function/object noun the diagnostic reads as, so a value-category form (a numeric
+  // fold or an inferred-pure `const`) both surface as "a value" regardless of the finer render template.
+  const noun = renderedFormNoun(renderedForm);
   if (consumption.shape === "callable") {
     const throughBarrel =
       consumption.supply.status === "supplied" && consumption.supply.hops.length > 0;
-    return `${at}: called ${by} but the definer renders a ${renderedForm}${throughBarrel ? "; callability is not forwarded through a barrel" : ""} — a call must reach a callable-own-state definer or a directly call-marked export`;
+    return `${at}: called ${by} but the definer renders a ${noun}${throughBarrel ? "; callability is not forwarded through a barrel" : ""} — a call must reach a callable-own-state definer or a directly call-marked export`;
   }
   if (consumption.shape === "reference") {
-    return `${at}: captured by identity (objectRef) ${by} but the definer renders a ${renderedForm}; an objectRef must reach a fresh-object export`;
+    return `${at}: captured by identity (objectRef) ${by} but the definer renders a ${noun}; an objectRef must reach a fresh-object export`;
   }
-  return `${at}: folded numerically ${by} but the definer renders a ${renderedForm}; folding a ${renderedForm} (a function's source text or an object) is unsound`;
+  return `${at}: folded numerically ${by} but the definer renders a ${noun}; folding a ${noun} (a function's source text or an object) is unsound`;
 }
 
 /// The object ORIGIN each objectRef capture in `moduleId` resolves to (through barrels), read from the

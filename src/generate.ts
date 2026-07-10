@@ -94,11 +94,13 @@ export function generateCase(
     template === "random-mixed"
       ? buildRandomMixed(rng, size, forcedRegime)
       : TEMPLATE_BUILDERS[template](rng, size);
-  // The ONE AnalyzedProgram for the case: finalizeProgram already produced it for random-mixed; a fixed
-  // template analyzes its assembled program ONCE here. Everything downstream (tags, validation, render,
-  // evaluation) reads THIS instance, so demand analysis runs exactly once per case.
-  const analyzed = built.analyzed ?? analyzeProgram(built.program);
-  const coverageTags = deriveCoverageTags(built.program, analyzed);
+  // The ONE AnalyzedProgram for the case: finalizeProgram already produced it (and deep-froze its program)
+  // for random-mixed; a fixed template's program is a plain literal, so it is DEEP-FROZEN here on the same
+  // path before being analyzed ONCE — every GeneratedCase then carries a frozen program + analysis, so an
+  // accidental post-generation mutation throws whatever the template. Everything downstream (tags,
+  // validation, render, evaluation) reads THIS instance, so demand analysis runs exactly once per case.
+  const analyzed = built.analyzed ?? analyzeProgram(deepFreeze(built.program));
+  const coverageTags = deriveCoverageTags(analyzed);
   // `template:*` tags stay purely structural; only fixed templates promise their own shape.
   if (template !== "random-mixed" && !coverageTags.includes(`template:${template}`)) {
     throw new Error(`Generated ${template} program does not match its template`);
@@ -1854,16 +1856,12 @@ function buildRandomManualGroups(
   return groups;
 }
 
-export function deriveCoverageTags(
-  program: ProgramModel,
-  analyzed: AnalyzedProgram = analyzeProgram(program),
-): readonly string[] {
+export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[] {
   const tags = new Set<string>();
+  // The consumer takes ONLY the AnalyzedProgram and reads the program from it (no separate program
+  // argument that could disagree with the analysis). A standalone caller wraps `analyzeProgram(program)`.
+  const { program, facts, plan } = analyzed;
   const modulesById = new Map(program.modules.map((module) => [module.id, module]));
-  // Read the ONE analyzed view's facts and plan rather than rebuilding a parallel ProgramFacts or
-  // re-resolving export routes: along the case path this is the carried instance, so tags add no extra
-  // demand analysis; a standalone caller builds one via the default above.
-  const { facts, plan } = analyzed;
   const formats = new Set(program.modules.map((module) => module.format));
   const esmCarriersByCjsTarget = new Map<string, Set<string>>();
   let requiresSynchronousEsm = false;

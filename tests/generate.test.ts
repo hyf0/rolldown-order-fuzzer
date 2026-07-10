@@ -9,6 +9,7 @@ import {
   sampleCaseSize,
   type MixedTemplateName,
 } from "../src/generate.ts";
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
 import { SeededRng } from "../src/rng.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
@@ -64,8 +65,8 @@ describe("generateCase", () => {
         assertTemplateGraph(template, generated.program);
       }
       expect(generated.coverageTags).toEqual([...generated.coverageTags].sort());
-      expect(generated.coverageTags).toEqual(deriveCoverageTags(generated.program));
-      expect(validateProgramModel(generated.program)).toEqual([]);
+      expect(generated.coverageTags).toEqual(deriveCoverageTags(generated.analyzed));
+      expect(validateProgramModel(generated.analyzed)).toEqual([]);
     }
   });
 
@@ -73,7 +74,7 @@ describe("generateCase", () => {
     for (let seed = 0; seed < 500; seed += 1) {
       const generated = generateCase(seed, 1 + (seed % 16));
       expect(
-        validateProgramModel(generated.program),
+        validateProgramModel(generated.analyzed),
         `seed ${seed} produced an invalid program`,
       ).toEqual([]);
       expect(generated.program.schedule.length).toBeGreaterThan(0);
@@ -199,7 +200,7 @@ describe("generateCase", () => {
           ).toBe("esm");
         }
       }
-      expect(validateProgramModel(generated.program)).toEqual([]);
+      expect(validateProgramModel(generated.analyzed)).toEqual([]);
     }
     expect(sawBarrel).toBe(true);
   });
@@ -248,7 +249,7 @@ describe("generateCase", () => {
         );
       }
       expect(flaggedModules.length).toBeLessThan(generated.program.modules.length);
-      expect(validateProgramModel(generated.program)).toEqual([]);
+      expect(validateProgramModel(generated.analyzed)).toEqual([]);
     }
 
     expect(randomTotal).toBeGreaterThan(0);
@@ -272,7 +273,7 @@ describe("generateCase", () => {
         continue;
       }
       multiEdge += 1;
-      expect(validateProgramModel(generated.program), `seed ${seed}`).toEqual([]);
+      expect(validateProgramModel(generated.analyzed), `seed ${seed}`).toEqual([]);
       for (const module of generated.program.modules) {
         const kindsByTarget = new Map<string, string[]>();
         for (const dependency of module.dependencies) {
@@ -550,7 +551,7 @@ describe("format regimes", () => {
       for (let seed = 0; seed < 50; seed += 1) {
         const generated = generateCase(seed, 6, regime);
         expect(generated.template).toBe("random-mixed");
-        expect(validateProgramModel(generated.program)).toEqual([]);
+        expect(validateProgramModel(generated.analyzed)).toEqual([]);
         expect(generated.program.modules.every((module) => module.format === format)).toBe(true);
         expect(generated.coverageTags).toContain(`regime:${regime}`);
       }
@@ -580,7 +581,7 @@ describe("format regimes", () => {
       if (generated.template !== "random-mixed") {
         continue;
       }
-      expect(validateProgramModel(generated.program)).toEqual([]);
+      expect(validateProgramModel(generated.analyzed)).toEqual([]);
       if (!generated.coverageTags.includes("mechanism:cjs-dynamic-import")) {
         continue;
       }
@@ -643,7 +644,7 @@ describe("organic chunking axis (wave 6)", () => {
         for (const group of generated.program.organicChunkGroups ?? []) {
           expect(group.name.length).toBeGreaterThan(0);
         }
-        expect(validateProgramModel(generated.program)).toEqual([]);
+        expect(validateProgramModel(generated.analyzed)).toEqual([]);
       }
     }
     expect(randomMixed).toBeGreaterThan(0);
@@ -710,8 +711,8 @@ describe("nested dynamic chains (wave 6)", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     };
-    expect(validateProgramModel(program)).toEqual([]);
-    expect(deriveCoverageTags(program)).toContain("mechanism:nested-dynamic");
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    expect(deriveCoverageTags(analyzeProgram(program))).toContain("mechanism:nested-dynamic");
   });
 
   test("does not tag a plain (eagerly-reached) dynamic import as nested", () => {
@@ -736,7 +737,7 @@ describe("nested dynamic chains (wave 6)", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     };
-    expect(deriveCoverageTags(program)).not.toContain("mechanism:nested-dynamic");
+    expect(deriveCoverageTags(analyzeProgram(program))).not.toContain("mechanism:nested-dynamic");
   });
 
   test("the generator produces nested dynamic chains at scale", () => {
@@ -770,7 +771,7 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    const tags = deriveCoverageTags(program);
+    const tags = deriveCoverageTags(analyzeProgram(program));
     expect(tags).toContain("mechanism:esm-imports-cjs");
     expect(tags).not.toContain("variation:side-effect-import");
   });
@@ -797,7 +798,9 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(deriveCoverageTags(twoValueImports)).not.toContain("variation:multi-edge-pair");
+    expect(deriveCoverageTags(analyzeProgram(twoValueImports))).not.toContain(
+      "variation:multi-edge-pair",
+    );
 
     const valuePlusDynamic = {
       ...twoValueImports,
@@ -819,7 +822,9 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
         },
       ],
     } satisfies ProgramModel;
-    expect(deriveCoverageTags(valuePlusDynamic)).toContain("variation:multi-edge-pair");
+    expect(deriveCoverageTags(analyzeProgram(valuePlusDynamic))).toContain(
+      "variation:multi-edge-pair",
+    );
   });
 
   test("a namespace import with no read members is not tagged namespace-read", () => {
@@ -843,7 +848,7 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(deriveCoverageTags(program)).not.toContain("variation:namespace-read");
+    expect(deriveCoverageTags(analyzeProgram(program))).not.toContain("variation:namespace-read");
   });
 
   test("a forward callable read does not falsely produce a cycle-hoisted-call tag", () => {
@@ -894,8 +899,8 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
-    const tags = deriveCoverageTags(program);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const tags = deriveCoverageTags(analyzeProgram(program));
     expect(tags).toContain("mechanism:cycle");
     expect(tags).toContain("variation:callable-own-state");
     // The call read is on a FORWARD edge (entry -> def), not a cycle-closing one.
@@ -984,9 +989,11 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
       entries: [{ name: "main", moduleId: "root" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
     // c1 and c2 read the split, but they are NOT entries, so the conjunction is incomplete.
-    expect(deriveCoverageTags(program)).not.toContain("mechanism:pure-definer-behind-barrel");
+    expect(deriveCoverageTags(analyzeProgram(program))).not.toContain(
+      "mechanism:pure-definer-behind-barrel",
+    );
   });
 
   // Finding B: cycle formats were aggregated PROGRAM-WIDE, so a case with a separate all-ESM SCC and a
@@ -1029,8 +1036,8 @@ describe("deriveCoverageTags predicate corrections (finding 8)", () => {
         { kind: "require-entry", entry: "cjs-entry" },
       ],
     } satisfies ProgramModel;
-    expect(validateProgramModel(program)).toEqual([]);
-    const tags = deriveCoverageTags(program);
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+    const tags = deriveCoverageTags(analyzeProgram(program));
     expect(tags).toContain("mechanism:esm-cycle");
     expect(tags).toContain("mechanism:cjs-cycle");
   });

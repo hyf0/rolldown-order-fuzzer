@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import { executeManifest } from "../src/execute.ts";
 import type { ProgramModel } from "../src/model.ts";
 import type { ExecutionEvent, ExecutionManifest, ExecutionOutcome } from "../src/protocol.ts";
@@ -45,7 +46,7 @@ describe("executeManifest", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    await withRenderedProgram(renderProgram(analyzeProgram(program)), async (manifestPath) => {
       await expect(
         executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
       ).resolves.toEqual({
@@ -99,7 +100,7 @@ describe("executeManifest", () => {
       ],
     } satisfies ProgramModel;
 
-    await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    await withRenderedProgram(renderProgram(analyzeProgram(program)), async (manifestPath) => {
       const outcome = await executeManifest(manifestPath, {
         timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
       });
@@ -131,7 +132,7 @@ describe("executeManifest", () => {
       schedule: [{ kind: "require-entry", entry: "worker" }],
     } satisfies ProgramModel;
 
-    await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    await withRenderedProgram(renderProgram(analyzeProgram(program)), async (manifestPath) => {
       await expect(
         executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),
       ).resolves.toMatchObject({
@@ -390,7 +391,7 @@ describe("executeManifest", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    await withRenderedProgram(renderProgram(analyzeProgram(program)), async (manifestPath) => {
       const first = await executeManifest(manifestPath, {
         timeoutMs: EXECUTION_TEST_TIMEOUT_MS,
       });
@@ -590,7 +591,7 @@ describe("executeManifest", () => {
       schedule: [{ kind: "import-entry", entry: "main" }],
     } satisfies ProgramModel;
 
-    await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+    await withRenderedProgram(renderProgram(analyzeProgram(program)), async (manifestPath) => {
       const startedAt = Date.now();
       const outcome = await executeManifest(manifestPath, { timeoutMs: 1 });
 
@@ -811,8 +812,8 @@ async function expectRoundTrip(
   program: ProgramModel,
   events: ExecutionOutcome["events"],
 ): Promise<void> {
-  expect(validateProgramModel(program)).toEqual([]);
-  await withRenderedProgram(renderProgram(program), async (manifestPath) => {
+  expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+  await withRenderedProgram(renderProgram(analyzeProgram(program)), async (manifestPath) => {
     // Every shape here runs a single `import-entry`, so the runner appends one entry marker.
     await expect(
       executeManifest(manifestPath, { timeoutMs: EXECUTION_TEST_TIMEOUT_MS }),

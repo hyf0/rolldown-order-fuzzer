@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 
 import { describe, expect, test } from "vite-plus/test";
 
+import { analyzeProgram } from "../src/analyzed-program.ts";
 import { executeManifest } from "../src/execute.ts";
 import { deriveCoverageTags, generateCase, sampleCaseSize } from "../src/generate.ts";
 import type { ProgramModel } from "../src/model.ts";
@@ -149,7 +150,7 @@ function objectIdentityProgram(): ProgramModel {
 
 describe("callable-reads-own-state rendering", () => {
   test("an inferred-pure definer reads a module-scope state var through a function export, no events", () => {
-    const rendered = renderProgram(callableOwnStateProgram(true));
+    const rendered = renderProgram(analyzeProgram(callableOwnStateProgram(true)));
     const definer = fileContents(rendered.files, "module-0000.mjs");
     // A non-inlinable state var (a pure build call, like the family-A definer value) read by the export.
     expect(definer).toContain("function __ownStateBuild0() { return 700; }");
@@ -171,7 +172,7 @@ describe("callable-reads-own-state rendering", () => {
   });
 
   test("an event-carrying definer keeps its event AND the state-reading callable", () => {
-    const rendered = renderProgram(callableOwnStateProgram(false));
+    const rendered = renderProgram(analyzeProgram(callableOwnStateProgram(false)));
     const definer = fileContents(rendered.files, "module-0000.mjs");
     expect(definer).toContain("__orderEvent");
     expect(definer).toContain("let __ownState0 = /* @__PURE__ */ __ownStateBuild0();");
@@ -181,7 +182,7 @@ describe("callable-reads-own-state rendering", () => {
 
 describe("callable-reads-own-state fold-equivalence (the oracle baseline)", () => {
   test("the source graph folds the called own-state value into consumer events", async () => {
-    const rendered = renderProgram(callableOwnStateProgram(true));
+    const rendered = renderProgram(analyzeProgram(callableOwnStateProgram(true)));
     await withRenderedProgram(rendered.files, async (directory) => {
       const outcome = await executeManifest(join(directory, rendered.schedulePath));
       expect(outcome.status).toBe("ok");
@@ -195,7 +196,7 @@ describe("callable-reads-own-state fold-equivalence (the oracle baseline)", () =
   });
 
   test("the event-carrying variant folds correctly and emits the definer's own event", async () => {
-    const rendered = renderProgram(callableOwnStateProgram(false));
+    const rendered = renderProgram(analyzeProgram(callableOwnStateProgram(false)));
     await withRenderedProgram(rendered.files, async (directory) => {
       const outcome = await executeManifest(join(directory, rendered.schedulePath));
       expect(outcome.status).toBe("ok");
@@ -211,7 +212,7 @@ describe("callable-reads-own-state fold-equivalence (the oracle baseline)", () =
 
 describe("object-identity rendering and fold-equivalence", () => {
   test("an object export renders a fresh object literal; the consumer compares two captures", () => {
-    const rendered = renderProgram(objectIdentityProgram());
+    const rendered = renderProgram(analyzeProgram(objectIdentityProgram()));
     expect(fileContents(rendered.files, "module-0000.mjs")).toContain(
       "export const vdef = { v: 0 };",
     );
@@ -223,7 +224,7 @@ describe("object-identity rendering and fold-equivalence", () => {
   });
 
   test("source identity holds (single evaluation), so the value equals the base", async () => {
-    const rendered = renderProgram(objectIdentityProgram());
+    const rendered = renderProgram(analyzeProgram(objectIdentityProgram()));
     await withRenderedProgram(rendered.files, async (directory) => {
       const outcome = await executeManifest(join(directory, rendered.schedulePath));
       expect(outcome.status).toBe("ok");
@@ -236,16 +237,18 @@ describe("object-identity rendering and fold-equivalence", () => {
 
 describe("wave-8 coverage tags", () => {
   test("variation:callable-own-state fires and does NOT count as a family-A conjunction", () => {
-    const tags = deriveCoverageTags(callableOwnStateProgram(true));
+    const tags = deriveCoverageTags(analyzeProgram(callableOwnStateProgram(true)));
     expect(tags).toContain("variation:callable-own-state");
     // A callable-own-state definer read via a CALL is a distinct witness, not the value-read family A.
     expect(tags).not.toContain("mechanism:pure-definer-behind-barrel");
   });
 
   test("variation:object-identity fires when an event carries an identityCheck", () => {
-    expect(deriveCoverageTags(objectIdentityProgram())).toContain("variation:object-identity");
+    expect(deriveCoverageTags(analyzeProgram(objectIdentityProgram()))).toContain(
+      "variation:object-identity",
+    );
     // A program with neither construct does not fire the tags.
-    expect(deriveCoverageTags(objectIdentityProgram())).not.toContain(
+    expect(deriveCoverageTags(analyzeProgram(objectIdentityProgram()))).not.toContain(
       "variation:callable-own-state",
     );
   });
@@ -268,7 +271,7 @@ describe("wave-8 model validation", () => {
       entries: [{ name: "main", moduleId: "b" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
-    const errors = validateProgramModel(invalid);
+    const errors = validateProgramModel(analyzeProgram(invalid));
     expect(errors).toContain("modules[0]: a callable-own-state module must be ESM, received cjs");
     expect(errors).toContain(
       "modules[1]: a module cannot be both callableOwnState and objectExport",
@@ -290,7 +293,7 @@ describe("wave-8 model validation", () => {
       entries: [{ name: "main", moduleId: "a" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
-    const errors = validateProgramModel(invalid);
+    const errors = validateProgramModel(analyzeProgram(invalid));
     expect(errors).toContain(
       "modules[0]: an object-export module must not emit events; it is the invisible double-init target",
     );
@@ -338,7 +341,7 @@ describe("wave-8 model validation", () => {
       entries: [{ name: "main", moduleId: "reader" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
-    const errors = validateProgramModel(invalid);
+    const errors = validateProgramModel(analyzeProgram(invalid));
     expect(
       errors.some(
         (error) =>
@@ -380,7 +383,7 @@ describe("wave-8 model validation", () => {
       entries: [{ name: "main", moduleId: "reader" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
     } as unknown as ProgramModel;
-    const errors = validateProgramModel(invalid);
+    const errors = validateProgramModel(analyzeProgram(invalid));
     expect(
       errors.some(
         (error) => error.includes("callMembers") && error.includes("must be one of readMembers"),
@@ -402,7 +405,7 @@ describe("wave-8 generation", () => {
     for (let seed = 700_000; seed < 701_000; seed += 1) {
       const size = sampleCaseSize(new SeededRng(seed));
       const { program, coverageTags } = generateCase(seed, size, "mixed");
-      expect(validateProgramModel(program)).toEqual([]);
+      expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
       total += 1;
       const tags = new Set(coverageTags);
       if (tags.has("variation:callable-own-state")) {

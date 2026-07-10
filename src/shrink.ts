@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { analyzeProgram } from "./analyzed-program.ts";
 import { failureSignatureOf } from "./case-evaluator.ts";
 import type { DependencyOperation, EventRecord, ProgramModel } from "./model.ts";
 import { ProgramFacts } from "./program-facts.ts";
@@ -62,7 +63,7 @@ async function main(): Promise<void> {
   while (shrunk) {
     shrunk = false;
     for (const candidate of candidates(current)) {
-      if (validateProgramModel(candidate).length > 0) {
+      if (validateProgramModel(analyzeProgram(candidate)).length > 0) {
         continue;
       }
       const signature = await run(candidate, options);

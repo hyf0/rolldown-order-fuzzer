@@ -36,16 +36,30 @@ export interface ConsumptionRecord {
   readonly supply: ExportSupply;
 }
 
-/// The rendered FORM a definer emits for one export — the single source of truth the renderer and the
-/// validator both obey, so callability can never be "demanded by a caller but not forwarded to the
-/// definer" without both agreeing it is a mismatch:
+/// The concrete rendered FORM a definer emits for one export — the analyzer's SINGLE classification of
+/// export shape. The renderer maps each form DIRECTLY to one emission template (never re-deriving the
+/// shape from the module profile), and the validator collapses it to a consumption category
+/// (`formConsumptionShape`). It is finer than a value/function/object trichotomy on purpose: two
+/// DISTINCT templates share a category, so a coarser vocabulary could not pick the template. A
+/// `callable-own-state` state-reading function and a `callable-constant` constant-returning function are
+/// both "callable"; an `inferred-pure` non-inlinable `const` and a plain `numeric-value` fold are both
+/// "value".
 ///
-/// - `value` — a folded numeric `const`/`module.exports` value.
-/// - `function` — a callable export: a `callable-own-state` definer's state-reading function, OR a
-///   numeric-fold definer whose name a DIRECT call import marked callable (a constant-returning
-///   function). Callability is marked only on a direct edge, never forwarded through a barrel.
-/// - `object` — a fresh object literal (an `objectExport` definer).
-export type RenderedExportForm = "value" | "function" | "object";
+/// - `numeric-value` — a folded numeric `const` (ESM) or `exports.x = <fold>` (CJS) value. Also the form
+///   of a CJS or a definer-less (require-of-absent) export, which render a value.
+/// - `callable-constant` — a numeric-fold definer's export a DIRECT call import marked callable: a
+///   hoisted `function` returning the module's constant base. Callability is marked only on a direct
+///   edge, never forwarded through a barrel.
+/// - `inferred-pure` — an inferred-pure definer's non-inlinable `/* @__PURE__ */`-call `const`.
+/// - `callable-own-state` — a callable-own-state definer's export: a `function` reading a module-scope
+///   state var assigned from a pure call.
+/// - `fresh-object` — a fresh object literal per export (an `objectExport` definer).
+export type RenderedExportForm =
+  | "numeric-value"
+  | "callable-constant"
+  | "inferred-pure"
+  | "callable-own-state"
+  | "fresh-object";
 
 /// The aggregated demand on ONE resolved definer export `(moduleId, exportName)`, across ALL consumers
 /// that resolve here: the definer's export shape, the rendered form, every consumption shape demanded
@@ -83,19 +97,38 @@ export function resolvedExportKey(origin: ExportOrigin): string {
   return `${origin.moduleId}\0${origin.exportName}`;
 }
 
-/// The rendered form a consumption of `shape` REQUIRES of its resolved definer, so the validator can
-/// check consumption soundness over the ONE plan instead of a parallel direct-target capability walk: a
-/// `numeric` fold needs a `value`, a `callable` call needs a `function`, a `reference` identity capture
-/// needs an `object`. A consumption whose resolved definer renders a DIFFERENT form misreads it — folding
-/// a function's source text into a number, calling a number (a TypeError), or comparing folded numbers
-/// for identity (a dead witness). The three sound pairings are exactly the diagonal of shape × form.
-export function requiredFormForShape(shape: ConsumptionShape): RenderedExportForm {
-  switch (shape) {
-    case "numeric":
+/// The consumption SHAPE a rendered form soundly satisfies — the coarse category the per-consumption
+/// validation check compares each consumer's `shape` against, collapsing the five concrete forms onto
+/// the shape × form diagonal: a `numeric` fold needs a value form (`numeric-value` / `inferred-pure`), a
+/// `callable` call needs a function form (`callable-constant` / `callable-own-state`), a `reference`
+/// identity capture needs an object form (`fresh-object`). A consumption whose resolved definer renders a
+/// form in a DIFFERENT category misreads it — folding a function's source text into a number, calling a
+/// number (a TypeError), or comparing folded numbers for identity (a dead witness).
+export function formConsumptionShape(form: RenderedExportForm): ConsumptionShape {
+  switch (form) {
+    case "numeric-value":
+    case "inferred-pure":
+      return "numeric";
+    case "callable-constant":
+    case "callable-own-state":
+      return "callable";
+    case "fresh-object":
+      return "reference";
+  }
+}
+
+/// The coarse value/function/object NOUN a rendered form reads as in a diagnostic — the display
+/// vocabulary the crafted-violation messages use, so a mismatch reads "the definer renders a value"
+/// regardless of WHICH value-category form (a numeric fold or an inferred-pure `const`) it actually is.
+export function renderedFormNoun(form: RenderedExportForm): "value" | "function" | "object" {
+  switch (form) {
+    case "numeric-value":
+    case "inferred-pure":
       return "value";
-    case "callable":
+    case "callable-constant":
+    case "callable-own-state":
       return "function";
-    case "reference":
+    case "fresh-object":
       return "object";
   }
 }
@@ -232,44 +265,49 @@ function buildExportDemandPlan(program: ProgramModel, facts: ProgramFacts): Expo
   return { requestedNames, callableNames, consumptions, resolvedDemands };
 }
 
-/// The rendered form of `exportName` on `definer` — the EXACT form the renderer emits, so the plan's
-/// dispatch and the renderer never disagree. It mirrors the renderer's export path precisely:
+/// The rendered form of `exportName` on `definer` — the analyzer's ONE classification of export shape,
+/// which the renderer consumes DIRECTLY as its emission-template dispatch (so it never re-derives shape
+/// from the module profile) and the validator collapses to a consumption category. It reads the export
+/// path precisely, in the profile-precedence order the renderer's templates require:
 ///
-/// - a CJS definer renders numeric exports only (`exports.x = <fold>`), so its form is always `value`;
-/// - a fresh-object definer renders an object literal (`object`);
-/// - a callable-own-state definer renders a state-reading function (`function`);
-/// - an inferred-pure definer renders a non-inlinable `const` (the inferred-pure branch takes precedence
-///   over any call marking), so its form is `value`;
-/// - else a numeric-fold definer renders a callable FUNCTION only when a DIRECT call import marked the
-///   name callable ON THE DEFINER (never forwarded through a barrel), otherwise a plain `value`.
+/// - a CJS definer (or a definer-less name) renders a numeric value (`exports.x = <fold>`) → `numeric-value`;
+/// - a fresh-object definer renders an object literal → `fresh-object`;
+/// - a callable-own-state definer renders a state-reading function → `callable-own-state`;
+/// - an inferred-pure definer renders a non-inlinable `const` (this branch takes precedence over any call
+///   marking) → `inferred-pure`;
+/// - else a numeric-fold definer renders a callable constant-returning function ONLY when a DIRECT call
+///   import marked the name callable ON THE DEFINER (never forwarded through a barrel) → `callable-constant`,
+///   otherwise a plain folded value → `numeric-value`.
 ///
-/// The CJS and inferred-pure cases previously returned `function` when call-marked, disagreeing with the
-/// renderer (which renders a value) — the two degenerate crash models finding 3 closes. They now stay
-/// `value`, so a callable consumption of one is rejected at validation. Byte-identical on the corpus: the
+/// The CJS and inferred-pure cases stay VALUE-category even when call-marked (the two degenerate crash
+/// models finding 3 closes): a callable consumption of one is rejected at validation rather than rendering
+/// a `const`/`exports.x = 5` the caller then invokes (a `TypeError`). Byte-identical on the corpus: the
 /// generator never call-marks a CJS export (a call import must target ESM) nor an inferred-pure definer's
 /// exports (read as numeric folds through the barrel), so those never rendered as functions anyway.
-function renderedFormOf(
+export function renderedFormOf(
   definer: ModuleModel | undefined,
   exportName: string,
   callableNames: ReadonlyMap<string, ReadonlySet<string>>,
 ): RenderedExportForm {
   if (definer === undefined) {
-    return "value";
+    return "numeric-value";
   }
   if (definer.format !== "esm") {
-    return "value";
+    return "numeric-value";
   }
   const profile = moduleProfile(definer);
   if (profile.exportShape.kind === "fresh-object") {
-    return "object";
+    return "fresh-object";
   }
   if (profile.exportShape.kind === "callable-own-state") {
-    return "function";
+    return "callable-own-state";
   }
   if (profile.purity.kind === "inferred") {
-    return "value";
+    return "inferred-pure";
   }
-  return callableNames.get(definer.id)?.has(exportName) === true ? "function" : "value";
+  return callableNames.get(definer.id)?.has(exportName) === true
+    ? "callable-constant"
+    : "numeric-value";
 }
 
 /// The export names each module must expose, propagated through re-export (barrel) chains — RELOCATED

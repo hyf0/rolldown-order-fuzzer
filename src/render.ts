@@ -3,11 +3,9 @@
 import { posix } from "node:path";
 
 import {
-  analyzeProgram,
   localExportsFor,
-  resolvedExportKey,
+  renderedFormOf,
   type AnalyzedProgram,
-  type ExportDemandPlan,
   type RenderedExportForm,
 } from "./analyzed-program.ts";
 import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
@@ -39,11 +37,12 @@ const SCHEDULE_PATH = "schedule.json";
 const SIDE_EFFECT_FREE_DIRECTORY = "side-effect-free";
 const SIDE_EFFECT_FREE_PACKAGE_JSON = '{\n  "sideEffects": false\n}\n';
 
-export function renderProgram(
-  program: ProgramModel,
-  analyzed: AnalyzedProgram = analyzeProgram(program),
-): RenderedProgram {
-  const validationErrors = validateProgramModel(program, analyzed);
+export function renderProgram(analyzed: AnalyzedProgram): RenderedProgram {
+  // The consumer takes ONLY the AnalyzedProgram and reads the program from it, so the program can never
+  // disagree with the analysis it is rendered against (the mismatch is unrepresentable). A standalone
+  // caller wraps `analyzeProgram(program)`.
+  const { program, plan } = analyzed;
+  const validationErrors = validateProgramModel(analyzed);
   if (validationErrors.length > 0) {
     throw new Error(
       ["Cannot render invalid program:", ...validationErrors.map((error) => `- ${error}`)].join(
@@ -53,10 +52,9 @@ export function renderProgram(
   }
 
   // The ONE analyzed view: the renderer reads the plan's `requestedNames` (which names each module must
-  // expose) and `resolvedDemands.renderedForm` (the SOLE value/function/object decision), instead of
-  // re-running its own `collectRequestedExports` fixpoint and re-deriving callability. Threaded in along
-  // the case path so demand analysis runs ONCE; a standalone caller builds it via the default above.
-  const { plan } = analyzed;
+  // expose) and the analyzer's `renderedFormOf` classification (its SINGLE export-form dispatch), instead
+  // of re-running its own `collectRequestedExports` fixpoint or re-classifying export shape from the module
+  // profile. Threaded in along the case path so demand analysis runs ONCE.
   const isMetadataPure = (module: ModuleModel): boolean =>
     moduleProfile(module).purity.kind === "metadata";
   const modulePaths = new Map(
@@ -75,7 +73,7 @@ export function renderProgram(
         module,
         modulePaths,
         plan.requestedNames.get(module.id) ?? [],
-        (name) => renderedFormOnModule(plan, module.id, name),
+        (name) => renderedFormOf(module, name, plan.callableNames),
       ),
     });
   }
@@ -108,21 +106,6 @@ export function renderProgram(
     schedulePath: SCHEDULE_PATH,
     schedule,
   };
-}
-
-/// The rendered form the plan assigns to `name` on `moduleId` — the SOLE source of the renderer's
-/// value/function decision for a numeric-fold definer, so callability is never re-derived in the
-/// renderer. A local export with no consumer has no resolved demand and renders a plain numeric value
-/// (a `const`), exactly as an un-call-marked export always did; that keeps this byte-identical.
-function renderedFormOnModule(
-  plan: ExportDemandPlan,
-  moduleId: string,
-  name: string,
-): RenderedExportForm {
-  return (
-    plan.resolvedDemands.get(resolvedExportKey({ moduleId, exportName: name }))?.renderedForm ??
-    "value"
-  );
 }
 
 function modulePath(index: number, format: ModuleFormat, sideEffectFree: boolean): string {
@@ -547,29 +530,47 @@ function renderEsmExports(
   readable: readonly ValueRead[],
   formOf: (name: string) => RenderedExportForm,
 ): string[] {
-  // The module's export SHAPE (fresh-object / callable-own-state / inferred-pure) picks the concrete
-  // renderer — the shape is intrinsic and the plan's `renderedForm` agrees with it by construction
-  // (`renderedFormOf` is derived from the same profile). For a numeric-fold definer, the value-vs-callable
-  // decision is the plan's `renderedForm` (`formOf`), NOT a callability set the renderer re-derives — so a
-  // call not forwarded through a barrel, or a call of an inferred-pure/CJS numeric export, is rejected at
-  // validation rather than mis-rendered here.
-  const profile = moduleProfile(module);
-  if (profile.exportShape.kind === "fresh-object") {
-    return renderObjectExports(module, requestedExports, usedBindings);
+  // The analyzer's `renderedFormOf` classification (`formOf`) is the renderer's SINGLE export-form
+  // dispatch — the module-profile switch that used to re-classify fresh-object / callable-own-state /
+  // inferred-pure HERE is gone, so export-shape classification lives in ONE place. The three whole-module
+  // export shapes classify every requested export identically, so the first export's form selects the
+  // module template; a numeric-fold definer splits per export (below). `renderedFormOf` derives these
+  // forms from the SAME profile the deleted switch read, so the emitted bytes are unchanged.
+  const firstName = requestedExports[0];
+  if (firstName === undefined) {
+    return [];
   }
-  if (profile.exportShape.kind === "callable-own-state") {
-    return renderCallableOwnStateExports(module, requestedExports, usedBindings);
+  switch (formOf(firstName)) {
+    case "fresh-object":
+      return renderObjectExports(module, requestedExports, usedBindings);
+    case "callable-own-state":
+      return renderCallableOwnStateExports(module, requestedExports, usedBindings);
+    case "inferred-pure":
+      return renderInferredPureExports(module, requestedExports, usedBindings, readable);
+    case "callable-constant":
+    case "numeric-value":
+      return renderNumericFoldExports(module, requestedExports, usedBindings, readable, formOf);
   }
-  if (profile.purity.kind === "inferred") {
-    return renderInferredPureExports(module, requestedExports, usedBindings, readable);
-  }
+}
 
+/// A numeric-fold definer's exports: each name renders a plain folded `const` value, EXCEPT one a DIRECT
+/// call import marked callable (`callable-constant`), which renders a hoisted `function` returning the
+/// module's constant base. The per-export split is the analyzer's form (`formOf`), NOT a callability set
+/// the renderer re-derives — so a call not forwarded through a barrel, or a call of an inferred-pure / CJS
+/// numeric export, is rejected at validation rather than mis-rendered here.
+function renderNumericFoldExports(
+  module: ModuleModel,
+  requestedExports: readonly string[],
+  usedBindings: Set<string>,
+  readable: readonly ValueRead[],
+  formOf: (name: string) => RenderedExportForm,
+): string[] {
   const base = moduleStateBase(module);
   const lines: string[] = [];
   let candidateIndex = 0;
 
   for (const exportName of requestedExports) {
-    if (formOf(exportName) === "function") {
+    if (formOf(exportName) === "callable-constant") {
       // A hoisted callable export returns a CONSTANT (the module's base), so it is safe to call
       // before this module's body has run (even mid-cycle, up the stack). It deliberately does NOT
       // fold the module's own reads: a callable that called its siblings would mutually recurse
