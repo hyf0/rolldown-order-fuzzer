@@ -30,6 +30,35 @@ export interface ExportOrigin {
   readonly exportName: string;
 }
 
+/// One re-export hop a demanded name travels through on its way to a definer: a named re-export
+/// (`export { s as e } from`) or a star re-export (`export * from`), and the barrel module doing it.
+export interface RouteHop {
+  readonly via: "named" | "star";
+  readonly through: string;
+}
+
+/// The SUPPLY resolution of a demanded `(module, exportName)` — the supply-aware sibling of
+/// `resolveExportOrigin`, which always returns a (possibly fabricated) single origin. A module
+/// SYNTHESIZES any demanded name on demand UNLESS it suppresses local synthesis, which an ESM module
+/// does exactly when it carries a star re-export (`localExportsFor` renders nothing local then). So:
+///
+/// - `supplied` — exactly one genuine definer provides the name, reached by `hops` (a unique route);
+/// - `ambiguous` — two or more DISTINCT definers provide it (duplicate named exports, or two star
+///   re-exports each forwarding a different definer) — a real interop error the renderer would resolve
+///   arbitrarily;
+/// - `unsupplied` — no definer provides it. The canonical case is a `default` import through a
+///   star-only barrel: a star re-export never forwards `default`, and the barrel (carrying a star)
+///   synthesizes nothing local, so the demanded `default` has no provider and renders as an undefined
+///   import.
+export type ExportSupply =
+  | {
+      readonly status: "supplied";
+      readonly origin: ExportOrigin;
+      readonly hops: readonly RouteHop[];
+    }
+  | { readonly status: "ambiguous"; readonly origins: readonly ExportOrigin[] }
+  | { readonly status: "unsupplied"; readonly at: ExportOrigin };
+
 /// The strongly-connected components of the synchronous graph: every component, each node's component
 /// index, and which component indices are CYCLIC (>= 2 members, or a single member with a self-edge).
 interface SccComponents {
@@ -138,6 +167,17 @@ export class ProgramFacts {
     );
   }
 
+  /// Whether ADDING a synchronous edge `fromId -> toId` (which may not exist yet, or may exist only as
+  /// a DYNAMIC edge) would close a synchronous cycle. Unlike `edgeClosesCycle` — which is an
+  /// SCC-membership test valid only for an edge that already exists synchronously — this asks the
+  /// forward question a graph mutator needs: a new synchronous `from -> to` closes a cycle exactly when
+  /// it is a self-edge, or `to` can ALREADY synchronously reach `from` (so `from -> to -> … -> from`).
+  /// Use this when deciding whether to introduce an edge (e.g. augmenting a dynamic-only pair with a
+  /// synchronous kind); `edgeClosesCycle` would give the wrong answer for a pair joined only dynamically.
+  wouldCloseSynchronousEdge(fromId: string, toId: string): boolean {
+    return fromId === toId || this.reachableFrom(toId).has(fromId);
+  }
+
   /// Whether `id`'s synchronous closure contains a top-level-await module (so a `require` of it would
   /// reach TLA — forbidden, because `require` of an evaluating-with-await ESM module is illegal).
   reachesTopLevelAwait(id: string): boolean {
@@ -240,6 +280,92 @@ export class ProgramFacts {
       }
     }
     return { moduleId, exportName };
+  }
+
+  /// The supply-aware resolution of a demanded `(moduleId, exportName)`: which genuine definer(s)
+  /// provide it and whether that is unique (`supplied`), conflicting (`ambiguous`), or absent
+  /// (`unsupplied`). Unlike `resolveExportOrigin`, this never fabricates a self-origin for a name a
+  /// star-only barrel cannot supply, and it collects EVERY definer so duplicate named exports and
+  /// two-star conflicts surface as `ambiguous`. Generated barrels forward one unique definer per name,
+  /// so on the generated corpus this is always `supplied`; the other verdicts only arise for
+  /// hand-crafted models the validator then rejects.
+  resolveExportRoute(moduleId: string, exportName: string): ExportSupply {
+    const definers = new Map<string, { origin: ExportOrigin; hops: readonly RouteHop[] }>();
+    this.#collectDefiners(moduleId, exportName, [], new Set<string>(), definers);
+    const entries = [...definers.values()];
+    if (entries.length === 0) {
+      return { status: "unsupplied", at: { moduleId, exportName } };
+    }
+    const [only] = entries;
+    if (entries.length === 1 && only !== undefined) {
+      return { status: "supplied", origin: only.origin, hops: only.hops };
+    }
+    return { status: "ambiguous", origins: entries.map((entry) => entry.origin) };
+  }
+
+  /// Collect every genuine definer of `(moduleId, exportName)`, following named then star re-exports.
+  /// A module is a local definer of the name unless it SUPPRESSES local synthesis, which an ESM module
+  /// does exactly when it carries a star re-export (mirroring `localExportsFor`). `visited` is
+  /// per-path (removed on exit) so a diamond of barrels still discovers a second, distinct definer for
+  /// ambiguity; `out` dedupes by resolved origin so two routes to the SAME definer stay one `supplied`.
+  #collectDefiners(
+    moduleId: string,
+    exportName: string,
+    hops: readonly RouteHop[],
+    visited: Set<string>,
+    out: Map<string, { origin: ExportOrigin; hops: readonly RouteHop[] }>,
+  ): void {
+    const module = this.#modulesById.get(moduleId);
+    if (module === undefined) {
+      return;
+    }
+    const key = `${moduleId}\0${exportName}`;
+    if (visited.has(key)) {
+      return;
+    }
+    visited.add(key);
+
+    let matchedNamed = false;
+    for (const dependency of module.dependencies) {
+      if (dependency.kind === "esm-reexport-named" && dependency.exportedName === exportName) {
+        matchedNamed = true;
+        this.#collectDefiners(
+          dependency.target,
+          dependency.sourceName,
+          [...hops, { via: "named", through: moduleId }],
+          visited,
+          out,
+        );
+      }
+    }
+    if (!matchedNamed) {
+      // A star re-export never forwards `default`.
+      if (exportName !== "default") {
+        for (const dependency of module.dependencies) {
+          if (dependency.kind === "esm-reexport-star") {
+            this.#collectDefiners(
+              dependency.target,
+              exportName,
+              [...hops, { via: "star", through: moduleId }],
+              visited,
+              out,
+            );
+          }
+        }
+      }
+      const hasStar = module.dependencies.some(
+        (dependency) => dependency.kind === "esm-reexport-star",
+      );
+      // A CJS module synthesizes every demanded export; an ESM module synthesizes one unless a star
+      // re-export suppresses all local synthesis. Either way, the local definer supplies the name here.
+      if (!(module.format === "esm" && hasStar)) {
+        const originKey = `${moduleId}\0${exportName}`;
+        if (!out.has(originKey)) {
+          out.set(originKey, { origin: { moduleId, exportName }, hops });
+        }
+      }
+    }
+    visited.delete(key);
   }
 
   /// Strongly connected components via ITERATIVE Tarjan (O(V+E)). Iterative on purpose: a 10,000-deep

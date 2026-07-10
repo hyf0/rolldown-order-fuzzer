@@ -2,6 +2,7 @@
 
 import { posix } from "node:path";
 
+import { collectRequestedExports, localExportsFor } from "./analyzed-program.ts";
 import type { EntryModel, ModuleFormat, ModuleModel, ProgramModel, ValueRead } from "./model.ts";
 import { moduleProfile, readableBindingsOf } from "./model.ts";
 import type { ExecutionManifest, ExecutionManifestEntry } from "./protocol.ts";
@@ -57,8 +58,8 @@ export function renderProgram(program: ProgramModel): RenderedProgram {
       contents: renderModule(
         module,
         modulePaths,
-        requestedExports.names.get(module.id) ?? [],
-        requestedExports.callable.get(module.id) ?? new Set<string>(),
+        requestedExports.requestedNames.get(module.id) ?? [],
+        requestedExports.callableNames.get(module.id) ?? new Set<string>(),
       ),
     });
   }
@@ -105,129 +106,6 @@ function modulePath(index: number, format: ModuleFormat, sideEffectFree: boolean
 function importSpecifier(fromPath: string, toPath: string): string {
   const specifier = posix.relative(posix.dirname(fromPath), toPath);
   return specifier.startsWith(".") ? specifier : `./${specifier}`;
-}
-
-interface RequestedExports {
-  /// Per module, the export names it must expose (propagated through re-export chains).
-  readonly names: ReadonlyMap<string, readonly string[]>;
-  /// Per module, the subset of those names demanded as a CALLABLE function export (`export function
-  /// name() { … }`) by a hoisted-function call import. A call import only ever targets a cycle
-  /// member directly (never a barrel), so callable-ness is demanded on the definer and never
-  /// forwarded through a star re-export.
-  readonly callable: ReadonlyMap<string, ReadonlySet<string>>;
-}
-
-/// The export names each module must expose, propagated through re-export (barrel) chains. A value
-/// import demands its imported name; a namespace import demands each read member; a readable require
-/// demands the name it reads; a named re-export always references (demands) its source on the target;
-/// a star re-export forwards any name demanded on the barrel down to its target. A call import also
-/// records its imported name as callable on the target. The result feeds re-export statements,
-/// locally synthesized state-derived exports, and callable function exports (see `localExportsFor`).
-function collectRequestedExports(program: ProgramModel): RequestedExports {
-  const requestedExports = new Map<string, string[]>();
-  const callableExports = new Map<string, Set<string>>();
-  const markCallable = (target: string, name: string): void => {
-    const names = callableExports.get(target);
-    if (names === undefined) {
-      callableExports.set(target, new Set([name]));
-    } else {
-      names.add(name);
-    }
-  };
-  const demand = (target: string, name: string): boolean => {
-    const names = requestedExports.get(target);
-    if (names === undefined) {
-      requestedExports.set(target, [name]);
-      return true;
-    }
-    if (!names.includes(name)) {
-      names.push(name);
-      return true;
-    }
-    return false;
-  };
-
-  for (const module of program.modules) {
-    for (const dependency of module.dependencies) {
-      if (dependency.kind === "esm-value-import") {
-        demand(dependency.target, dependency.importedName);
-        if (dependency.call === true) {
-          markCallable(dependency.target, dependency.importedName);
-        }
-      } else if (dependency.kind === "esm-namespace-import") {
-        // A call member (`ns.member()`) demands a CALLABLE export on the direct target, so a flat
-        // model calling a plain module's member synthesizes `export function member()` rather than a
-        // const a call would crash on. Like the value-import call marking, callable-ness is only
-        // demanded on the direct target, never forwarded through a star re-export — a barrel-mediated
-        // call member expects a `callableOwnState` definer (which synthesizes functions regardless).
-        const callMembers = new Set(dependency.callMembers ?? []);
-        for (const member of dependency.readMembers) {
-          demand(dependency.target, member);
-          if (callMembers.has(member)) {
-            markCallable(dependency.target, member);
-          }
-        }
-      } else if (dependency.kind === "cjs-require" && dependency.readName !== undefined) {
-        demand(dependency.target, dependency.readName);
-      } else if (dependency.kind === "esm-reexport-named") {
-        // `export { source as exported } from target` references `source` on the target eagerly.
-        demand(dependency.target, dependency.sourceName);
-      }
-    }
-  }
-
-  // Fixpoint: a `export * from target` barrel forwards every name demanded on it (that a named
-  // re-export does not already provide) to its target, so demand reaches the defining module.
-  let changed = true;
-  while (changed) {
-    changed = false;
-    for (const module of program.modules) {
-      const starTargets = module.dependencies.flatMap((dependency) =>
-        dependency.kind === "esm-reexport-star" ? [dependency.target] : [],
-      );
-      if (starTargets.length === 0) {
-        continue;
-      }
-      const namedProvided = new Set(
-        module.dependencies.flatMap((dependency) =>
-          dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
-        ),
-      );
-      // Index iteration tolerates the array growing under a (pathological) self-star; `demand`
-      // deduplicates, so the fixpoint still terminates.
-      const demandedHere = requestedExports.get(module.id);
-      for (let index = 0; index < (demandedHere?.length ?? 0); index += 1) {
-        const name = demandedHere?.[index];
-        if (name === undefined || namedProvided.has(name)) {
-          continue;
-        }
-        for (const starTarget of starTargets) {
-          if (demand(starTarget, name)) {
-            changed = true;
-          }
-        }
-      }
-    }
-  }
-
-  return { names: requestedExports, callable: callableExports };
-}
-
-/// The subset of a module's requested exports it must synthesize locally (a state-derived value):
-/// everything a re-export does not forward. CJS cannot re-export, so it synthesizes all of them; an
-/// ESM barrel forwards names via named re-exports (matched by `exportedName`) or a star re-export
-/// (which forwards everything else), leaving a pure barrel with no local exports.
-function localExportsFor(module: ModuleModel, requested: readonly string[]): readonly string[] {
-  if (module.format === "cjs") {
-    return requested;
-  }
-  const namedProvided = new Set(
-    module.dependencies.flatMap((dependency) =>
-      dependency.kind === "esm-reexport-named" ? [dependency.exportedName] : [],
-    ),
-  );
-  const hasStar = module.dependencies.some((dependency) => dependency.kind === "esm-reexport-star");
-  return requested.filter((name) => !namedProvided.has(name) && !hasStar);
 }
 
 /// Dependencies render one statement each — no dedup by specifier, so a multi-kind pair (the same
