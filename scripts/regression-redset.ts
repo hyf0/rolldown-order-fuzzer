@@ -45,8 +45,10 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  generateCjsOutputWitnessCase,
   generateCrossChunkInitCycleCase,
   generateCrossEntryLeakCase,
+  generateOptimizerCycleCase,
   type GeneratedCase,
 } from "../src/generate.ts";
 import { executeProgram } from "../src/program-run.ts";
@@ -67,6 +69,12 @@ const RAW_SPAWN_TIMEOUT_MS = 120_000;
 const GENERATORS: Readonly<Record<string, (seed: number) => GeneratedCase>> = {
   generateCrossChunkInitCycleCase,
   generateCrossEntryLeakCase,
+  // FW-A: RED-3 upgraded from raw to generator form — `generateOptimizerCycleCase` (runtime-placement
+  // variant, its default) reproduces the exact `__commonJSMin is not a function` signature from a
+  // ProgramModel (FW-B evidence `.agents/evidence/optimizer-cycle.json`). RED-8 is the FW-A cjs-output
+  // arm bracket — the object-identity double-init witness against CJS output (its default variant).
+  generateOptimizerCycleCase,
+  generateCjsOutputWitnessCase,
 };
 
 // ---------------------------------------------------------------------------------------------------

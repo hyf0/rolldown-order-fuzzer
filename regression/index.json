@@ -71,17 +71,42 @@
       "issue": 9993,
       "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
       "title": "runtime-placement cycle (__commonJSMin)",
-      "form": "raw",
-      "dir": "raw/9993",
+      "form": "generator",
+      "generator": "generateOptimizerCycleCase",
+      "seed": 0,
+      "onDemandWrapping": true,
       "redTarget": { "kind": "npm", "version": "1.1.4" },
       "greenTarget": { "kind": "npm", "version": "1.1.5" },
-      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "expectedRedSignature": "bundle-only-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
       "provenance": {
         "fixPr": "#9993 (issue) / #10101 (fix, \"a regression of #9224\")",
         "fixCommit": "2d9f81cdd fix(chunk-optimizer): follow entry facade edges in runtime placement cycle check (#10101)",
         "redBelow": "1.1.5",
         "greenAtOrAbove": "1.1.5",
-        "miningDocRef": "section 4 RED-3"
+        "miningDocRef": "section 4 RED-3",
+        "note": "FW-A: UPGRADED from raw to generator form. `generateOptimizerCycleCase` (runtime-placement variant, its default) reproduces the EXACT signature from a ProgramModel — the manual group `oc-v:[oc-node3,oc-node4]` captures the two CJS entries but not the ESM leaf at idr:false, forcing __commonJSMin into a back-imported sibling chunk (FW-B deliverable 1; evidence .agents/evidence/optimizer-cycle.json). The generator-form signature carries the `bundle-only-crash:` prefix (source runs clean, only the bundle crashes) where the raw form carried `raw-crash:`; the [name,message] tuple is identical. The raw fixture at regression/raw/9993/ is kept on disk as a byte-verbatim provenance reference."
+      }
+    },
+    {
+      "id": "RED-8",
+      "issue": 0,
+      "cluster": "P7/T4 cjs-output arm — wrapped-entry init emission (FW-A)",
+      "title": "object-identity double-init witness against CJS output (on-demand)",
+      "form": "generator",
+      "generator": "generateCjsOutputWitnessCase",
+      "seed": 0,
+      "onDemandWrapping": true,
+      "redTarget": { "kind": "npm", "version": "1.1.5" },
+      "greenTarget": { "kind": "snapshot" },
+      "bracketPending": true,
+      "expectedRedSignature": "bundle-only-crash:[\"ReferenceError\",\"init_module_0002 is not defined\"]",
+      "provenance": {
+        "fixPr": "OPEN — no released fix; RED on npm 1.1.5 (the latest release), GREEN only on the unreleased final-snapshot-42628c18b (PR-10104 arc) — the RED-0 bracket shape",
+        "fixCommit": "none — bracket-pending: the CJS-output-arm bug is fixed on the PR-10104 strict-order snapshot but not in any release; the entry graduates to a normal bracket when the fix ships and the green target flips to an npm version",
+        "redBelow": "1.1.5",
+        "greenAtOrAbove": "final-snapshot-42628c18b (bracket-pending — no released green)",
+        "miningDocRef": "gap-audit Wave 11 / mining P7 (T4)",
+        "note": "FW-A deliverable 1 witness. `generateCjsOutputWitnessCase` (object-identity variant, its default) — an objectExport definer captured directly and through a barrel by an entry, compared for identity at top level, built with outputFormat:cjs. The entry's top-level objectRef reads order-wrap it; under a CJS output on-demand emits the entry's `init_module_0002()` into the entry chunk WITHOUT its definition -> ReferenceError. Classified (scripts/cjs-output-catch.ts): RED only at cjs-output + on-demand on 1.1.5; GREEN at esm-output on both targets, cjs-output on the snapshot, and cjs-output under wrap-all. Structurally invisible under the ESM-output pin. Evidence .agents/evidence/cjs-output.json."
       }
     },
     {
