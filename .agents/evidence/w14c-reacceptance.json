@@ -1,7 +1,7 @@
 {
   "proof": "W14c 6-cell seo:true reacceptance vs the frozen buggy snapshot",
-  "generatedAt": "2026-07-10T23:32:31.853Z",
-  "head": "f0b15b4e1ddfe5caa987e6bf1289d4fa05745fc8",
+  "generatedAt": "2026-07-11T02:09:30.829Z",
+  "head": "78fbed4100aa2a8a46209a0a0c4a809df04b6b89",
   "dirty": true,
   "node": "v24.18.0",
   "casesPerCell": 300,
@@ -17,19 +17,24 @@
       "regime": "mixed",
       "onDemandWrapping": true,
       "cases": 300,
-      "red": 74,
+      "red": 79,
       "signatureHistogram": {
         "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 68,
         "events-reordered:source=[[\"psib10\",\"evaluate\",926258],[\"psib10\",\"evaluate-1\",968572],[\"pconsA10\",\"evaluate\",1508783],[\"@schedule\",5,\"entry\"],[\"@schedule\",6,\"dynamic\"]]": 1,
         "events-reordered:source=[[\"psib7\",\"evaluate\",265365],[\"psib7\",\"evaluate-1\",393955],[\"pconsA7\",\"evaluate\",1552463],[\"pconsA7\",\"evaluate-1\",847299],[\"@schedule\",0,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib20\",\"evaluate\",430988],[\"pconsA20\",\"evaluate\",1164864],[\"@schedule\",5,\"entry\"],[\"m7\",\"evaluate\",1695653],[\"m7\",\"evaluate-1\",362144],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"],[\"@schedule\",9,\"dynamic\"],[\"@schedule\",10,\"dynamic\"],[\"@schedule\",11,\"entry\"]]": 1,
+        "events-reordered:source=[[\"m13\",\"evaluate\",401014],[\"m12\",\"evaluate\",341086],[\"@schedule\",0,\"entry\"],[\"m23\",\"evaluate\",406143],[\"m11\",\"evaluate\",991435],[\"m18\",\"evaluate\",581767],[\"m18\",\"evaluate-1\",850701],[\"m6\",\"evaluate\",862548],[\"m6\",\"evaluate-1\",980773],[\"m2\",\"evaluate\",1262008],[\"m2\",\"evaluate-1\",1395530],[\"m3\",\"evaluate\",282681],[\"m25\",\"evaluate\",174821],[\"m17\",\"evaluate\",370081],[\"m17\",\"evaluate-1\",47107],[\"m19\",\"evaluate\",149428],[\"m27\",\"evaluate\",948119],[\"m21\",\"evaluate\",435955],[\"m9\",\"evaluate\",864959],[\"m4\",\"evaluate\",437405],[\"m1\",\"evaluate\",1904436],[\"m24\",\"evaluate\",818061],[\"m24\",\"evaluate-1\",816439],[\"m5\",\"evaluate\",1110980],[\"m5\",\"evaluate-1\",1377311],[\"m0\",\"evaluate\",1503264]]": 1,
+        "events-reordered:source=[[\"m2\",\"evaluate\",592877],[\"m2\",\"evaluate-1\",280597],[\"@schedule\",1,\"entry\"],[\"m1\",\"evaluate\",810063],[\"m1\",\"evaluate-1\",220284],[\"m0\",\"evaluate\",168493],[\"m0\",\"evaluate-1\",543476]]": 1,
+        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.init_module_0004 is not a function\"]": 1,
         "events-reordered:source=[[\"psib19\",\"evaluate\",356875],[\"psib19\",\"evaluate-1\",671647],[\"pconsA19\",\"evaluate\",1435545],[\"pconsA19\",\"evaluate-1\",506822],[\"@schedule\",15,\"entry\"],[\"coscA24\",\"evaluate\",1658579],[\"@schedule\",16,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib9\",\"evaluate\",254489],[\"pconsA9\",\"evaluate\",131657],[\"pconsA9\",\"evaluate-1\",1282417],[\"@schedule\",0,\"entry\"],[\"cos15\",\"evaluate\",253083],[\"cossib15\",\"evaluate\",581015],[\"cossib15\",\"evaluate-1\",20263],[\"coscB15\",\"evaluate\",804215],[\"@schedule\",1,\"entry\"]]": 1,
-        "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1
+        "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1,
+        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0021 is not a function\"]": 1,
+        "events-reordered:source=[[\"objcA29\",\"evaluate\",573226],[\"@schedule\",0,\"entry\"],[\"objcB29\",\"evaluate\",269779],[\"@schedule\",1,\"entry\"],[\"m26\",\"evaluate\",688874],[\"m25\",\"evaluate\",736472],[\"m19\",\"evaluate\",1574826],[\"m19\",\"evaluate-1\",865877],[\"m13\",\"evaluate\",348390],[\"m16\",\"evaluate\",942507],[\"m16\",\"evaluate-1\",757086],[\"m24\",\"evaluate\",643988],[\"m18\",\"evaluate\",157414],[\"m2\",\"evaluate\",418750],[\"m2\",\"evaluate-1\",1214089],[\"m10\",\"evaluate\",259815],[\"m10\",\"evaluate-1\",318789],[\"m11\",\"evaluate\",807664],[\"m11\",\"evaluate-1\",828988],[\"m7\",\"evaluate\",313827],[\"m7\",\"evaluate-1\",51055],[\"m12\",\"evaluate\",752283],[\"m14\",\"evaluate\",324825],[\"m8\",\"evaluate\",1269246],[\"m8\",\"evaluate-1\",723809],[\"m22\",\"evaluate\",1355435],[\"m15\",\"evaluate\",621978],[\"m15\",\"evaluate-1\",626136],[\"m5\",\"evaluate\",2105895],[\"m21\",\"evaluate\",1458461],[\"m6\",\"evaluate\",1506601],[\"m1\",\"evaluate\",2449864],[\"m1\",\"evaluate-1\",715131],[\"ring0\",\"evaluate\",789865],[\"ring0\",\"evaluate-1\",1409394],[\"ring1\",\"evaluate\",472530],[\"ring1\",\"evaluate-1\",16231],[\"m20\",\"evaluate\",458316],[\"m20\",\"evaluate-1\",786216],[\"m0\",\"evaluate\",1229096]]": 1
       },
       "reasonHistogram": {
-        "bundle-only-crash": 68,
-        "events-reordered": 6
+        "bundle-only-crash": 70,
+        "events-reordered": 9
       },
       "unknownReasons": []
     },
@@ -38,21 +43,25 @@
       "regime": "mixed",
       "onDemandWrapping": false,
       "cases": 300,
-      "red": 63,
+      "red": 67,
       "signatureHistogram": {
         "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 55,
         "events-reordered:source=[[\"psib10\",\"evaluate\",26813],[\"psib10\",\"evaluate-1\",15256],[\"pconsA10\",\"evaluate\",1332984],[\"@schedule\",1,\"entry\"],[\"m2\",\"evaluate\",770334],[\"m4\",\"evaluate\",383358],[\"m9\",\"evaluate\",667370],[\"m9\",\"evaluate-1\",734496],[\"m8\",\"evaluate\",1214522],[\"m7\",\"evaluate\",634263],[\"m5\",\"evaluate\",1206747],[\"m5\",\"evaluate-1\",1559255],[\"m3\",\"evaluate\",1224494],[\"m3\",\"evaluate-1\",565639],[\"m6\",\"evaluate\",947528],[\"m1\",\"evaluate\",836786],[\"m1\",\"evaluate-1\",2289349],[\"@schedule\",2,\"dynamic\"],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"]]": 1,
         "events-reordered:source=[[\"psib10\",\"evaluate\",926258],[\"psib10\",\"evaluate-1\",968572],[\"pconsA10\",\"evaluate\",1508783],[\"@schedule\",5,\"entry\"],[\"@schedule\",6,\"dynamic\"]]": 1,
         "events-reordered:source=[[\"psib7\",\"evaluate\",265365],[\"psib7\",\"evaluate-1\",393955],[\"pconsA7\",\"evaluate\",1552463],[\"pconsA7\",\"evaluate-1\",847299],[\"@schedule\",0,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib20\",\"evaluate\",430988],[\"pconsA20\",\"evaluate\",1164864],[\"@schedule\",5,\"entry\"],[\"m7\",\"evaluate\",1695653],[\"m7\",\"evaluate-1\",362144],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"],[\"@schedule\",8,\"dynamic\"],[\"@schedule\",9,\"dynamic\"],[\"@schedule\",10,\"dynamic\"],[\"@schedule\",11,\"entry\"]]": 1,
+        "events-reordered:source=[[\"m13\",\"evaluate\",401014],[\"m12\",\"evaluate\",341086],[\"@schedule\",0,\"entry\"],[\"m23\",\"evaluate\",406143],[\"m11\",\"evaluate\",991435],[\"m18\",\"evaluate\",581767],[\"m18\",\"evaluate-1\",850701],[\"m6\",\"evaluate\",862548],[\"m6\",\"evaluate-1\",980773],[\"m2\",\"evaluate\",1262008],[\"m2\",\"evaluate-1\",1395530],[\"m3\",\"evaluate\",282681],[\"m25\",\"evaluate\",174821],[\"m17\",\"evaluate\",370081],[\"m17\",\"evaluate-1\",47107],[\"m19\",\"evaluate\",149428],[\"m27\",\"evaluate\",948119],[\"m21\",\"evaluate\",435955],[\"m9\",\"evaluate\",864959],[\"m4\",\"evaluate\",437405],[\"m1\",\"evaluate\",1904436],[\"m24\",\"evaluate\",818061],[\"m24\",\"evaluate-1\",816439],[\"m5\",\"evaluate\",1110980],[\"m5\",\"evaluate-1\",1377311],[\"m0\",\"evaluate\",1503264]]": 1,
+        "events-reordered:source=[[\"m2\",\"evaluate\",592877],[\"m2\",\"evaluate-1\",280597],[\"@schedule\",1,\"entry\"],[\"m1\",\"evaluate\",810063],[\"m1\",\"evaluate-1\",220284],[\"m0\",\"evaluate\",168493],[\"m0\",\"evaluate-1\",543476]]": 1,
         "events-reordered:source=[[\"psib3\",\"evaluate\",82124],[\"psib3\",\"evaluate-1\",929785],[\"pconsA3\",\"evaluate\",981042],[\"pconsA3\",\"evaluate-1\",967776],[\"@schedule\",1,\"entry\"]]": 1,
+        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.init_module_0004 is not a function\"]": 1,
         "events-reordered:source=[[\"psib19\",\"evaluate\",356875],[\"psib19\",\"evaluate-1\",671647],[\"pconsA19\",\"evaluate\",1435545],[\"pconsA19\",\"evaluate-1\",506822],[\"@schedule\",15,\"entry\"],[\"coscA24\",\"evaluate\",1658579],[\"@schedule\",16,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib9\",\"evaluate\",254489],[\"pconsA9\",\"evaluate\",131657],[\"pconsA9\",\"evaluate-1\",1282417],[\"@schedule\",0,\"entry\"],[\"cos15\",\"evaluate\",253083],[\"cossib15\",\"evaluate\",581015],[\"cossib15\",\"evaluate-1\",20263],[\"coscB15\",\"evaluate\",804215],[\"@schedule\",1,\"entry\"]]": 1,
-        "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1
+        "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1,
+        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0021 is not a function\"]": 1
       },
       "reasonHistogram": {
-        "bundle-only-crash": 55,
-        "events-reordered": 8
+        "bundle-only-crash": 57,
+        "events-reordered": 10
       },
       "unknownReasons": []
     },
@@ -94,9 +103,17 @@
       "regime": "pure-cjs",
       "onDemandWrapping": true,
       "cases": 300,
-      "red": 0,
-      "signatureHistogram": {},
-      "reasonHistogram": {},
+      "red": 4,
+      "signatureHistogram": {
+        "events-reordered:source=[[\"m8\",\"evaluate\",628552],[\"m8\",\"evaluate-1\",539580],[\"m9\",\"evaluate\",219519],[\"m11\",\"evaluate\",477230],[\"m6\",\"evaluate\",1010963],[\"m6\",\"evaluate-1\",891403],[\"m4\",\"evaluate\",1525205],[\"m4\",\"evaluate-1\",135164],[\"@schedule\",0,\"entry\"],[\"@schedule\",1,\"dynamic\"],[\"@schedule\",2,\"dynamic\"],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"m7\",\"evaluate\",726149],[\"m5\",\"evaluate\",1458784],[\"m3\",\"evaluate\",1697292],[\"m3\",\"evaluate-1\",1500768],[\"m2\",\"evaluate\",988507],[\"m0\",\"evaluate\",1962853],[\"m0\",\"evaluate-1\",31999]]": 1,
+        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0001 is not a function\"]": 1,
+        "events-reordered:source=[[\"m17\",\"evaluate\",825194],[\"m17\",\"evaluate-1\",122628],[\"m13\",\"evaluate\",937755],[\"m8\",\"evaluate\",1012527],[\"@schedule\",0,\"entry\"],[\"m20\",\"evaluate\",189655],[\"m20\",\"evaluate-1\",259191],[\"m19\",\"evaluate\",876060],[\"@schedule\",1,\"dynamic\"],[\"m1\",\"evaluate\",525563],[\"ring2\",\"evaluate\",209131],[\"ring2\",\"evaluate-1\",580183],[\"ring0\",\"evaluate\",547497],[\"ring0\",\"evaluate-1\",545892],[\"ring1\",\"evaluate\",606134],[\"m3\",\"evaluate\",531168],[\"m3\",\"evaluate-1\",11487],[\"m5\",\"evaluate\",948708],[\"m0\",\"evaluate\",1328360],[\"m0\",\"evaluate-1\",2122743]]": 1,
+        "events-reordered:source=[[\"m7\",\"evaluate\",573585],[\"m7\",\"evaluate-1\",512352],[\"m5\",\"evaluate\",763127],[\"m5\",\"evaluate-1\",321762],[\"@schedule\",0,\"entry\"],[\"m4\",\"evaluate\",986623],[\"m4\",\"evaluate-1\",183484],[\"m3\",\"evaluate\",632775],[\"m1\",\"evaluate\",763231],[\"m2\",\"evaluate\",415429],[\"m2\",\"evaluate-1\",667606],[\"m0\",\"evaluate\",805797]]": 1
+      },
+      "reasonHistogram": {
+        "events-reordered": 3,
+        "bundle-only-crash": 1
+      },
       "unknownReasons": []
     },
     {
@@ -104,9 +121,17 @@
       "regime": "pure-cjs",
       "onDemandWrapping": false,
       "cases": 300,
-      "red": 0,
-      "signatureHistogram": {},
-      "reasonHistogram": {},
+      "red": 4,
+      "signatureHistogram": {
+        "events-reordered:source=[[\"m8\",\"evaluate\",628552],[\"m8\",\"evaluate-1\",539580],[\"m9\",\"evaluate\",219519],[\"m11\",\"evaluate\",477230],[\"m6\",\"evaluate\",1010963],[\"m6\",\"evaluate-1\",891403],[\"m4\",\"evaluate\",1525205],[\"m4\",\"evaluate-1\",135164],[\"@schedule\",0,\"entry\"],[\"@schedule\",1,\"dynamic\"],[\"@schedule\",2,\"dynamic\"],[\"@schedule\",3,\"dynamic\"],[\"@schedule\",4,\"dynamic\"],[\"m7\",\"evaluate\",726149],[\"m5\",\"evaluate\",1458784],[\"m3\",\"evaluate\",1697292],[\"m3\",\"evaluate-1\",1500768],[\"m2\",\"evaluate\",988507],[\"m0\",\"evaluate\",1962853],[\"m0\",\"evaluate-1\",31999]]": 1,
+        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0001 is not a function\"]": 1,
+        "events-reordered:source=[[\"m17\",\"evaluate\",825194],[\"m17\",\"evaluate-1\",122628],[\"m13\",\"evaluate\",937755],[\"m8\",\"evaluate\",1012527],[\"@schedule\",0,\"entry\"],[\"m20\",\"evaluate\",189655],[\"m20\",\"evaluate-1\",259191],[\"m19\",\"evaluate\",876060],[\"@schedule\",1,\"dynamic\"],[\"m1\",\"evaluate\",525563],[\"ring2\",\"evaluate\",209131],[\"ring2\",\"evaluate-1\",580183],[\"ring0\",\"evaluate\",547497],[\"ring0\",\"evaluate-1\",545892],[\"ring1\",\"evaluate\",606134],[\"m3\",\"evaluate\",531168],[\"m3\",\"evaluate-1\",11487],[\"m5\",\"evaluate\",948708],[\"m0\",\"evaluate\",1328360],[\"m0\",\"evaluate-1\",2122743]]": 1,
+        "events-reordered:source=[[\"m7\",\"evaluate\",573585],[\"m7\",\"evaluate-1\",512352],[\"m5\",\"evaluate\",763127],[\"m5\",\"evaluate-1\",321762],[\"@schedule\",0,\"entry\"],[\"m4\",\"evaluate\",986623],[\"m4\",\"evaluate-1\",183484],[\"m3\",\"evaluate\",632775],[\"m1\",\"evaluate\",763231],[\"m2\",\"evaluate\",415429],[\"m2\",\"evaluate-1\",667606],[\"m0\",\"evaluate\",805797]]": 1
+      },
+      "reasonHistogram": {
+        "events-reordered": 3,
+        "bundle-only-crash": 1
+      },
       "unknownReasons": []
     }
   ]

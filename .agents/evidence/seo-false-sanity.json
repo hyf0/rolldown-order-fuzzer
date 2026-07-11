@@ -1,8 +1,8 @@
 {
   "proof": "W14c seo:false sanity — the isolation oracle does not false-positive on relaxed order",
-  "generatedAt": "2026-07-11T00:41:13.724Z",
-  "head": "14716d8187c27adf3e904dd1dbf16b5e8381224d",
-  "dirty": true,
+  "generatedAt": "2026-07-11T02:01:59.102Z",
+  "head": "6dee5da52f7ded17d645154a10082b8f68ebd388",
+  "dirty": false,
   "node": "v24.18.0",
   "casesRequested": 300,
   "kept": 300,
@@ -13,15 +13,18 @@
     "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
   },
   "accepted": true,
-  "isolationGreen": 295,
-  "nonIsolationOther": 5,
-  "relaxedOrderIgnored": 35,
+  "isolationGreen": 293,
+  "nonIsolationOther": 7,
+  "relaxedOrderIgnored": 38,
   "isolationFalsePositives": [],
   "signatureHistogram": {
-    "pass": 295,
+    "pass": 293,
     "bundle-only-crash:[\"TypeError\",\"require_module_0009 is not a function\"]": 1,
     "bundle-only-crash:[\"TypeError\",\"require_module_0003 is not a function\"]": 1,
-    "bundle-only-crash:[\"ReferenceError\",\"Cannot access '__orderExport0$2' before initialization\"]": 2,
-    "bundle-only-crash:[\"TypeError\",\"init_module_0002 is not a function\"]": 1
+    "bundle-only-crash:[\"ReferenceError\",\"Cannot access '__orderExport0$2' before initialization\"]": 1,
+    "bundle-only-crash:[\"TypeError\",\"require_group_0.require_module_0001 is not a function\"]": 1,
+    "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 1,
+    "bundle-only-crash:[\"TypeError\",\"init_module_0002 is not a function\"]": 1,
+    "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0013 is not a function\"]": 1
   }
 }
