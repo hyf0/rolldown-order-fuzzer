@@ -93,6 +93,24 @@ async function runSeoTrueControl(
   };
 }
 
+/// The AUTOMATIC-chunking control: the SAME shape at seo:false but with the co-locating organic group
+/// REMOVED (automatic chunking). If it stays GREEN the group is load-bearing and the "automatic chunking
+/// does not leak" disproof is MEASURED from this script (not a hardcoded literal). Runs on the snapshot.
+async function runAutomaticControl(
+  rolldownPackage: string,
+): Promise<{ green: boolean; signature: string }> {
+  const { program } = buildStaticCrossEntryLeak(new SeededRng(0));
+  const automatic = {
+    ...program,
+    build: { ...buildConfigOf(program), chunking: { kind: "automatic" as const } },
+  };
+  const run = await executeProgram(automatic, { rolldownPackage, onDemandWrapping: true });
+  return {
+    green: run.verdict.kind === "pass",
+    signature: run.verdict.kind === "pass" ? "pass" : run.verdict.signature,
+  };
+}
+
 function sha256OfFile(path: string): string | null {
   try {
     return createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -119,6 +137,11 @@ async function main(): Promise<number> {
   const npm = await runCell(NPM);
   const snapshot = await runCell(SNAPSHOT);
   const control = await runSeoTrueControl(SNAPSHOT);
+  // The load-bearing controls: seo:true (the leak is seo:false-only) AND automatic chunking on BOTH
+  // targets (the group — not seo:false alone — is what leaks; the "automatic does not leak" disproof is
+  // MEASURED here, not asserted).
+  const automaticNpm = await runAutomaticControl(NPM);
+  const automaticSnapshot = await runAutomaticControl(SNAPSHOT);
 
   process.stdout.write(
     `npm 1.1.5   isolation-red=${npm.redIsolation}/${CASES}  green=${npm.green}\n`,
@@ -129,17 +152,24 @@ async function main(): Promise<number> {
   process.stdout.write(
     `seo:true control: ${control.green ? "GREEN" : `RED ${control.signature}`}\n`,
   );
+  process.stdout.write(
+    `automatic-chunking control (seo:false): npm=${automaticNpm.green ? "GREEN" : `RED ${automaticNpm.signature}`} snapshot=${automaticSnapshot.green ? "GREEN" : `RED ${automaticSnapshot.signature}`}\n`,
+  );
   for (const line of [...npm.other, ...snapshot.other]) {
     process.stdout.write(`  ! ${line}\n`);
   }
 
+  // The disproof is MEASURED: automatic chunking stays GREEN on both targets (a red here would mean
+  // automatic chunking leaks after all — the disproof would be wrong, and acceptance fails).
+  const automaticStaysGreen = automaticNpm.green && automaticSnapshot.green;
   const accepted =
     CASES >= 20 &&
     npm.redIsolation === CASES &&
     npm.other.length === 0 &&
     snapshot.redIsolation === CASES &&
     snapshot.other.length === 0 &&
-    control.green;
+    control.green &&
+    automaticStaysGreen;
 
   const evidence = {
     proof:
@@ -153,15 +183,16 @@ async function main(): Promise<number> {
     ablation: {
       minimalTrigger:
         "two mutually-unreachable entries sharing a static module + private eager modules, co-located by a PLAIN organic group (test:'.*'), seo:false; load ONE entry -> the OTHER's private top-level runs",
-      automaticChunkingLeaks: false,
+      automaticChunkingLeaks: !automaticStaysGreen,
       automaticChunkingNote:
-        "AUTOMATIC chunking does NOT leak (GREEN on both targets; 0/28 random automatic multi-entry seo:false cases) — the W14c 'automatic chunking' characterization is disproven; a co-locating organic group is load-bearing",
+        "AUTOMATIC chunking does NOT leak — MEASURED by the automatic-chunking control below (the SAME shape at seo:false with the group removed stays GREEN on both targets); the W14c 'automatic chunking' characterization is disproven, a co-locating organic group is load-bearing. (An out-of-band random scan also found 0/28 automatic multi-entry seo:false leaks.)",
       sameRootAsRed9998: true,
       broaderThanRed9998:
         "no dynamic import required (purely static) and a plain organic group suffices (not only entriesAware)",
       foldedIntoRed9998: true,
     },
     seoTrueControl: control,
+    automaticChunkingControl: { npm: automaticNpm, snapshot: automaticSnapshot },
     targets: {
       npm: { path: NPM, sha256: sha256OfFile(NPM) },
       snapshot: { path: SNAPSHOT, sha256: sha256OfFile(SNAPSHOT) },

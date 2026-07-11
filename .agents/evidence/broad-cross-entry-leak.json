@@ -1,7 +1,7 @@
 {
   "proof": "FW-B W14c follow-up: broader STATIC cross-entry-leak at seo:false — same root as #9998, AUTOMATIC chunking disproven",
-  "generatedAt": "2026-07-11T00:24:02.673Z",
-  "head": "890aadf48a76bba8b95b37fd01d02c1b0f3b057c",
+  "generatedAt": "2026-07-11T00:51:54.089Z",
+  "head": "8a9a2962c78fdda78cc44c0919da2e96e32dcc79",
   "dirty": true,
   "node": "v24.18.0",
   "cases": 20,
@@ -9,7 +9,7 @@
   "ablation": {
     "minimalTrigger": "two mutually-unreachable entries sharing a static module + private eager modules, co-located by a PLAIN organic group (test:'.*'), seo:false; load ONE entry -> the OTHER's private top-level runs",
     "automaticChunkingLeaks": false,
-    "automaticChunkingNote": "AUTOMATIC chunking does NOT leak (GREEN on both targets; 0/28 random automatic multi-entry seo:false cases) — the W14c 'automatic chunking' characterization is disproven; a co-locating organic group is load-bearing",
+    "automaticChunkingNote": "AUTOMATIC chunking does NOT leak — MEASURED by the automatic-chunking control below (the SAME shape at seo:false with the group removed stays GREEN on both targets); the W14c 'automatic chunking' characterization is disproven, a co-locating organic group is load-bearing. (An out-of-band random scan also found 0/28 automatic multi-entry seo:false leaks.)",
     "sameRootAsRed9998": true,
     "broaderThanRed9998": "no dynamic import required (purely static) and a plain organic group suffices (not only entriesAware)",
     "foldedIntoRed9998": true
@@ -17,6 +17,16 @@
   "seoTrueControl": {
     "green": true,
     "signature": "pass"
+  },
+  "automaticChunkingControl": {
+    "npm": {
+      "green": true,
+      "signature": "pass"
+    },
+    "snapshot": {
+      "green": true,
+      "signature": "pass"
+    }
   },
   "targets": {
     "npm": {
