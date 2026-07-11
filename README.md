@@ -102,6 +102,17 @@ npm run regression:redset RED-2    # one bracket by id
 
 Not part of `vp test` (it acquires pinned npm rolldown targets and runs out-of-tree builds). It writes evidence to `.agents/evidence/regression-redset.json` and exits non-zero on any violation. See [.agents/docs/regression-red-set.md](.agents/docs/regression-red-set.md) for the brackets, the two entry forms, and how to add one.
 
+## Transplant cell
+
+A corpus cell (`transplant/`) of committed cases whose SHAPE comes from real apps: each is a real application's module-graph skeleton, extracted during one ordinary production build, reduced to its order-relevant core, anonymized, and emitted as a fuzzer-schema model at the current schema (no names, paths, or code — only `m<index>` ids). Three seed apps (shadcn-admin, vue-vben-admin web-antd, comfyui) each carry a pure-order baseline and a family-A witness overlay.
+
+```
+npm run transplant:cell              # all apps, both targets
+npm run transplant:cell shadcn-admin # one app
+```
+
+Not part of `vp test` (it builds against out-of-tree snapshots). Baselines run green on the fixed snapshot in both wrap modes; each overlay reds the buggy snapshot with the family-A signature and shrinks to its 5-module core. See [.agents/docs/transplant-cell.md](.agents/docs/transplant-cell.md) for the pipeline, the regeneration flow, how to add an app, and the #10044 honest-limit finding.
+
 ## Context
 
 Read [AGENTS.md](AGENTS.md) first. Durable project context lives under [.agents/docs/](.agents/docs/).

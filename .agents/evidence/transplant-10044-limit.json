@@ -1,0 +1,77 @@
+{
+  "proof": "#10044 real-graph link-failure transplant test",
+  "generatedAt": "2026-07-11T02:52:53.267Z",
+  "head": "2da9c2058dc75d90908f1fe24302897c1b2b1aca",
+  "node": "v24.18.0",
+  "graphPath": "/private/tmp/claude-501/-Users-yunfeihe-Documents/f7cdede9-095e-40cd-a487-bcfeb2f9e793/scratchpad/graphs/griffel-114.json",
+  "graphModules": 2122,
+  "realGraphReproduces": "confirmed out-of-band: bare rolldown 1.1.3 on `import { Title1 } from '@fluentui/react-text'` throws [MISSING_EXPORT] \"RESET\"; 1.1.4 builds",
+  "anyReproduced": false,
+  "finding": "HONEST LIMIT: the faithful transplant carries the exact star->named RESET chain at full scale (verified in the rendered output) yet is GREEN on rolldown 1.1.3 — the emergent link order the bug depends on is not reconstructed by the anonymized side-effect/re-export skeleton",
+  "matrix": [
+    {
+      "config": {
+        "scope": "griffel",
+        "retainReset": true,
+        "packages": false
+      },
+      "valid": true,
+      "modules": 111,
+      "renderedChain": {
+        "resetReexporters": 1,
+        "starFiles": 1
+      },
+      "on113": "pass",
+      "on114": "pass",
+      "reproduced": false
+    },
+    {
+      "config": {
+        "scope": "full",
+        "retainReset": true,
+        "packages": false
+      },
+      "valid": true,
+      "modules": 2124,
+      "renderedChain": {
+        "resetReexporters": 1,
+        "starFiles": 6
+      },
+      "on113": "pass",
+      "on114": "pass",
+      "reproduced": false
+    },
+    {
+      "config": {
+        "scope": "full",
+        "retainReset": true,
+        "packages": true
+      },
+      "valid": true,
+      "modules": 2124,
+      "renderedChain": {
+        "resetReexporters": 1,
+        "starFiles": 6
+      },
+      "on113": "pass",
+      "on114": "pass",
+      "reproduced": false
+    },
+    {
+      "config": {
+        "scope": "full",
+        "retainReset": false,
+        "packages": true
+      },
+      "valid": true,
+      "modules": 2123,
+      "renderedChain": {
+        "resetReexporters": 1,
+        "starFiles": 6
+      },
+      "on113": "pass",
+      "on114": "pass",
+      "reproduced": false
+    }
+  ]
+}

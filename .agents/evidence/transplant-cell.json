@@ -1,0 +1,133 @@
+{
+  "proof": "real-graph skeleton transplant corpus cell — baselines green, family-A witnesses fire",
+  "generatedAt": "2026-07-11T02:55:35.642Z",
+  "head": "2da9c2058dc75d90908f1fe24302897c1b2b1aca",
+  "dirty": true,
+  "node": "v24.18.0",
+  "greenTarget": {
+    "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+    "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+  },
+  "buggyTarget": {
+    "path": "/tmp/rolldown-strict-order-study/pr10104-runtime-snapshot/rolldown/dist/index.mjs",
+    "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+  },
+  "expectedRedSignature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+  "accepted": true,
+  "apps": [
+    {
+      "app": "shadcn-admin",
+      "originalModules": 3973,
+      "keptModules": 260,
+      "baselineGreen": {
+        "od": {
+          "kind": "pass",
+          "signature": "pass"
+        },
+        "wa": {
+          "kind": "pass",
+          "signature": "pass"
+        }
+      },
+      "overlayGreen": {
+        "od": {
+          "kind": "pass",
+          "signature": "pass"
+        },
+        "wa": {
+          "kind": "pass",
+          "signature": "pass"
+        }
+      },
+      "overlayBuggy": {
+        "od": {
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]"
+        },
+        "wa": {
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]"
+        }
+      },
+      "witnessFires": true,
+      "baselineHolds": true,
+      "accepted": true
+    },
+    {
+      "app": "vue-vben-admin",
+      "originalModules": 7904,
+      "keptModules": 260,
+      "baselineGreen": {
+        "od": {
+          "kind": "pass",
+          "signature": "pass"
+        },
+        "wa": {
+          "kind": "pass",
+          "signature": "pass"
+        }
+      },
+      "overlayGreen": {
+        "od": {
+          "kind": "pass",
+          "signature": "pass"
+        },
+        "wa": {
+          "kind": "pass",
+          "signature": "pass"
+        }
+      },
+      "overlayBuggy": {
+        "od": {
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]"
+        },
+        "wa": {
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]"
+        }
+      },
+      "witnessFires": true,
+      "baselineHolds": true,
+      "accepted": true
+    },
+    {
+      "app": "comfyui",
+      "originalModules": 5719,
+      "keptModules": 260,
+      "baselineGreen": {
+        "od": {
+          "kind": "pass",
+          "signature": "pass"
+        },
+        "wa": {
+          "kind": "pass",
+          "signature": "pass"
+        }
+      },
+      "overlayGreen": {
+        "od": {
+          "kind": "pass",
+          "signature": "pass"
+        },
+        "wa": {
+          "kind": "pass",
+          "signature": "pass"
+        }
+      },
+      "overlayBuggy": {
+        "od": {
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]"
+        },
+        "wa": {
+          "kind": "mismatch",
+          "signature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]"
+        }
+      },
+      "witnessFires": true,
+      "baselineHolds": true,
+      "accepted": true
+    }
+  ]
+}

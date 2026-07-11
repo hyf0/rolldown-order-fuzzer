@@ -1,0 +1,105 @@
+{
+  "modules": [
+    {
+      "id": "m260",
+      "format": "esm",
+      "dependencies": [],
+      "events": [],
+      "inferredPure": true,
+      "pureBase": 7
+    },
+    {
+      "id": "m261",
+      "format": "esm",
+      "dependencies": [],
+      "events": [
+        {
+          "module": "m261",
+          "phase": "evaluate",
+          "value": 5
+        }
+      ]
+    },
+    {
+      "id": "m262",
+      "format": "esm",
+      "dependencies": [
+        {
+          "kind": "esm-reexport-star",
+          "target": "m260"
+        },
+        {
+          "kind": "esm-reexport-named",
+          "target": "m261",
+          "sourceName": "v261",
+          "exportedName": "v261"
+        }
+      ],
+      "events": []
+    },
+    {
+      "id": "m263",
+      "format": "esm",
+      "dependencies": [
+        {
+          "kind": "esm-namespace-import",
+          "target": "m262",
+          "localName": "nsA",
+          "readMembers": [["v260"]]
+        }
+      ],
+      "events": [
+        {
+          "module": "m263",
+          "phase": "evaluate",
+          "value": 1,
+          "reads": [
+            {
+              "binding": "nsA",
+              "memberPath": ["v260"]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "m264",
+      "format": "esm",
+      "dependencies": [
+        {
+          "kind": "esm-namespace-import",
+          "target": "m262",
+          "localName": "nsB",
+          "readMembers": []
+        }
+      ],
+      "events": []
+    }
+  ],
+  "entries": [
+    {
+      "name": "wA",
+      "moduleId": "m263"
+    },
+    {
+      "name": "wB",
+      "moduleId": "m264"
+    }
+  ],
+  "schedule": [
+    {
+      "kind": "import-entry",
+      "entry": "wA"
+    }
+  ],
+  "build": {
+    "chunking": {
+      "kind": "automatic"
+    },
+    "includeDependenciesRecursively": true,
+    "preserveEntrySignatures": "allow-extension",
+    "lazyBarrel": false,
+    "strictExecutionOrder": true,
+    "outputFormat": "esm"
+  }
+}

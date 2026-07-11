@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "title": "Real-graph skeleton transplant corpus cell",
+  "description": "Committed transplant models — real app module-graph skeletons extracted during one ordinary build, reduced to their order-relevant core, anonymized, and emitted as fuzzer-schema ProgramModels at the current schema (no names, paths, or code — only m<index> ids). Each app carries a pure-order BASELINE (organic chunking shaped like the app's real chunks, green on a correct bundler) and a family-A OVERLAY variant (a split-read star-barrel conjunction that reds a buggy bundler in both wrap modes and returns to green when fixed). Regenerated per real-app sweep by scripts/transplant/build-models.ts. See .agents/docs/transplant-cell.md.",
+  "greenTarget": {
+    "id": "final-snapshot-42628c18b",
+    "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+    "note": "PR-10104 strict-order arc snapshot (fixed). Override with TRANSPLANT_GREEN_TARGET."
+  },
+  "buggyTarget": {
+    "id": "pr10104-runtime-snapshot",
+    "path": "/tmp/rolldown-strict-order-study/pr10104-runtime-snapshot/rolldown/dist/index.mjs",
+    "note": "rolldown 1.1.5 snapshot — provably contains bug families A and B. Override with TRANSPLANT_BUGGY_TARGET."
+  },
+  "expectedRedSignature": "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]",
+  "apps": [
+    {
+      "app": "shadcn-admin",
+      "source": "pr10104-repos/satnaing__shadcn-admin",
+      "originalModules": 3973,
+      "keptModules": 260,
+      "baseline": "models/shadcn-admin.json",
+      "overlay": "models/shadcn-admin.overlay.json",
+      "witness": "family-a"
+    },
+    {
+      "app": "vue-vben-admin",
+      "source": "pr10104-repos/vbenjs__vue-vben-admin/apps/web-antd",
+      "originalModules": 7904,
+      "keptModules": 260,
+      "baseline": "models/vue-vben-admin.json",
+      "overlay": "models/vue-vben-admin.overlay.json",
+      "witness": "family-a"
+    },
+    {
+      "app": "comfyui",
+      "source": "pr10104-repos/Comfy-Org__ComfyUI_frontend",
+      "originalModules": 5719,
+      "keptModules": 260,
+      "baseline": "models/comfyui.json",
+      "overlay": "models/comfyui.overlay.json",
+      "witness": "family-a"
+    }
+  ]
+}
