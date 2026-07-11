@@ -192,6 +192,14 @@ deliberately NOT code-churned:
 
 ## Residual gaps (next: FW-A — non-ESM output axis)
 
+> **FW-A LANDED** — see [fw-a-output-format-axis.md](./fw-a-output-format-axis.md). The output-format axis
+> (`esm|cjs`), transpiled-CJS interop, RED-3→generator upgrade, and the two campaigns landed; it reached a
+> genuine CJS-output-arm bug (RED-8: the object-identity double-init witness reds `init_module_NNNN is not
+defined` on npm 1.1.5, green on the snapshot — cjs-output + on-demand only). P9 deconfliction (RED-2) and
+> RED-1's exact `init_shared` remain residual (they need a hybrid ESM-import+CJS-exports module / a
+> packaged leaf) — documented per-entry in the FW-A doc. The notes below are the pre-FW-A plan, kept for
+> provenance.
+
 - **FW-A is the non-ESM output axis** (`format: cjs|iife|umd`), which unlocks P7/T4 (CJS output),
   P3 (transpiled-CJS interop), and P9 (deconfliction) — the ~30-fix surface behind the ESM-output +
   unique-names pins. Set up for it here: (1) `scripts/chunk-graph.ts` builds directly with any target
