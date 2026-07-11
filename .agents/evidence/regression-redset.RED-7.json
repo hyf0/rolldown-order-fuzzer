@@ -1,0 +1,36 @@
+{
+  "proof": "standing version-bracketed regression red-set (FW-C)",
+  "generatedAt": "2026-07-11T00:26:50.936Z",
+  "head": "b8e3c3655fc1846adee2f335eae19b580a239db9",
+  "dirty": true,
+  "node": "v24.18.0",
+  "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
+  "cacheRoot": "/tmp/order-fuzzer-regression-targets",
+  "subset": "RED-7",
+  "entryCount": 1,
+  "accepted": true,
+  "entries": [
+    {
+      "id": "RED-7",
+      "issue": 9164,
+      "form": "raw",
+      "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
+      "redTarget": {
+        "label": "npm:1.0.0-rc.17",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-rc.17/node_modules/rolldown/dist/index.mjs",
+        "sha256": "d36347aa98641c590dee7238129ec2fdf812114613074ba46fdf7952ba04328f"
+      },
+      "greenTarget": {
+        "label": "npm:1.0.0-rc.18",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-rc.18/node_modules/rolldown/dist/index.mjs",
+        "sha256": "846d08a0fafa53a7af536d04372a2a3905b5ef5c33ca020f09edb69963bc9d15"
+      },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__exportAll is not a function\"]",
+      "observedRedSignature": "raw-crash:[\"TypeError\",\"__exportAll is not a function\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    }
+  ]
+}

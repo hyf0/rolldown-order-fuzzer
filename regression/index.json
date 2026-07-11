@@ -85,6 +85,63 @@
       }
     },
     {
+      "id": "RED-5",
+      "issue": 9353,
+      "cluster": "1.2 wrapped-ESM init emission — initialize re-export owners",
+      "title": "wrapped-ESM re-export owner not initialized (createIcon)",
+      "form": "raw",
+      "dir": "raw/9353",
+      "redTarget": { "kind": "npm", "version": "1.0.1" },
+      "greenTarget": { "kind": "npm", "version": "1.0.2" },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'muiName')\"]",
+      "provenance": {
+        "fixPr": "#9353",
+        "fixCommit": "fix: initialize wrapped-ESM re-export owners (#9353)",
+        "redBelow": "1.0.2",
+        "greenAtOrAbove": "1.0.2",
+        "miningDocRef": "section 4 RED-5",
+        "note": "FW-B deliverable 5. Verified runtime witness (entry2 CJS-requires the ESM createIcon.js, wrapping it as init_createIcon; entry1 reads createIcon through reexport.js, but on 1.0.1 the re-export owner's init_createIcon() is not emitted before the forwarded createIcon('Arrow') runs, so SvgIcon is undefined -> TypeError). Also GREEN on current 1.1.5. Fixture: upstream issues/8950, translated to the JS API."
+      }
+    },
+    {
+      "id": "RED-6",
+      "issue": 7771,
+      "cluster": "1.4 dynamic-entry chunk placement × wrap-kind",
+      "title": "dynamic entry merged into common chunk with cjs+esm wrap kind",
+      "form": "raw",
+      "dir": "raw/7771",
+      "redTarget": { "kind": "npm", "version": "1.0.0-beta.58" },
+      "greenTarget": { "kind": "npm", "version": "1.0.0-beta.59" },
+      "expectedRedSignature": "raw-crash:[\"SyntaxError\",\"Export 'imp_exports' is not defined in module\"]",
+      "provenance": {
+        "fixPr": "#7771",
+        "fixCommit": "fix: dynamic entry merged into common chunk with cjs and esm wrap kind (#7771)",
+        "redBelow": "1.0.0-beta.59",
+        "greenAtOrAbove": "1.0.0-beta.59",
+        "miningDocRef": "section 4 RED-6",
+        "note": "FW-B deliverable 5. BRACKET CORRECTION: the mining doc listed a pessimistic 'pre-v1.0.0-beta (git-bisect a nightly)' bracket, but the fix landed exactly at the published beta.58 -> beta.59 boundary — no nightly bisect needed. Verified runtime witness: the dynamically-imported CJS entry `imp` and the ESM `imp2` merge into one common chunk carrying BOTH a cjs wrap (require_imp) and an esm wrap (init_imp2); on beta.58 the merged chunk's export list references an undefined `imp_exports`, so Node throws SyntaxError when the dynamic import resolves that chunk. Green on beta.59 and current 1.1.5. Fixture: upstream optimization/chunk_merging/dynamic_entry_merged_in_common_chunk2."
+      }
+    },
+    {
+      "id": "RED-7",
+      "issue": 9164,
+      "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
+      "title": "dominator runtime placement cycle (__exportAll)",
+      "form": "raw",
+      "dir": "raw/9164",
+      "redTarget": { "kind": "npm", "version": "1.0.0-rc.17" },
+      "greenTarget": { "kind": "npm", "version": "1.0.0-rc.18" },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__exportAll is not a function\"]",
+      "provenance": {
+        "fixPr": "#9164",
+        "fixCommit": "5a5f8f5d7 fix: pick dominator for runtime placement to avoid cycles (#9164)",
+        "redBelow": "1.0.0-rc.18",
+        "greenAtOrAbove": "1.0.0-rc.18",
+        "miningDocRef": "section 4 RED-7",
+        "note": "FW-B deliverable 5. BRACKET CORRECTION: the mining doc listed rc.15 -> rc.16, but the #9164 fix commit (5a5f8f5d7, 2026-04-26) is not in any release before rc.18 (rc.15/16/17 all predate it, and rc.16 already throws). Verified: rc.17 RED / rc.18 GREEN. Runtime witness: with experimental.chunkOptimization the runtime helper __exportAll is placed into the node1 chunk and entry-2 imports it back, closing an entry-2<->node1 cycle; loading entry-0 runs node1's top-level __exportAll(...) before the defining chunk -> TypeError. Green on rc.18 (helper placed in the dominator) and current 1.1.5. Fixture: upstream issues/8920_2, converted to a runtime value assertion."
+      }
+    },
+    {
       "id": "RED-9998",
       "issue": 9998,
       "cluster": "chunking — manual codeSplitting cross-entry execution leak (seo:false)",
@@ -103,13 +160,8 @@
         "redBelow": "1.1.5 and final-snapshot-42628c18b (both red at seo:false)",
         "greenAtOrAbove": "none yet (bracket-pending)",
         "note": "The fuzzer-model translation of the issue's verified repro (buildCrossEntryLeakCase, src/generate.ts), caught by the reachability-isolation oracle the persisted seo:false axis selects. Live-catch acceptance: scripts/cross-entry-leak-catch.ts + .agents/evidence/9998-cross-entry-leak.json.",
-        "broaderShapeFoldedIn": {
-          "summary": "FW-B deliverable 4 investigated the W14c-residual 'broader automatic-chunking cross-entry leak' and folded it here — it is the SAME ROOT MECHANISM as #9998 (a co-locating organic group at seo:false runs a disjoint-reachability entry's top-level, caught by the reachability-isolation oracle), only a broader TRIGGER, so it is NOT a separate bracket.",
-          "abLationCorrection": "The W14c 'automatic chunking' characterization is DISPROVEN: automatic chunking does NOT leak (verified GREEN on both npm 1.1.5 and the snapshot; 0/28 random automatic multi-entry seo:false cases leaked). A co-locating organic group is load-bearing.",
-          "broaderTrigger": "The genuinely broader surface is PURELY STATIC (no dynamic import) and fires under a PLAIN organic group (not only entriesAware): two mutually-unreachable entries sharing a static module, each owning a private eager module; loading ONE entry runs the OTHER's private top-level (reachability-isolation:[le2-b,le2-pb]).",
-          "generator": "buildStaticCrossEntryLeak / generateStaticCrossEntryLeakCase (src/generate.ts)",
-          "campaign": "scripts/broad-cross-entry-leak-catch.ts — isolation RED 20/20 on BOTH npm 1.1.5 AND the snapshot, seo:true control GREEN; evidence .agents/evidence/broad-cross-entry-leak.json"
-        }
+        "broaderShapeFoldedIn": "FW-B deliverable 4 folded the W14c-residual 'broader automatic-chunking cross-entry leak' here: same ROOT mechanism as #9998 (a co-locating organic group at seo:false runs a disjoint-reachability entry's top-level), only a broader TRIGGER, so NOT a separate bracket. buildStaticCrossEntryLeak (src/generate.ts) + scripts/broad-cross-entry-leak-catch.ts — isolation RED 20/20 on BOTH npm 1.1.5 AND the snapshot, seo:true control GREEN; evidence .agents/evidence/broad-cross-entry-leak.json.",
+        "broaderShapeAblation": "The W14c 'automatic chunking' characterization is DISPROVEN: automatic chunking does NOT leak (GREEN on both targets; 0/28 random automatic multi-entry seo:false cases). A co-locating organic group is load-bearing. The genuinely broader surface is PURELY STATIC (no dynamic import) under a PLAIN organic group (not only entriesAware): two mutually-unreachable entries sharing a static module, each owning a private eager module; loading ONE runs the OTHER's private top-level (reachability-isolation:[le2-b,le2-pb])."
       }
     }
   ]

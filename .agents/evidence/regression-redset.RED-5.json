@@ -1,0 +1,36 @@
+{
+  "proof": "standing version-bracketed regression red-set (FW-C)",
+  "generatedAt": "2026-07-11T00:26:44.507Z",
+  "head": "b8e3c3655fc1846adee2f335eae19b580a239db9",
+  "dirty": true,
+  "node": "v24.18.0",
+  "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
+  "cacheRoot": "/tmp/order-fuzzer-regression-targets",
+  "subset": "RED-5",
+  "entryCount": 1,
+  "accepted": true,
+  "entries": [
+    {
+      "id": "RED-5",
+      "issue": 9353,
+      "form": "raw",
+      "cluster": "1.2 wrapped-ESM init emission — initialize re-export owners",
+      "redTarget": {
+        "label": "npm:1.0.1",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.1/node_modules/rolldown/dist/index.mjs",
+        "sha256": "4cd5570fb7b6c71af7ed84221071e85ce600ef6b66a45ee7e232fb7357d38601"
+      },
+      "greenTarget": {
+        "label": "npm:1.0.2",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.2/node_modules/rolldown/dist/index.mjs",
+        "sha256": "3896277975d3af8032f17a760e5185639da72ff617c447ab81d7261418dd4e0e"
+      },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'muiName')\"]",
+      "observedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'muiName')\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    }
+  ]
+}

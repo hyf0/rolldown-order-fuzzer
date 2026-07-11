@@ -1,0 +1,36 @@
+{
+  "proof": "standing version-bracketed regression red-set (FW-C)",
+  "generatedAt": "2026-07-11T00:26:49.938Z",
+  "head": "b8e3c3655fc1846adee2f335eae19b580a239db9",
+  "dirty": true,
+  "node": "v24.18.0",
+  "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
+  "cacheRoot": "/tmp/order-fuzzer-regression-targets",
+  "subset": "RED-6",
+  "entryCount": 1,
+  "accepted": true,
+  "entries": [
+    {
+      "id": "RED-6",
+      "issue": 7771,
+      "form": "raw",
+      "cluster": "1.4 dynamic-entry chunk placement × wrap-kind",
+      "redTarget": {
+        "label": "npm:1.0.0-beta.58",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-beta.58/node_modules/rolldown/dist/index.mjs",
+        "sha256": "ee484030458a174c4f39662a018bde436f9efb21d3671c5953fa74ab68fedd5d"
+      },
+      "greenTarget": {
+        "label": "npm:1.0.0-beta.59",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-beta.59/node_modules/rolldown/dist/index.mjs",
+        "sha256": "020d456fc88a38c520a754973bbe144a329973cd62099b499e1e145009ba615d"
+      },
+      "expectedRedSignature": "raw-crash:[\"SyntaxError\",\"Export 'imp_exports' is not defined in module\"]",
+      "observedRedSignature": "raw-crash:[\"SyntaxError\",\"Export 'imp_exports' is not defined in module\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    }
+  ]
+}

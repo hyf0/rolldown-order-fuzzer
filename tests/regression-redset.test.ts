@@ -112,8 +112,21 @@ describe("parseManifest", () => {
     ) as unknown;
     const manifest: RedsetManifest = parseManifest(raw);
     const ids = manifest.entries.map((entry) => entry.id).sort();
-    // RED-0..RED-3 (the four fix-history brackets) plus RED-9998 (the W14c bracket-PENDING #9998 catch).
-    expect(ids).toEqual(["RED-0", "RED-1", "RED-2", "RED-3", "RED-9998"]);
+    // RED-0..RED-3 + RED-5..RED-7 (the seven fix-history brackets) plus RED-9998 (the W14c
+    // bracket-PENDING #9998 catch). RED-4 (#9669) is deliberately absent: FW-B verification found its
+    // pre-fix manifestation is a BUILD PANIC ("init_external" is not in any chunk), not a runtime
+    // witness, so it fails the runtime-witness discipline; the runtime Family-A coverage it would add is
+    // already provided by RED-1 (#9502) and RED-5 (#9353). See fw-b-machinery-stress.md.
+    expect(ids).toEqual([
+      "RED-0",
+      "RED-1",
+      "RED-2",
+      "RED-3",
+      "RED-5",
+      "RED-6",
+      "RED-7",
+      "RED-9998",
+    ]);
     // Two generator-form brackets (RED-0, RED-9998); the other three are raw.
     expect(
       manifest.entries

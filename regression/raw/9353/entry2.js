@@ -1,0 +1,1 @@
+require('./createIcon.js');
