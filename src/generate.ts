@@ -1120,6 +1120,131 @@ export function generateFamilyBEagerBarrelCase(
   };
 }
 
+/// The optimizer-cycle shape family (FW-B deliverable 1, cluster 1.1 — the #1 regression magnet). Two
+/// directed variants of the chunk-optimizer runtime-placement / facade cycle, both MODULE-ACYCLIC
+/// graphs whose manual chunk split forces the optimizer to place a runtime helper / facade into a chunk
+/// that is statically imported back — a QUOTIENT CYCLE the optimizer historically mis-orders:
+///
+/// - `runtime-placement` — the #9993/#10101 shape ("a regression of #9224", RED-3's bracket 1.1.4→1.1.5).
+///   Two CJS entries write `exports.*` (a third CJS consumer requires both, forcing the exports); one
+///   entry side-effect-`require()`s an ESM leaf OUTSIDE the group; a manual group captures the two CJS
+///   entries but NOT the leaf, at `includeDependenciesRecursively:false`. The CJS `__commonJSMin` runtime
+///   helper is placed into a sibling chunk the group chunk statically imports back → the bundle throws
+///   `TypeError: __commonJSMin is not a function` at eval on rolldown@1.1.4 (RED), fixed on @1.1.5 (GREEN).
+///   Empirically reproduced (`scratchpad/fw-b-probe`) — the exact RED-3 signature from a GENERATOR, so
+///   the mining doc's "not expressible without new generator capabilities" verdict is superseded.
+/// - `facade-shared` — the #9997/#10101 facade-elimination adjacent shape: two CJS entries BOTH
+///   side-effect-`require()` a shared ESM leaf, the group captures the two entries but not the leaf, so
+///   the shared leaf's chunk and an entry facade interplay under `idr:false`. A merge/facade probe (green
+///   on the fixed releases; the campaign WATCHES it for a fresh red, since cluster 1.1 is still leaky).
+///
+/// Both keep the module graph ACYCLIC (each CJS entry only requires the leaf forward; the leaf imports
+/// nothing back), so the source runs cleanly and the differential oracle is valid — only the CHUNK graph
+/// is cyclic, manufactured by the split. The seed varies only the cosmetic fold values.
+export type OptimizerCycleVariant = "runtime-placement" | "facade-shared";
+
+export function buildOptimizerCycle(
+  rng: SeededRng,
+  variant: OptimizerCycleVariant = "runtime-placement",
+): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const node3Base = 1 + rng.integer(900_000);
+  const node4Base = 1 + rng.integer(900_000);
+  const leafBase = 1 + rng.integer(900_000);
+  const consumerBase = 1 + rng.integer(900_000);
+  // A third CJS consumer requires both CJS entries and folds their exports — this is what makes the two
+  // entries render `exports.*` (a demand-driven export), the CJS-wrapped shape the runtime-placement
+  // cycle needs (an entry with no consumer would render no exports under `allow-extension`).
+  const consumer: ModuleModel = {
+    id: "oc-consumer",
+    format: "cjs",
+    dependencies: [
+      { kind: "cjs-require", target: "oc-node3", resultBinding: "oc_c3", readName: "voc_node3" },
+      { kind: "cjs-require", target: "oc-node4", resultBinding: "oc_c4", readName: "voc_node4" },
+    ],
+    events: [
+      {
+        module: "oc-consumer",
+        phase: "evaluate",
+        value: consumerBase,
+        reads: [
+          { binding: "oc_c3", memberPath: ["voc_node3"] },
+          { binding: "oc_c4", memberPath: ["voc_node4"] },
+        ],
+      },
+    ],
+  };
+  const node4: ModuleModel = {
+    id: "oc-node4",
+    format: "cjs",
+    // `facade-shared` makes the SECOND entry also require the leaf (both entries share it); the base
+    // shape leaves node4 a plain CJS leaf so only node3 pulls the ESM leaf into the cross-chunk edge.
+    dependencies: variant === "facade-shared" ? [{ kind: "cjs-require", target: "oc-leaf" }] : [],
+    events: [{ module: "oc-node4", phase: "evaluate", value: node4Base }],
+  };
+  const node3: ModuleModel = {
+    id: "oc-node3",
+    format: "cjs",
+    dependencies: [{ kind: "cjs-require", target: "oc-leaf" }],
+    events: [{ module: "oc-node3", phase: "evaluate", value: node3Base }],
+  };
+  const leaf: ModuleModel = {
+    id: "oc-leaf",
+    format: "esm",
+    dependencies: [],
+    events: [{ module: "oc-leaf", phase: "evaluate", value: leafBase }],
+  };
+  const program: ProgramModel = {
+    modules: [consumer, node3, node4, leaf],
+    entries: [
+      { name: "entry-oc-node4", moduleId: "oc-node4" },
+      { name: "entry-oc-node3", moduleId: "oc-node3" },
+      { name: "entry-oc-consumer", moduleId: "oc-consumer" },
+    ],
+    schedule: [
+      { kind: "require-entry", entry: "entry-oc-node3" },
+      { kind: "require-entry", entry: "entry-oc-node4" },
+      { kind: "require-entry", entry: "entry-oc-consumer" },
+    ],
+    build: {
+      // The manual group captures the two CJS entries but NOT the ESM leaf: at idr:false the leaf stays
+      // in its own chunk and the runtime helper / facade is placed into a chunk the group imports back.
+      chunking: {
+        kind: "manual",
+        groups: [{ name: "oc-v", moduleIds: ["oc-node3", "oc-node4"] }],
+      },
+      // The load-bearing axis: false keeps the leaf out of the group chunk so the cross-chunk cycle forms.
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the directed optimizer-cycle campaign (FW-B deliverable 1). The seed only
+/// varies the cosmetic fold values, so the structural shape — and its RED-3 red/green verdict pair on
+/// the 1.1.4→1.1.5 bracket — is identical across seeds. Tagged `mechanism:optimizer-runtime-placement-cycle`.
+export function generateOptimizerCycleCase(
+  seed: number,
+  variant: OptimizerCycleVariant = "runtime-placement",
+): GeneratedCase {
+  const { program, analyzed } = buildOptimizerCycle(new SeededRng(seed), variant);
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
 /// has been wired — the mutable graph the random generator built, ready to be FROZEN. `finalizeProgram`
 /// is the single point that consumes it.
@@ -3234,6 +3359,37 @@ function hasDeadBarrelHopShape(program: ProgramModel): boolean {
   });
 }
 
+/// The optimizer runtime-placement / facade cycle RECIPE predicate (FW-B deliverable 1, cluster 1.1): a
+/// MANUAL chunk group containing a CJS module that `require()`s an ESM leaf which is NOT captured by any
+/// group, at `includeDependenciesRecursively:false`. At idr:false the leaf stays in its own chunk and the
+/// optimizer places the CJS runtime helper (`__commonJSMin`) into a sibling chunk the group chunk imports
+/// back — the #9993 cross-chunk cycle. Purely structural over the analyzed program, so any model carrying
+/// the recipe is tagged whatever its provenance (the directed builder or a random manual-group case).
+function hasOptimizerRuntimePlacementRecipe(analyzed: AnalyzedProgram): boolean {
+  const { program } = analyzed;
+  const chunking = programChunking(program);
+  if (chunking.kind !== "manual") {
+    return false;
+  }
+  if (buildConfigOf(program).includeDependenciesRecursively !== false) {
+    return false;
+  }
+  const modulesById = new Map(program.modules.map((module) => [module.id, module]));
+  const grouped = new Set(chunking.groups.flatMap((group) => group.moduleIds));
+  return program.modules.some(
+    (module) =>
+      module.format === "cjs" &&
+      grouped.has(module.id) &&
+      module.dependencies.some((dependency) => {
+        if (dependency.kind !== "cjs-require") {
+          return false;
+        }
+        const target = modulesById.get(dependency.target);
+        return target !== undefined && target.format === "esm" && !grouped.has(target.id);
+      }),
+  );
+}
+
 export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[] {
   const tags = new Set<string>();
   // The consumer takes ONLY the AnalyzedProgram and reads the program from it (no separate program
@@ -3407,6 +3563,18 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     if (closesQuotientCycle) {
       tags.add("mechanism:barrel-cross-chunk-init-cycle");
     }
+  }
+
+  // The optimizer runtime-placement / facade cycle RECIPE (FW-B deliverable 1, cluster 1.1 — the #9993/
+  // #10101 "regression of #9224" class). Unlike the barrel init-cycle above, the cycle here is NOT a
+  // module-graph cycle — it is MANUFACTURED by the optimizer placing the CJS `__commonJSMin` runtime
+  // helper (or an entry facade) into a chunk that is statically imported back, which the module graph
+  // cannot show. So this predicate marks the structural RECIPE that forces that placement: a manual group
+  // capturing a CJS module that `require()`s an ESM leaf left OUTSIDE the group, at idr:false. The
+  // directed campaign (`scripts/optimizer-cycle-catch.ts`) then VERIFIES the actual chunk merge + quotient
+  // cycle by inspecting the built chunk graph (`moduleIds`/`imports`) — "tag the recipe, verify the merge".
+  if (hasOptimizerRuntimePlacementRecipe(analyzed)) {
+    tags.add("mechanism:optimizer-runtime-placement-cycle");
   }
 
   const registrations = program.modules.flatMap((module) =>

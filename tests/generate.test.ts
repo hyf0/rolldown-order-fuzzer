@@ -5,6 +5,7 @@ import {
   deriveRegistrationSequence,
   generateCase,
   generateCrossChunkInitCycleCase,
+  generateOptimizerCycleCase,
   MAX_CASE_SIZE,
   MIXED_TEMPLATE_NAMES,
   sampleCaseSize,
@@ -1257,5 +1258,59 @@ describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
       "cc-interop",
       "cc-shared",
     ]);
+  });
+});
+
+describe("optimizer runtime-placement cycle shape (FW-B deliverable 1, rolldown #9993/RED-3)", () => {
+  test("produces a valid, module-ACYCLIC model with the #9993 runtime-placement recipe", () => {
+    const generated = generateOptimizerCycleCase(0, "runtime-placement");
+    // Valid: the cross-chunk cycle is a build-side optimizer artifact, not a source-level module cycle.
+    expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    // The MODULE graph is ACYCLIC — every CJS module only requires the ESM leaf forward; the leaf imports
+    // nothing back. Only the optimizer manufactures the chunk cycle (a runtime-helper placement, not a
+    // module cycle), so the source runs cleanly and the differential oracle stays valid.
+    const facts = ProgramFacts.from(generated.program.modules);
+    expect(facts.cycles().cyclicMembers.size).toBe(0);
+    // The recipe: a manual group capturing the two CJS entries but NOT the required ESM leaf, at idr:false.
+    const build = buildConfigOf(generated.program);
+    expect(build.includeDependenciesRecursively).toBe(false);
+    expect(build.strictExecutionOrder).toBe(true);
+    expect(build.chunking.kind).toBe("manual");
+    if (build.chunking.kind === "manual") {
+      const grouped = new Set(build.chunking.groups.flatMap((g) => g.moduleIds));
+      expect(grouped.has("oc-node3")).toBe(true);
+      expect(grouped.has("oc-node4")).toBe(true);
+      expect(grouped.has("oc-leaf")).toBe(false);
+    }
+  });
+
+  test("carries the optimizer-runtime-placement-cycle recipe tag (both variants)", () => {
+    for (const variant of ["runtime-placement", "facade-shared"] as const) {
+      const generated = generateOptimizerCycleCase(0, variant);
+      expect(generated.coverageTags).toContain("mechanism:optimizer-runtime-placement-cycle");
+      expect(generated.coverageTags).toContain("mechanism:cjs-requires-esm");
+      expect(generated.coverageTags).toContain("chunking:explicit");
+      expect(generated.coverageTags).toContain("axis:include-dependencies-recursively:false");
+    }
+  });
+
+  test("the recipe tag does NOT fire when the required ESM leaf is INSIDE the group (no cross-chunk edge)", () => {
+    // The recipe needs the leaf OUTSIDE the group: at idr:false that keeps the leaf in its own chunk so the
+    // runtime helper is placed cross-chunk. A group capturing the leaf too dissolves the placement, so the
+    // tag must not fire (a coverage over-claim guard, mirroring the cross-chunk-init-cycle acyclic probe).
+    const generated = generateOptimizerCycleCase(0, "runtime-placement");
+    const grouped: ProgramModel = {
+      ...generated.program,
+      build: {
+        ...buildConfigOf(generated.program),
+        chunking: {
+          kind: "manual",
+          groups: [{ name: "oc-v", moduleIds: ["oc-node3", "oc-node4", "oc-leaf"] }],
+        },
+      },
+    };
+    expect(deriveCoverageTags(analyzeProgram(grouped))).not.toContain(
+      "mechanism:optimizer-runtime-placement-cycle",
+    );
   });
 });
