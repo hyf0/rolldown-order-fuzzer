@@ -1,13 +1,13 @@
 {
   "proof": "standing version-bracketed regression red-set (FW-C)",
-  "generatedAt": "2026-07-10T23:21:55.552Z",
-  "head": "f0b15b4e1ddfe5caa987e6bf1289d4fa05745fc8",
+  "generatedAt": "2026-07-11T00:40:21.870Z",
+  "head": "14716d8187c27adf3e904dd1dbf16b5e8381224d",
   "dirty": true,
   "node": "v24.18.0",
   "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
   "cacheRoot": "/tmp/order-fuzzer-regression-targets",
   "subset": null,
-  "entryCount": 5,
+  "entryCount": 8,
   "accepted": true,
   "entries": [
     {
@@ -93,6 +93,72 @@
       },
       "expectedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
       "observedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-5",
+      "issue": 9353,
+      "form": "raw",
+      "cluster": "1.2 wrapped-ESM init emission — initialize re-export owners",
+      "redTarget": {
+        "label": "npm:1.0.1",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.1/node_modules/rolldown/dist/index.mjs",
+        "sha256": "4cd5570fb7b6c71af7ed84221071e85ce600ef6b66a45ee7e232fb7357d38601"
+      },
+      "greenTarget": {
+        "label": "npm:1.0.2",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.2/node_modules/rolldown/dist/index.mjs",
+        "sha256": "3896277975d3af8032f17a760e5185639da72ff617c447ab81d7261418dd4e0e"
+      },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'muiName')\"]",
+      "observedRedSignature": "raw-crash:[\"TypeError\",\"Cannot read properties of undefined (reading 'muiName')\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-6",
+      "issue": 7771,
+      "form": "raw",
+      "cluster": "1.4 dynamic-entry chunk placement × wrap-kind",
+      "redTarget": {
+        "label": "npm:1.0.0-beta.58",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-beta.58/node_modules/rolldown/dist/index.mjs",
+        "sha256": "ee484030458a174c4f39662a018bde436f9efb21d3671c5953fa74ab68fedd5d"
+      },
+      "greenTarget": {
+        "label": "npm:1.0.0-beta.59",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-beta.59/node_modules/rolldown/dist/index.mjs",
+        "sha256": "020d456fc88a38c520a754973bbe144a329973cd62099b499e1e145009ba615d"
+      },
+      "expectedRedSignature": "raw-crash:[\"SyntaxError\",\"Export 'imp_exports' is not defined in module\"]",
+      "observedRedSignature": "raw-crash:[\"SyntaxError\",\"Export 'imp_exports' is not defined in module\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-7",
+      "issue": 9164,
+      "form": "raw",
+      "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
+      "redTarget": {
+        "label": "npm:1.0.0-rc.17",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-rc.17/node_modules/rolldown/dist/index.mjs",
+        "sha256": "d36347aa98641c590dee7238129ec2fdf812114613074ba46fdf7952ba04328f"
+      },
+      "greenTarget": {
+        "label": "npm:1.0.0-rc.18",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.0.0-rc.18/node_modules/rolldown/dist/index.mjs",
+        "sha256": "846d08a0fafa53a7af536d04372a2a3905b5ef5c33ca020f09edb69963bc9d15"
+      },
+      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__exportAll is not a function\"]",
+      "observedRedSignature": "raw-crash:[\"TypeError\",\"__exportAll is not a function\"]",
       "observedGreenSignature": "pass",
       "redMatches": true,
       "greenPassed": true,
