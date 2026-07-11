@@ -339,6 +339,20 @@ export interface CjsModuleModel extends ModuleModelBase {
   readonly format: "cjs";
   readonly dependencies: readonly (CjsRequireOperation | EsmDynamicImportOperation)[];
   readonly hasTopLevelAwait?: never;
+  /// When `true` (FW-A deliverable 3), the module renders the TRANSPILED-CJS interop marker
+  /// `Object.defineProperty(exports, "__esModule", { value: true });` before its exports, and writes
+  /// EVERY demanded export (including `default`) as an `exports.<name> = …` property — the Babel/tsc
+  /// `esModuleInterop` shape every transpiled npm package ships. This is the ONLY thing that drives
+  /// rolldown's `__esModule` interop DETECTION (the historical DCE-vs-order epicenter, cluster 3 /
+  /// #8675/#8975); it exercises that path without changing the observed value, because rolldown targets
+  /// Node semantics — a real `.mjs` importer gets `__toESM(require_x(), 1)` (isNodeMode), which IGNORES
+  /// `__esModule` and mirrors Node's own CJS interop exactly (an `import def` binds the whole
+  /// `module.exports`, a named import binds the named member). LEGALITY GATE: every consumption × marker
+  /// combination was probed identical between Node and the final snapshot, so the legal subset is ALL of
+  /// them (see `.agents/docs/fw-a-output-format-axis.md`). ESM importers consume it via a named import
+  /// (a clean numeric fold) and a default import (`import { default as x }`, folding the whole exports
+  /// object — a stringy but stable witness that still crashes on a broken interop).
+  readonly esModuleMarker?: true;
 }
 
 export type ModuleModel = EsmModuleModel | CjsModuleModel;

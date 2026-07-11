@@ -1547,6 +1547,109 @@ export function generateCjsOutputWitnessCase(
   };
 }
 
+/// The FW-A deliverable-3 transpiled-CJS interop shape (cluster 3, the DCE-vs-order epicenter #8675/#8975):
+/// a `__esModule`-marked CJS definer (`Object.defineProperty(exports,"__esModule",{value:true});
+/// exports.default = …; exports.<named> = …`) consumed cross-chunk by TWO ESM entries — one folding a
+/// NAMED import (a clean numeric fold) AND the DEFAULT import (`import { default as x }`, folding the
+/// whole exports object, a stringy-but-stable witness that crashes on a broken interop), the other folding
+/// the named import so the definer lands in a shared chunk. Built with `outputFormat: "cjs"` so rolldown
+/// emits the `__toESM(require_x(), 1)` interop shim (isNodeMode) whose `__esModule` detection is the
+/// historically buggy path. LEGALITY GATE (probed identical Node-vs-snapshot for every consumption ×
+/// marker combination): the legal subset is ALL of them, so the shape is a directly-comparable GREEN
+/// coverage cell watched for a fresh interop red. The campaign runs it at esm output too as a control.
+export function buildTranspiledCjsInterop(rng: SeededRng): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const depBase = 100 + rng.integer(900);
+  const baseA = 1_000_000 + rng.integer(900_000);
+  const baseB = 2_000_000 + rng.integer(900_000);
+  const modules: ModuleModel[] = [
+    {
+      id: "tcidep",
+      format: "cjs",
+      dependencies: [],
+      events: [{ module: "tcidep", phase: "init", value: depBase }],
+      esModuleMarker: true,
+    },
+    {
+      id: "tcia",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "tcidep",
+          importedName: "vtcidep",
+          localName: "tcia_named",
+        },
+        {
+          kind: "esm-value-import",
+          target: "tcidep",
+          importedName: "default",
+          localName: "tcia_def",
+        },
+      ],
+      events: [
+        {
+          module: "tcia",
+          phase: "run",
+          value: baseA,
+          reads: [{ binding: "tcia_named" }, { binding: "tcia_def" }],
+        },
+      ],
+    },
+    {
+      id: "tcib",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "tcidep",
+          importedName: "vtcidep",
+          localName: "tcib_named",
+        },
+      ],
+      events: [{ module: "tcib", phase: "run", value: baseB, reads: [{ binding: "tcib_named" }] }],
+    },
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [
+      { name: "tcia", moduleId: "tcia" },
+      { name: "tcib", moduleId: "tcib" },
+    ],
+    schedule: [
+      { kind: "import-entry", entry: "tcia" },
+      { kind: "import-entry", entry: "tcib" },
+    ],
+    build: {
+      chunking: { kind: "automatic" },
+      includeDependenciesRecursively: true,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+      outputFormat: "cjs",
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the FW-A transpiled-CJS interop campaign (deliverable 3). Tagged
+/// `mechanism:transpiled-cjs-interop` + `variation:interop-{default,named}-import`.
+export function generateTranspiledCjsInteropCase(seed: number): GeneratedCase {
+  const { program, analyzed } = buildTranspiledCjsInterop(new SeededRng(seed));
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The dynamic-entry × wrap-kind × merge shape family (FW-B deliverable 2, cluster 4 — the historically
 /// MISSING T1 cell: a dynamically-imported target the optimizer inlines/merges into a common or user
 /// chunk while ≥2 entries share it, where the CJS `__commonJS` / ESM `__esm` wrap-kind must survive the
@@ -4221,6 +4324,16 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
           dependency.kind === "esm-namespace-import"
         ) {
           tags.add("variation:value-import");
+        }
+        // FW-A deliverable 3: a transpiled-CJS (`__esModule` + `exports.default`) definer default- or
+        // named-imported by an ESM module — rolldown's interop-detection path (cluster 3, #8675/#8975).
+        if (target.esModuleMarker === true && dependency.kind === "esm-value-import") {
+          tags.add("mechanism:transpiled-cjs-interop");
+          tags.add(
+            dependency.importedName === "default"
+              ? "variation:interop-default-import"
+              : "variation:interop-named-import",
+          );
         }
         const carriers = esmCarriersByCjsTarget.get(target.id) ?? new Set<string>();
         carriers.add(module.id);

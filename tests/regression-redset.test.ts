@@ -112,11 +112,11 @@ describe("parseManifest", () => {
     ) as unknown;
     const manifest: RedsetManifest = parseManifest(raw);
     const ids = manifest.entries.map((entry) => entry.id).sort();
-    // RED-0..RED-3 + RED-5..RED-7 (the seven fix-history brackets) plus RED-9998 (the W14c
-    // bracket-PENDING #9998 catch). RED-4 (#9669) is deliberately absent: FW-B verification found its
-    // pre-fix manifestation is a BUILD PANIC ("init_external" is not in any chunk), not a runtime
-    // witness, so it fails the runtime-witness discipline; the runtime Family-A coverage it would add is
-    // already provided by RED-1 (#9502) and RED-5 (#9353). See fw-b-machinery-stress.md.
+    // RED-0..RED-3 + RED-5..RED-7 (the fix-history brackets) plus RED-9998 (the W14c bracket-PENDING
+    // #9998 catch) and RED-8 (the FW-A cjs-output-arm bracket — object-identity double-init against CJS
+    // output, open on npm 1.1.5, green on the snapshot). RED-4 (#9669) is deliberately absent: FW-B
+    // verification found its pre-fix manifestation is a BUILD PANIC ("init_external" is not in any
+    // chunk), not a runtime witness. See fw-b-machinery-stress.md / fw-a-output-format-axis.md.
     expect(ids).toEqual([
       "RED-0",
       "RED-1",
@@ -125,19 +125,25 @@ describe("parseManifest", () => {
       "RED-5",
       "RED-6",
       "RED-7",
+      "RED-8",
       "RED-9998",
     ]);
-    // Two generator-form brackets (RED-0, RED-9998); the other three are raw.
+    // Four generator-form brackets: RED-0 + RED-9998 (W14a/W14c), RED-3 (upgraded from raw by FW-A via
+    // generateOptimizerCycleCase) and RED-8 (FW-A cjs-output witness). The rest are raw.
     expect(
       manifest.entries
         .filter((entry) => entry.form === "generator")
         .map((e) => e.id)
         .sort(),
-    ).toEqual(["RED-0", "RED-9998"]);
-    // RED-9998 is the only bracket-pending entry (bug open on both targets, no green yet).
+    ).toEqual(["RED-0", "RED-3", "RED-8", "RED-9998"]);
+    // Two bracket-pending entries (bug open on the release / both targets, no released green yet):
+    // RED-8 (FW-A cjs-output arm) and RED-9998 (#9998).
     expect(
-      manifest.entries.filter((entry) => entry.bracketPending === true).map((e) => e.id),
-    ).toEqual(["RED-9998"]);
+      manifest.entries
+        .filter((entry) => entry.bracketPending === true)
+        .map((e) => e.id)
+        .sort(),
+    ).toEqual(["RED-8", "RED-9998"]);
     // Every expected red signature is already in its normalized form (idempotent under normalize).
     for (const entry of manifest.entries) {
       expect(normalizeSignature(entry.expectedRedSignature)).toBe(entry.expectedRedSignature);

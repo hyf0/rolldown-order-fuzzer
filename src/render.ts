@@ -455,6 +455,17 @@ function renderCjsExports(
 ): string[] {
   const base = moduleStateBase(module);
 
+  // FW-A deliverable 3: the transpiled-CJS interop shape — `Object.defineProperty(exports,"__esModule",
+  // {value:true})` then EVERY demanded export (including `default`) as an `exports.<name> = <fold>`
+  // property, the Babel/tsc `esModuleInterop` form. The marker drives rolldown's `__esModule` interop
+  // detection without changing the value (rolldown targets Node semantics for a real importer).
+  if (module.format === "cjs" && module.esModuleMarker === true) {
+    return [
+      `Object.defineProperty(exports, "__esModule", { value: true });`,
+      ...requestedExports.map((name) => renderCjsNamedExport("exports", name, base, readable)),
+    ];
+  }
+
   if (requestedExports.length === 1 && requestedExports[0] === "default") {
     return [`module.exports = ${renderFold(base, readable)};`];
   }
