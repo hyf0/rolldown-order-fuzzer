@@ -2124,6 +2124,7 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     preserveEntrySignatures: "allow-extension",
     lazyBarrel: true,
     strictExecutionOrder: true,
+    outputFormat: "esm",
   };
 
   test("buildConfigOf returns the persisted build when present", () => {

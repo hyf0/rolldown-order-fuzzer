@@ -77,7 +77,10 @@ export interface BuildChildRequest {
   readonly manualChunkGroups: readonly BuildChildManualChunkGroup[];
   readonly organicChunkGroups: readonly BuildChildOrganicChunkGroup[];
   readonly output: {
-    readonly format: "esm";
+    /// FW-A output-format axis. `cjs` reaches the whole `render_chunk_exports` CommonJS arm — live
+    /// getters, `__toCommonJS` at the entry, the self-rebinding-wrapper defense — that the ESM-output
+    /// pin kept unreachable. Both keep code splitting; iife/umd (single-entry) stay out.
+    readonly format: "esm" | "cjs";
     readonly strictExecutionOrder: boolean;
     readonly entryFileNames: string;
     readonly chunkFileNames: string;
@@ -215,7 +218,11 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     };
   });
   const output = requireRecord(request.output, "build output");
-  if (output.format !== "esm" || output.cleanDir !== false || output.minify !== false) {
+  if (
+    (output.format !== "esm" && output.format !== "cjs") ||
+    output.cleanDir !== false ||
+    output.minify !== false
+  ) {
     throw new TypeError("build output constants are invalid");
   }
   const strictExecutionOrder = requireBoolean(
@@ -237,7 +244,7 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     manualChunkGroups,
     organicChunkGroups,
     output: {
-      format: "esm",
+      format: output.format,
       strictExecutionOrder,
       entryFileNames: requireNonEmptyString(output.entryFileNames, "build output.entryFileNames"),
       chunkFileNames: requireNonEmptyString(output.chunkFileNames, "build output.chunkFileNames"),

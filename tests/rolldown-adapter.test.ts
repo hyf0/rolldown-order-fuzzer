@@ -392,6 +392,7 @@ describe("withRolldownBuild", () => {
         preserveEntrySignatures: "allow-extension",
         lazyBarrel: true,
         strictExecutionOrder: true,
+        outputFormat: "esm",
       },
     };
     try {
@@ -1691,7 +1692,7 @@ describe("withRolldownBuild", () => {
         ...valid,
         manualChunkGroups: [{ name: "shared", modulePaths: ["relative/module.mjs"] }],
       },
-      { ...valid, output: { ...valid.output, format: "cjs" } },
+      { ...valid, output: { ...valid.output, format: "iife" } },
       // The build child accepts any BOOLEAN strictExecutionOrder (a non-boolean is invalid); the
       // seo:true policy is a MODEL-validator rule (`validateBuildConfig`), not a request-parse rule.
       { ...valid, output: { ...valid.output, strictExecutionOrder: "yes" } },
@@ -1709,6 +1710,11 @@ describe("withRolldownBuild", () => {
         ...valid,
         output: { ...valid.output, strictExecutionOrder: false },
       }),
+    ).not.toThrow();
+    // FW-A: `format: "cjs"` is a VALID build-child request (the output-format axis); `esm` and `cjs`
+    // are the two rolled formats. `iife`/`umd` stay rejected (single-entry, out of scope — above).
+    expect(() =>
+      parseBuildChildRequest({ ...valid, output: { ...valid.output, format: "cjs" } }),
     ).not.toThrow();
 
     await expect(runBuildChildFromUnknown({ ...valid, version: 2 })).resolves.toMatchObject({

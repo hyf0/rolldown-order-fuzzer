@@ -1471,6 +1471,27 @@ function validateBuildConfig(program: ProgramModel, errors: string[]): void {
       `build.chunking: unknown chunking kind ${quote(String(chunkingKind))} (expected automatic, manual, or organic)`,
     );
   }
+  // FW-A output-format axis: only `esm` / `cjs` are rolled (both keep code splitting). A `cjs` output
+  // is Node-illegal when any module carries top-level await — rolldown hard-refuses it
+  // (`[UNSUPPORTED_FEATURE] Top-level await is currently not supported with the 'cjs' output`), so a
+  // model that pairs the two would only ever produce a build error, not a differential witness. The
+  // generator gates `cjs` off whenever a module has TLA; this rejects a handwritten/shrunk model that
+  // does not.
+  // A persisted `build` predating FW-A has no `outputFormat` — tolerated (it resolves to `esm` via
+  // `buildConfigOf`, the "old artifact still replays" rule). A PRESENT value must be `esm` or `cjs`.
+  const outputFormat: unknown = (build as { readonly outputFormat?: unknown }).outputFormat;
+  if (outputFormat !== undefined && outputFormat !== "esm" && outputFormat !== "cjs") {
+    errors.push(
+      `build.outputFormat: invalid value ${JSON.stringify(outputFormat)} (expected esm or cjs)`,
+    );
+  } else if (
+    outputFormat === "cjs" &&
+    program.modules.some((module) => module.hasTopLevelAwait === true)
+  ) {
+    errors.push(
+      "build.outputFormat: a cjs output cannot be built when any module has top-level await (rolldown refuses TLA under the cjs format)",
+    );
+  }
 }
 
 function validateManualChunkGroups(

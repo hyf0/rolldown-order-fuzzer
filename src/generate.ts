@@ -11,6 +11,7 @@ import type {
   ModuleFormat,
   ModuleModel,
   OrganicChunkGroupConfig,
+  OutputFormat,
   PackageModel,
   ProgramModel,
   ScheduleOperation,
@@ -69,6 +70,12 @@ export const MAX_CASE_SIZE = 48;
 /// interlocking sub-cycle) is sized within `MAX_RANDOM_MODULES - dagCount - 2`, reserving two slots
 /// for barrel modules.
 const MAX_RANDOM_MODULES = 48;
+
+/// FW-A: the reciprocal density at which random-mixed rolls a `cjs` output format (`1/N`). `5` = 20% of
+/// cases build to CommonJS (gated off when a module has top-level await). Meaningful coverage of the
+/// whole `render_chunk_exports` CJS arm without letting it dominate the corpus, and drawn LAST so it
+/// never perturbs the source render (see `finalizeProgram`).
+const CJS_OUTPUT_DENOMINATOR = 5;
 
 /// Sample a per-case generation size from a weighted small/medium/large spread. A campaign that does
 /// not pin `--case-size` draws one of these per case (seeded by the case seed) so a single run covers
@@ -850,6 +857,7 @@ export function buildCrossChunkInitCycle(rng: SeededRng): {
       preserveEntrySignatures: "allow-extension",
       lazyBarrel: false,
       strictExecutionOrder: true,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -989,6 +997,7 @@ export function buildFamilyBEagerBarrel(
       preserveEntrySignatures: "allow-extension",
       lazyBarrel: options.lazyBarrel ?? false,
       strictExecutionOrder: true,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -1081,6 +1090,7 @@ export function buildCrossEntryLeakCase(rng: SeededRng): {
       lazyBarrel: false,
       // The whole point: the leak exists ONLY at seo:false (seo:true is the #9997-fixed control).
       strictExecutionOrder: false,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -1182,6 +1192,7 @@ export function buildStaticCrossEntryLeak(rng: SeededRng): {
       preserveEntrySignatures: "allow-extension",
       lazyBarrel: false,
       strictExecutionOrder: false,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -1322,6 +1333,7 @@ export function buildOptimizerCycle(
       preserveEntrySignatures: "allow-extension",
       lazyBarrel: false,
       strictExecutionOrder: true,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -1437,6 +1449,7 @@ export function buildDynamicWrapKindMerge(
         preserveEntrySignatures: "allow-extension",
         lazyBarrel: false,
         strictExecutionOrder: true,
+        outputFormat: "esm",
       },
     };
     deepFreeze(program);
@@ -1505,6 +1518,7 @@ export function buildDynamicWrapKindMerge(
         preserveEntrySignatures: "allow-extension",
         lazyBarrel: false,
         strictExecutionOrder: true,
+        outputFormat: "esm",
       },
     };
     deepFreeze(program);
@@ -1554,6 +1568,7 @@ export function buildDynamicWrapKindMerge(
       preserveEntrySignatures: "allow-extension",
       lazyBarrel: false,
       strictExecutionOrder: true,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -1662,6 +1677,7 @@ export function buildExoticImportReads(rng: SeededRng): {
       preserveEntrySignatures: "allow-extension",
       lazyBarrel: false,
       strictExecutionOrder: true,
+      outputFormat: "esm",
     },
   };
   deepFreeze(program);
@@ -1896,6 +1912,16 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
   // golden's buildAxes); it defaults to true and is flipped to false ONLY by an explicit generation
   // option (the seo:false sanity cell and cross-entry cells), so the default corpus is byte-identical.
   const strictExecutionOrder = context.options.strictExecutionOrder ?? true;
+  // FW-A output-format axis, drawn LAST — after every source-affecting roll AND the whole W14b/W14c
+  // enrichment — so no earlier draw shifts and a case's rendered SOURCE bytes are byte-identical to the
+  // pre-FW-A corpus (the source run is format-neutral; only the bundle build/load path changes). `cjs`
+  // is rolled at a modest density (`CJS_OUTPUT_DENOMINATOR`) but forced OFF whenever any module carries
+  // top-level await (rolldown refuses TLA under a cjs output); the roll is consumed either way so the
+  // RNG sequence stays deterministic. seo stays as-is (true in the default corpus), so the cjs cells run
+  // under the strict full-order oracle — the strict×cjs machinery that was defense-in-depth until now.
+  const outputFormatRoll = rng.integer(CJS_OUTPUT_DENOMINATOR);
+  const anyTopLevelAwait = enriched.modules.some((module) => module.hasTopLevelAwait === true);
+  const outputFormat: OutputFormat = outputFormatRoll === 0 && !anyTopLevelAwait ? "cjs" : "esm";
   // A cross-entry cell (seo:false + bias) OVERRIDES the rolled chunking with a single entriesAware
   // co-locating group over every module — the #9998 config, which at seo:false runs one entry's
   // top-level when a disjoint-reachability entry loads. Only fires under the opt-in option, so it never
@@ -1920,6 +1946,7 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     preserveEntrySignatures: "allow-extension",
     lazyBarrel,
     strictExecutionOrder,
+    outputFormat,
   };
 
   const program: ProgramModel = {
@@ -4063,6 +4090,9 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   tags.add(`axis:include-dependencies-recursively:${String(build.includeDependenciesRecursively)}`);
   tags.add(`axis:lazy-barrel:${String(build.lazyBarrel)}`);
   tags.add(`axis:strict-execution-order:${String(build.strictExecutionOrder)}`);
+  // FW-A output-format axis: `cjs` reaches the whole CommonJS render arm (live getters, `__toCommonJS`,
+  // the self-rebinding-wrapper defense) the ESM-output pin kept unreachable.
+  tags.add(`axis:output-format:${build.outputFormat}`);
   // The #9998 cross-entry-leak structural signature (W14c): a seo:false program with a codeSplitting
   // group whose reach spans DISJOINT entry-reachability sets — the config that runs one entry's
   // top-level when a disjoint entry loads, caught by the reachability-isolation oracle.

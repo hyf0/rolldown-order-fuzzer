@@ -54,8 +54,11 @@ const BUILD_CHILD_TERMINATION_GRACE_MS = 250;
 const BUILD_CHILD_FINAL_CLOSE_GRACE_MS = 250;
 
 /// The fixed Rolldown build constants that are NOT per-case axes. `preserveEntrySignatures` and
-/// `strictExecutionOrder` moved out of here into the persisted `BuildConfig` (W14a) — the adapter reads
-/// them from `buildConfigOf(program)` now, so a future axis can vary them without touching this constant.
+/// `strictExecutionOrder` moved out of here into the persisted `BuildConfig` (W14a); `format` and the
+/// entry/chunk file names moved out too (FW-A) — they now depend on the `outputFormat` axis, resolved by
+/// `outputFormatFileOptions` below. This constant holds the ESM baseline (the historical values) so the
+/// artifact-identity's `buildOptions` record stays shape-compatible; the adapter overrides `format` /
+/// `entryFileNames` / `chunkFileNames` per case from `buildConfigOf(program)`.
 export const ROLLDOWN_BUILD_OPTIONS = {
   format: "esm",
   entryFileNames: "entries/[name].js",
@@ -64,6 +67,27 @@ export const ROLLDOWN_BUILD_OPTIONS = {
   cleanDir: false,
   minify: false,
 } as const;
+
+/// The `format` + entry/chunk file names an output format builds with (FW-A). A `cjs` bundle emits
+/// `.cjs` entries and chunks: the bundle directory keeps its `{"type":"module"}` package.json, so a
+/// `.cjs` extension is what makes Node load the emitted files as CommonJS (a `.js` there would parse as
+/// ESM and break the CJS output). The runner then loads a `cjs`-output entry via `require` (the manifest
+/// records `format: "cjs"` and the schedule uses `require-entry`); an `esm`-output entry keeps `.js` +
+/// `import`. Probed: `.cjs` under `{"type":"module"}` loads via both `require` and `import`, and the
+/// require path's events equal the source run's on the fixed snapshot. See
+/// `.agents/docs/fw-a-output-format-axis.md`.
+export function outputFormatFileOptions(format: "esm" | "cjs"): {
+  readonly format: "esm" | "cjs";
+  readonly entryFileNames: string;
+  readonly chunkFileNames: string;
+} {
+  const extension = format === "cjs" ? "cjs" : "js";
+  return {
+    format,
+    entryFileNames: `entries/[name].${extension}`,
+    chunkFileNames: `chunks/[name].${extension}`,
+  };
+}
 
 export interface RolldownAdapterOptions {
   readonly packageSpecifier?: string;
@@ -727,10 +751,9 @@ async function buildWithChild(
         : { entriesAwareMergeThreshold: group.entriesAwareMergeThreshold }),
     })),
     output: {
-      format: ROLLDOWN_BUILD_OPTIONS.format,
+      // FW-A: the output format + its `.js`/`.cjs` entry/chunk names come from the persisted BuildConfig.
+      ...outputFormatFileOptions(build.outputFormat),
       strictExecutionOrder: build.strictExecutionOrder,
-      entryFileNames: ROLLDOWN_BUILD_OPTIONS.entryFileNames,
-      chunkFileNames: ROLLDOWN_BUILD_OPTIONS.chunkFileNames,
       assetFileNames: ROLLDOWN_BUILD_OPTIONS.assetFileNames,
       cleanDir: ROLLDOWN_BUILD_OPTIONS.cleanDir,
       minify: ROLLDOWN_BUILD_OPTIONS.minify,
@@ -1075,6 +1098,11 @@ function createBundleManifest(
   sourceDirectory: string,
   output: readonly BuildChildOutputFile[],
 ): ExecutionManifest {
+  // FW-A: the emitted bundle is uniformly this output format, so every emitted entry is loaded the same
+  // way — an `esm` entry via `import`, a `cjs` entry via `require` (the runner has both paths). The
+  // source-side per-entry format is irrelevant to the bundle: rolldown rewrote every source module into
+  // one output format.
+  const outputFormat = buildConfigOf(program).outputFormat;
   const entryChunks = output.filter(isOutputChunkMetadata);
   const unusedChunks = new Set(entryChunks);
   const entries = program.entries.map((entry) => {
@@ -1091,23 +1119,33 @@ function createBundleManifest(
     return {
       name: entry.name,
       path: emitted.fileName,
-      format: "esm" as const,
+      format: outputFormat,
     };
   });
 
   return {
     version: EXECUTION_PROTOCOL_VERSION,
     entries,
-    operations: rendered.schedule.operations.map(bundleScheduleOperation),
+    operations: rendered.schedule.operations.map((operation) =>
+      bundleScheduleOperation(operation, outputFormat),
+    ),
   };
 }
 
-function bundleScheduleOperation(operation: ScheduleOperation): ScheduleOperation {
-  if (operation.kind === "require-entry") {
-    return {
-      kind: "import-entry",
-      entry: operation.entry,
-    };
+/// Rewrite a SOURCE schedule operation for the BUNDLE, whose entries are all `outputFormat`. Both entry
+/// operations (`import-entry` / `require-entry`) map to the ONE way the bundle's entry files load: an
+/// `esm` output is imported (rewriting a CJS source entry's `require-entry`), a `cjs` output is required
+/// (rewriting an ESM source entry's `import-entry`). The schedule marker collapses both to `entry`
+/// (`protocol.ts` `scheduleMarkerKind`), so this rewrite is symmetric with the source and adds no
+/// oracle surface. A `trigger-dynamic-import` is format-neutral and passes through.
+function bundleScheduleOperation(
+  operation: ScheduleOperation,
+  outputFormat: "esm" | "cjs",
+): ScheduleOperation {
+  if (operation.kind === "import-entry" || operation.kind === "require-entry") {
+    return outputFormat === "cjs"
+      ? { kind: "require-entry", entry: operation.entry }
+      : { kind: "import-entry", entry: operation.entry };
   }
   return { ...operation };
 }

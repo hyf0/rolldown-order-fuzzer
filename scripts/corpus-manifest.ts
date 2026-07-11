@@ -105,6 +105,10 @@ interface CaseManifest {
     readonly lazyBarrel: boolean;
     readonly preserveEntrySignatures: unknown;
     readonly strictExecutionOrder: boolean;
+    /// FW-A output-format axis. Recorded ONLY when `cjs` (omitted for the `esm` default), so an esm
+    /// case's buildAxes is byte-identical to the pre-FW-A golden and the delta is self-explaining: a
+    /// changed case either gained `outputFormat: "cjs"` (the format axis) or a package / new operation.
+    readonly outputFormat?: "cjs";
   };
   /// The resolved packages (W14b) — present ONLY when the case carries any, so a package-free case's
   /// manifest entry is byte-identical to the pre-package golden AND the golden delta is
@@ -238,6 +242,16 @@ function unexplainedCodeSplitting(
 /// change is a package chunk group, and every in-place root-file change is a package specifier update
 /// or a new-operation file — so a codeSplitting/schedule/render drift the old feature-presence check
 /// would have waved through fails here.
+/// A case's buildAxes with the FW-A `outputFormat` key stripped, so the drift check compares only the
+/// four pre-FW-A axes. An `outputFormat` difference is the format axis (an allowed roll), not a drift.
+function buildAxesWithoutOutputFormat(caseManifest: CaseManifest): unknown {
+  if (caseManifest.buildAxes === undefined) {
+    return undefined;
+  }
+  const { outputFormat: _outputFormat, ...rest } = caseManifest.buildAxes;
+  return rest;
+}
+
 function unexplainedChangeReasons(
   before: CaseManifest,
   after: CaseManifest,
@@ -246,10 +260,17 @@ function unexplainedChangeReasons(
   const reasons: string[] = [];
   // (1) The package enrichment is END-STAGE (drawn after the BuildConfig axes are rolled), so it can
   // never move includeDependenciesRecursively / lazyBarrel / preserveEntrySignatures /
-  // strictExecutionOrder. A buildAxes move is a real drift, not a package effect.
-  if (canonicalJson(before.buildAxes) !== canonicalJson(after.buildAxes)) {
+  // strictExecutionOrder. A buildAxes move is a real drift, not a package effect. EXCEPT the FW-A
+  // output-format axis, drawn LAST: an esm case has no `outputFormat` key, a cjs case gains
+  // `outputFormat: "cjs"` — an allowed axis roll. So compare the buildAxes with `outputFormat` STRIPPED;
+  // only a difference in the OTHER four axes is a real drift.
+  if (
+    canonicalJson(buildAxesWithoutOutputFormat(before)) !==
+    canonicalJson(buildAxesWithoutOutputFormat(after))
+  ) {
     reasons.push("buildAxes drifted (the end-stage enrichment cannot move a pre-enrichment axis)");
   }
+  const outputFormatChanged = before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat;
   const membership = program === undefined ? undefined : packageMembershipOf(program);
   const memberIds = new Set(membership?.keys() ?? []);
   // (2) A codeSplitting change must be ONLY appended package chunk groups.
@@ -263,12 +284,32 @@ function unexplainedChangeReasons(
       reasons.push(codeSplitReason);
     }
   }
-  // (3) The case must actually carry a W14b feature (packages or a new operation) — otherwise a moved
-  // package-free, new-op-free case is an unexplained regression.
+  // (3) The case must actually carry a W14b feature (packages or a new operation) OR have changed by the
+  // FW-A output-format axis alone — otherwise a moved package-free, new-op-free, format-unchanged case is
+  // an unexplained regression. A format-only change (a cjs roll, no source-byte / package effect) is
+  // fully accounted for: the source render is format-neutral, so a cjs case's files are byte-identical
+  // and only its buildAxes gained `outputFormat: "cjs"`.
   const carriesPackages = (after.packages?.length ?? 0) > 0;
   const newOp = program !== undefined && carriesNewOperation(program);
+  if (!carriesPackages && !newOp && !outputFormatChanged) {
+    reasons.push("changed without packages, a new operation, or an output-format roll");
+    return reasons;
+  }
   if (!carriesPackages && !newOp) {
-    reasons.push("changed without packages or a new operation");
+    // A format-only change: no packages, no new op, only the output-format axis moved. The source bytes
+    // must therefore be byte-identical (the format axis never touches the rendered source) — a file /
+    // codeSplitting / schedule change with no package or new-op cause would still fall through to the
+    // per-file checks below and be flagged.
+    for (const beforeFile of before.files) {
+      const afterHash = new Map(after.files.map((file) => [file.path, file.sha256])).get(
+        beforeFile.path,
+      );
+      if (afterHash !== undefined && afterHash !== beforeFile.sha256) {
+        reasons.push(
+          `output-format-only change altered source file ${beforeFile.path} (the format axis must not touch rendered source)`,
+        );
+      }
+    }
     return reasons;
   }
   if (program === undefined) {
@@ -389,6 +430,8 @@ function renderCase(
         lazyBarrel: build.lazyBarrel,
         preserveEntrySignatures: build.preserveEntrySignatures,
         strictExecutionOrder: build.strictExecutionOrder,
+        // FW-A: only a cjs case records outputFormat, so esm cases stay byte-identical to the old golden.
+        ...(build.outputFormat === "cjs" ? { outputFormat: "cjs" as const } : {}),
       },
       ...(packages.length > 0
         ? {
@@ -612,6 +655,7 @@ function main(argv: readonly string[]): number {
     let unchanged = 0;
     let changedWithPackages = 0;
     let changedNewOpOnly = 0;
+    let changedFormatOnly = 0;
     const unexplained: string[] = [];
     for (const [key, before] of baselineByKey) {
       const after = currentByKey.get(key);
@@ -629,8 +673,13 @@ function main(argv: readonly string[]): number {
         unexplained.push(`${key}: ${reasons.join("; ")}`);
         continue;
       }
+      // FW-A: a case whose ONLY change is a cjs output-format roll (no packages, no new operation, so its
+      // source files are byte-identical) is a distinct explained category.
+      const outputFormatChanged = before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat;
       if ((after.packages?.length ?? 0) > 0) {
         changedWithPackages += 1;
+      } else if (outputFormatChanged && !(program !== undefined && carriesNewOperation(program))) {
+        changedFormatOnly += 1;
       } else {
         changedNewOpOnly += 1;
       }
@@ -643,12 +692,13 @@ function main(argv: readonly string[]): number {
     // "package-free" = the cases carrying NO packages: the byte-identical ones plus the new-op-only
     // changes. (The old wording called the byte-identical count "the package-free corpus", which
     // under-counts by the new-op-only cases.)
-    const packageFree = unchanged + changedNewOpOnly;
+    const packageFree = unchanged + changedNewOpOnly + changedFormatOnly;
     process.stdout.write(
       `explain-delta: ${baselineByKey.size} baseline cases — ${unchanged} byte-identical, ` +
         `${changedWithPackages} changed with packages, ${changedNewOpOnly} changed by a new operation only, ` +
+        `${changedFormatOnly} changed by the output-format axis only, ` +
         `${unexplained.length} unexplained ` +
-        `(${packageFree} package-free = ${unchanged} unchanged + ${changedNewOpOnly} new-op)\n`,
+        `(${packageFree} package-free = ${unchanged} unchanged + ${changedNewOpOnly} new-op + ${changedFormatOnly} format-only)\n`,
     );
     for (const line of unexplained.slice(0, 40)) {
       process.stderr.write(`UNEXPLAINED: ${line}\n`);

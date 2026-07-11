@@ -515,6 +515,15 @@ export type Chunking =
 /// build child's request type accepts what a future axis might roll.
 export type PreserveEntrySignatures = false | "strict" | "allow-extension" | "exports-only";
 
+/// `OutputOptions.format` — the fuzzer's output-format axis (FW-A). Only `esm` and `cjs` are rolled:
+/// both support code splitting (multiple entries + shared chunks), so the differential oracle over a
+/// multi-entry program stays valid; `iife`/`umd` are single-entry-only and out of scope. A `cjs`-output
+/// bundle is a genuine CommonJS program — its entries are loaded via `require` (the runner already has
+/// the require-entry path) and its cross-chunk refs route through the CJS-interop machinery
+/// (`__toCommonJS`, live getters, the self-rebinding-wrapper defense) that the ESM-output pin kept
+/// structurally unreachable. See `.agents/docs/fw-a-output-format-axis.md`.
+export type OutputFormat = "esm" | "cjs";
+
 /// The ONE persisted bundle-side build configuration a case builds with — consumed by the adapter/build
 /// child, the evaluator, replay/shrink, the artifact identity, the corpus manifest, and the coverage
 /// tags. All of these bundle-side; NONE changes the source run, so the differential oracle stays valid.
@@ -529,12 +538,17 @@ export type PreserveEntrySignatures = false | "strict" | "allow-extension" | "ex
 ///   the W14-9 axis the generator rolls (smoke-verified honored by the frozen snapshot under strict order).
 /// - `strictExecutionOrder` — `OutputOptions.strictExecutionOrder` (default `true`; NOT rolled in W14a —
 ///   every case keeps `true`, because a `seo:false` cell needs a weaker order oracle that lands in W14c).
+/// - `outputFormat` — `OutputOptions.format` (FW-A; default `esm`). The generator rolls `cjs` at a
+///   modest density in random-mixed (drawn LAST so no source-affecting roll shifts), gated OFF whenever
+///   any module reaches top-level await (rolldown hard-refuses TLA under a `cjs` output). Source-neutral:
+///   the SOURCE run is identical; only the bundle build + load path changes.
 export interface BuildConfig {
   readonly chunking: Chunking;
   readonly includeDependenciesRecursively: boolean;
   readonly preserveEntrySignatures: PreserveEntrySignatures;
   readonly lazyBarrel: boolean;
   readonly strictExecutionOrder: boolean;
+  readonly outputFormat: OutputFormat;
 }
 
 /// The build config a program with no persisted `build` (a legacy v16 artifact) resolves to, minus its
@@ -545,6 +559,7 @@ export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
   preserveEntrySignatures: "allow-extension",
   lazyBarrel: false,
   strictExecutionOrder: true,
+  outputFormat: "esm",
 });
 
 /// The resolved `BuildConfig` of a program: its persisted `build` if present (schema 17), else derived
@@ -561,7 +576,12 @@ export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
 /// global per-group only when the roll asked).
 export function buildConfigOf(program: ProgramModel): BuildConfig {
   if (program.build !== undefined) {
-    return program.build;
+    // A persisted `build` predating the FW-A output-format axis (a schema-17 artifact) carries the five
+    // W14a/W14c fields but no `outputFormat`; default it to `esm` (the historical fixed value) so an old
+    // artifact still resolves and validates — the same "an old persisted artifact still replays" rule
+    // `packagesOf` / the v16 chunking fallback follow.
+    const persisted = program.build as BuildConfig & { readonly outputFormat?: OutputFormat };
+    return persisted.outputFormat === undefined ? { ...persisted, outputFormat: "esm" } : persisted;
   }
   const chunking = legacyChunking(program);
   return {

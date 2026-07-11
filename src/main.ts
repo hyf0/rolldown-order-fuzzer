@@ -408,6 +408,10 @@ interface FailureArtifactIdentity {
       readonly strictExecutionOrder: boolean;
       readonly includeDependenciesRecursively: boolean;
       readonly lazyBarrel: boolean;
+      // FW-A: the output format, so a cjs case dedups distinctly from its esm twin (the `.cjs` entry/chunk
+      // names and the `cjs` `format` are derived from it — the ESM-baseline `ROLLDOWN_BUILD_OPTIONS`
+      // strings above are cosmetic once this is recorded).
+      readonly outputFormat: BuildConfig["outputFormat"];
       readonly codeSplitting:
         | true
         | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> }
@@ -467,6 +471,7 @@ function createFailureArtifactIdentity(
       strictExecutionOrder: buildConfig.strictExecutionOrder,
       includeDependenciesRecursively: buildConfig.includeDependenciesRecursively,
       lazyBarrel: buildConfig.lazyBarrel,
+      outputFormat: buildConfig.outputFormat,
       codeSplitting: effectiveCodeSplitting(result.generated.program),
     },
     sourceOutcome: result.sourceOutcome,
