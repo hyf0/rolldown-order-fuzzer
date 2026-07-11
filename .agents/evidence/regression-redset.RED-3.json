@@ -1,0 +1,36 @@
+{
+  "proof": "standing version-bracketed regression red-set (FW-C)",
+  "generatedAt": "2026-07-11T01:53:26.043Z",
+  "head": "78183406be425b83920a30b541ba71695d5db57e",
+  "dirty": true,
+  "node": "v24.18.0",
+  "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
+  "cacheRoot": "/tmp/order-fuzzer-regression-targets",
+  "subset": "RED-3",
+  "entryCount": 1,
+  "accepted": true,
+  "entries": [
+    {
+      "id": "RED-3",
+      "issue": 9993,
+      "form": "generator",
+      "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
+      "redTarget": {
+        "label": "npm:1.1.4",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.4/node_modules/rolldown/dist/index.mjs",
+        "sha256": "e53f01ed8f22bfbd7f56a858eccc3b174916f855b0c080d1ca7252dfc2937e66"
+      },
+      "greenTarget": {
+        "label": "npm:1.1.5",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+        "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+      },
+      "expectedRedSignature": "bundle-only-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedRedSignature": "bundle-only-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    }
+  ]
+}

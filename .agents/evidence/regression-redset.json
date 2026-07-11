@@ -1,13 +1,13 @@
 {
   "proof": "standing version-bracketed regression red-set (FW-C)",
-  "generatedAt": "2026-07-11T00:40:21.870Z",
-  "head": "14716d8187c27adf3e904dd1dbf16b5e8381224d",
+  "generatedAt": "2026-07-11T01:53:50.450Z",
+  "head": "6007c980cac0a5d5d9d2ff4132d3266c16ce9fda",
   "dirty": true,
   "node": "v24.18.0",
   "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",
   "cacheRoot": "/tmp/order-fuzzer-regression-targets",
   "subset": null,
-  "entryCount": 8,
+  "entryCount": 9,
   "accepted": true,
   "entries": [
     {
@@ -79,7 +79,7 @@
     {
       "id": "RED-3",
       "issue": 9993,
-      "form": "raw",
+      "form": "generator",
       "cluster": "1.1 chunk-optimizer inter-chunk cycle — runtime placement",
       "redTarget": {
         "label": "npm:1.1.4",
@@ -91,8 +91,30 @@
         "distPath": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
         "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
       },
-      "expectedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
-      "observedRedSignature": "raw-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "expectedRedSignature": "bundle-only-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedRedSignature": "bundle-only-crash:[\"TypeError\",\"__commonJSMin is not a function\"]",
+      "observedGreenSignature": "pass",
+      "redMatches": true,
+      "greenPassed": true,
+      "verdict": "hold"
+    },
+    {
+      "id": "RED-8",
+      "issue": 0,
+      "form": "generator",
+      "cluster": "P7/T4 cjs-output arm — wrapped-entry init emission (FW-A)",
+      "redTarget": {
+        "label": "npm:1.1.5",
+        "distPath": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+        "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+      },
+      "greenTarget": {
+        "label": "snapshot:final-snapshot-42628c18b",
+        "distPath": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+        "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+      },
+      "expectedRedSignature": "bundle-only-crash:[\"ReferenceError\",\"init_module_0002 is not defined\"]",
+      "observedRedSignature": "bundle-only-crash:[\"ReferenceError\",\"init_module_0002 is not defined\"]",
       "observedGreenSignature": "pass",
       "redMatches": true,
       "greenPassed": true,
