@@ -1101,6 +1101,108 @@ export function generateCrossEntryLeakCase(seed: number): GeneratedCase {
   };
 }
 
+/// The BROADER cross-entry-leak shape (FW-B deliverable 4 — the W14c follow-up). The W14c wave noted a
+/// residual "broader automatic-chunking cross-entry leak"; this wave's ablation
+/// (`scratchpad/fw-b-probe/probe-d4b`) PINS its minimal trigger and CORRECTS the characterization:
+///
+/// - the leak needs a CO-LOCATING ORGANIC GROUP (an `entriesAware` group OR a PLAIN `test:".*"` group),
+///   NOT automatic chunking — automatic chunking does NOT leak (verified GREEN on both targets, and 0/28
+///   random automatic multi-entry seo:false cases leaked). The doc's "automatic chunking" wording is
+///   disproven; a group is load-bearing.
+/// - the genuinely BROADER surface (beyond #9998's dynamic-import shape) is a PURELY STATIC one: two
+///   mutually-unreachable entries that SHARE a static module, each also owning a private eager module,
+///   co-located by a plain organic group. Loading ONE entry runs the OTHER entry's private module (its
+///   top-level) — signature `reachability-isolation:[le2-b,le2-pb]`. No dynamic import is required.
+///
+/// This is the SAME ROOT MECHANISM as #9998 (a co-locating organic group at seo:false runs a
+/// disjoint-reachability entry's top-level, caught by the reachability-isolation oracle) — only the
+/// TRIGGER is broader (static instead of dynamic; a plain group suffices). So it folds into the RED-9998
+/// bracket-pending entry's notes rather than a new bracket (per the deliverable's same-root instruction).
+/// Bug OPEN on both npm rolldown@1.1.5 and the snapshot (#9997 fixed only the strict path). The seed
+/// varies only the cosmetic fold values.
+export function buildStaticCrossEntryLeak(rng: SeededRng): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const aBase = 1 + rng.integer(900_000);
+  const bBase = 1 + rng.integer(900_000);
+  const sharedBase = 1 + rng.integer(900_000);
+  const paBase = 1 + rng.integer(900_000);
+  const pbBase = 1 + rng.integer(900_000);
+  const program: ProgramModel = {
+    modules: [
+      {
+        id: "le2-a",
+        format: "esm",
+        dependencies: [
+          { kind: "esm-side-effect-import", target: "le2-shared" },
+          { kind: "esm-side-effect-import", target: "le2-pa" },
+        ],
+        events: [{ module: "le2-a", phase: "evaluate", value: aBase }],
+      },
+      {
+        id: "le2-b",
+        format: "esm",
+        dependencies: [
+          { kind: "esm-side-effect-import", target: "le2-shared" },
+          { kind: "esm-side-effect-import", target: "le2-pb" },
+        ],
+        events: [{ module: "le2-b", phase: "evaluate", value: bBase }],
+      },
+      {
+        id: "le2-shared",
+        format: "esm",
+        dependencies: [],
+        events: [{ module: "le2-shared", phase: "evaluate", value: sharedBase }],
+      },
+      {
+        id: "le2-pa",
+        format: "esm",
+        dependencies: [],
+        events: [{ module: "le2-pa", phase: "evaluate", value: paBase }],
+      },
+      {
+        id: "le2-pb",
+        format: "esm",
+        dependencies: [],
+        events: [{ module: "le2-pb", phase: "evaluate", value: pbBase }],
+      },
+    ],
+    entries: [
+      { name: "entry-le2-a", moduleId: "le2-a" },
+      { name: "entry-le2-b", moduleId: "le2-b" },
+    ],
+    // Load ONLY entry a: at seo:false the co-locating group runs le2-b + le2-pb (b's private) too — the
+    // isolation violation (le2-b, le2-pb are reachable only from entry b, not yet loaded).
+    schedule: [{ kind: "import-entry", entry: "entry-le2-a" }],
+    build: {
+      // A PLAIN organic group (no entriesAware) co-locating every module — the broader trigger.
+      chunking: { kind: "organic", groups: [{ name: "le2-common", test: "module-" }] },
+      includeDependenciesRecursively: true,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: false,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the directed broader-static cross-entry-leak campaign (FW-B deliverable 4).
+/// Tagged `mechanism:cross-entry-leak` (the same root as #9998). The seed varies only cosmetic values.
+export function generateStaticCrossEntryLeakCase(seed: number): GeneratedCase {
+  const { program, analyzed } = buildStaticCrossEntryLeak(new SeededRng(seed));
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// A generated case for the directed family-B campaign. The seed only varies the cosmetic fold
 /// values, so the structural shape — and its od-red/wa-green verdict split — is identical across
 /// seeds. Tagged `mechanism:family-b-eager-barrel` (asserted by the campaign script).

@@ -7,6 +7,7 @@ import {
   generateCrossChunkInitCycleCase,
   generateDynamicWrapKindMergeCase,
   generateOptimizerCycleCase,
+  generateStaticCrossEntryLeakCase,
   MAX_CASE_SIZE,
   MIXED_TEMPLATE_NAMES,
   sampleCaseSize,
@@ -1350,5 +1351,33 @@ describe("dynamic-entry × wrap-kind × merge shape (FW-B deliverable 2, cluster
     expect(deriveCoverageTags(analyzeProgram(automatic))).not.toContain(
       "mechanism:dynamic-entry-wrap-kind-merge",
     );
+  });
+});
+
+describe("broader static cross-entry-leak (FW-B deliverable 4, W14c follow-up)", () => {
+  test("is a valid seo:false model tagged cross-entry-leak, PURELY STATIC (no dynamic import)", () => {
+    const generated = generateStaticCrossEntryLeakCase(0);
+    expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    // The same root as #9998: seo:false + a co-locating organic group over mutually-unreachable entries.
+    expect(generated.coverageTags).toContain("mechanism:cross-entry-leak");
+    expect(generated.coverageTags).toContain("axis:strict-execution-order:false");
+    // Broader trigger: NO dynamic import (purely static), and a PLAIN organic group.
+    const hasDynamic = generated.program.modules.some((m) =>
+      m.dependencies.some((d) => d.kind === "esm-dynamic-import"),
+    );
+    expect(hasDynamic).toBe(false);
+    const chunking = programChunking(generated.program);
+    expect(chunking.kind).toBe("organic");
+    if (chunking.kind === "organic") {
+      // A plain group — no entriesAware.
+      expect(chunking.groups.every((g) => g.entriesAware !== true)).toBe(true);
+    }
+  });
+
+  test("its two entries are mutually unreachable (the isolation precondition)", () => {
+    const generated = generateStaticCrossEntryLeakCase(0);
+    const facts = ProgramFacts.from(generated.program.modules);
+    expect(facts.reachableAllFrom("le2-a").has("le2-b")).toBe(false);
+    expect(facts.reachableAllFrom("le2-b").has("le2-a")).toBe(false);
   });
 });

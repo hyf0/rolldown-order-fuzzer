@@ -102,7 +102,14 @@
         "fixCommit": "none — bracket-pending: the bug is RED on BOTH npm 1.1.5 AND the final-snapshot-42628c18b (open everywhere at seo:false), so there is no green target yet; the entry graduates to a normal bracket when a fix lands and the green target flips",
         "redBelow": "1.1.5 and final-snapshot-42628c18b (both red at seo:false)",
         "greenAtOrAbove": "none yet (bracket-pending)",
-        "note": "The fuzzer-model translation of the issue's verified repro (buildCrossEntryLeakCase, src/generate.ts), caught by the reachability-isolation oracle the persisted seo:false axis selects. Live-catch acceptance: scripts/cross-entry-leak-catch.ts + .agents/evidence/9998-cross-entry-leak.json."
+        "note": "The fuzzer-model translation of the issue's verified repro (buildCrossEntryLeakCase, src/generate.ts), caught by the reachability-isolation oracle the persisted seo:false axis selects. Live-catch acceptance: scripts/cross-entry-leak-catch.ts + .agents/evidence/9998-cross-entry-leak.json.",
+        "broaderShapeFoldedIn": {
+          "summary": "FW-B deliverable 4 investigated the W14c-residual 'broader automatic-chunking cross-entry leak' and folded it here — it is the SAME ROOT MECHANISM as #9998 (a co-locating organic group at seo:false runs a disjoint-reachability entry's top-level, caught by the reachability-isolation oracle), only a broader TRIGGER, so it is NOT a separate bracket.",
+          "abLationCorrection": "The W14c 'automatic chunking' characterization is DISPROVEN: automatic chunking does NOT leak (verified GREEN on both npm 1.1.5 and the snapshot; 0/28 random automatic multi-entry seo:false cases leaked). A co-locating organic group is load-bearing.",
+          "broaderTrigger": "The genuinely broader surface is PURELY STATIC (no dynamic import) and fires under a PLAIN organic group (not only entriesAware): two mutually-unreachable entries sharing a static module, each owning a private eager module; loading ONE entry runs the OTHER's private top-level (reachability-isolation:[le2-b,le2-pb]).",
+          "generator": "buildStaticCrossEntryLeak / generateStaticCrossEntryLeakCase (src/generate.ts)",
+          "campaign": "scripts/broad-cross-entry-leak-catch.ts — isolation RED 20/20 on BOTH npm 1.1.5 AND the snapshot, seo:true control GREEN; evidence .agents/evidence/broad-cross-entry-leak.json"
+        }
       }
     }
   ]

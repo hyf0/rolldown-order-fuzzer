@@ -1,0 +1,48 @@
+{
+  "proof": "FW-B W14c follow-up: broader STATIC cross-entry-leak at seo:false — same root as #9998, AUTOMATIC chunking disproven",
+  "generatedAt": "2026-07-11T00:24:02.673Z",
+  "head": "890aadf48a76bba8b95b37fd01d02c1b0f3b057c",
+  "dirty": true,
+  "node": "v24.18.0",
+  "cases": 20,
+  "catchTag": "mechanism:cross-entry-leak",
+  "ablation": {
+    "minimalTrigger": "two mutually-unreachable entries sharing a static module + private eager modules, co-located by a PLAIN organic group (test:'.*'), seo:false; load ONE entry -> the OTHER's private top-level runs",
+    "automaticChunkingLeaks": false,
+    "automaticChunkingNote": "AUTOMATIC chunking does NOT leak (GREEN on both targets; 0/28 random automatic multi-entry seo:false cases) — the W14c 'automatic chunking' characterization is disproven; a co-locating organic group is load-bearing",
+    "sameRootAsRed9998": true,
+    "broaderThanRed9998": "no dynamic import required (purely static) and a plain organic group suffices (not only entriesAware)",
+    "foldedIntoRed9998": true
+  },
+  "seoTrueControl": {
+    "green": true,
+    "signature": "pass"
+  },
+  "targets": {
+    "npm": {
+      "path": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+      "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+    },
+    "snapshot": {
+      "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    }
+  },
+  "accepted": true,
+  "cells": {
+    "npm": {
+      "redIsolation": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "reachability-isolation:[le2-b,le2-pb]": 20
+      }
+    },
+    "snapshot": {
+      "redIsolation": 20,
+      "green": 0,
+      "signatureHistogram": {
+        "reachability-isolation:[le2-b,le2-pb]": 20
+      }
+    }
+  }
+}
