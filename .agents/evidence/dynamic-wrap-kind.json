@@ -1,7 +1,7 @@
 {
   "proof": "FW-B dynamic-entry × wrap-kind × merge campaign (cluster 4 / T1 cell)",
-  "generatedAt": "2026-07-11T00:45:13.859Z",
-  "head": "14716d8187c27adf3e904dd1dbf16b5e8381224d",
+  "generatedAt": "2026-07-11T01:03:30.196Z",
+  "head": "a49515b2552e056f2b4327930f19ad5f14f79799",
   "dirty": true,
   "node": "v24.18.0",
   "cases": 20,

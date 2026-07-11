@@ -6,11 +6,14 @@
 /// wants. This harness builds a rendered program DIRECTLY with a target rolldown and reads the raw
 /// `OutputChunk` graph (`moduleIds` + `imports`) — the same objects the child serializes — so a campaign
 /// can VERIFY that a generated shape actually produced an optimizer MERGE (a chunk holding ≥2 source
-/// modules) and a QUOTIENT CYCLE (chunk A imports B and B imports A). The code-splitting config is
-/// reconstructed to MATCH `createOutputOptions` in `src/rolldown-build-child.ts` (manual groups become an
-/// exact-path `test` function; organic groups become a `RegExp` test + thresholds; the global
-/// `includeDependenciesRecursively` fallback and `experimental.chunkOptimization` when a group is
-/// `entriesAware`), so the inspected graph is the one the production build would produce.
+/// modules) and a QUOTIENT CYCLE (chunk A imports B and B imports A). The build options are
+/// RECONSTRUCTED to match the build child (`src/rolldown-build-child.ts`): the code-splitting config as
+/// `createOutputOptions` shapes it (manual groups become an exact-path `test` function; organic groups a
+/// `RegExp` test + thresholds; the global `includeDependenciesRecursively` fallback), and the input
+/// `experimental` options (`onDemandWrapping` mirroring the run's wrap mode, `lazyBarrel`,
+/// `chunkOptimization` when a group is `entriesAware`). It is a faithful reconstruction, not the child
+/// process itself — if the child ever gains a new build-affecting option, mirror it here too, or the
+/// inspected graph drifts from the graph that reds.
 
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -129,10 +132,15 @@ function findChunkCycle(chunks: readonly ChunkNode[]): readonly string[] {
 
 /// Build a rendered program with `rolldownPackage` and return its chunk graph. The program is written to
 /// an isolated temp dir, built with the reconstructed code-splitting config, and the raw `OutputChunk`
-/// graph is read back; the temp dir is removed before returning.
+/// graph is read back; the temp dir is removed before returning. `onDemandWrapping` mirrors the wrap
+/// mode of the campaign run being verified (default `true`, the campaigns' mode) so the inspected graph
+/// is built with the SAME input experimental options as the production build child — probed identical
+/// merge/cycle verdicts for the FW-B shapes either way, but a future shape whose chunking depends on
+/// wrapping must not silently inspect a different build.
 export async function inspectChunkGraph(
   analyzed: AnalyzedProgram,
   rolldownPackage: string,
+  onDemandWrapping = true,
 ): Promise<ChunkGraph> {
   const { program } = analyzed;
   const rendered = renderProgram(analyzed);
@@ -168,15 +176,14 @@ export async function inspectChunkGraph(
     const bundle = await rolldown({
       input,
       preserveEntrySignatures: build.preserveEntrySignatures,
-      // `lazyBarrel` and `chunkOptimization` are INPUT `experimental` options (not output/generate keys).
-      ...(chunkOptimization || build.lazyBarrel
-        ? {
-            experimental: {
-              ...(chunkOptimization ? { chunkOptimization: true } : {}),
-              ...(build.lazyBarrel ? { lazyBarrel: true } : {}),
-            },
-          }
-        : {}),
+      // The INPUT `experimental` options, mirroring the build child (`rolldown-build-child.ts`):
+      // `onDemandWrapping` (the wrap mode of the run being verified), `lazyBarrel`, and
+      // `chunkOptimization` when an entriesAware group asks for it.
+      experimental: {
+        onDemandWrapping,
+        lazyBarrel: build.lazyBarrel,
+        ...(chunkOptimization ? { chunkOptimization: true } : {}),
+      },
     });
     const generated = await bundle.generate({
       format: "es",

@@ -168,6 +168,28 @@ report honestly, do not land it"), it stays a documented residual. The redset no
   correctly ignored.
 - Per-deliverable campaign matrices in `.agents/evidence/{optimizer-cycle,dynamic-wrap-kind,exotic-reads,broad-cross-entry-leak}.json`.
 
+## Adversarial review (post-wave)
+
+An independent adversarial review of the full wave diff found NO blockers — it re-verified the D1
+module-graph acyclicity + merge/cycle evidence, probed all 8 malformed exotic-read forms against the D3
+validation guards (all rejected; the 4 valid forms accepted), re-ran the D5 fixtures against their
+bracket versions (signatures match exactly), and independently confirmed the D4 automatic-chunking
+disproof. Two of its findings were fixed in follow-up commits: the D4 evidence's ablation result is now
+MEASURED by a live automatic-chunking control inside the campaign (not a hardcoded literal), and
+`inspectChunkGraph` now threads `onDemandWrapping` (mirroring the run's wrap mode) into the input
+experimental options — probed identical merge/cycle verdicts for the FW-B shapes either way, but the
+reconstruction must not silently inspect a different build. Two remaining notes, verified harmless and
+deliberately NOT code-churned:
+
+- `aliasVarName` (`render.ts`) emits `const <binding>_alias = …` without a collision check. Unreachable
+  today (only the exotic generators set `alias`, and their binding names never end in `_alias`), and a
+  future collision fails LOUD (a duplicate-const SyntaxError at build), never a silent false-pass. Route
+  through `freshBinding` if `alias` ever spreads to arbitrary random-corpus bindings.
+- `hasDynamicEntryColocationRecipe`'s organic branch tags any entriesAware group + any dynamic import
+  without checking the group captures the target. Harmless today (0 golden occurrences — random chunking
+  never sets entriesAware; only opt-in cells could over-tag, and it is a coverage tag with no witness
+  impact). Tighten if entriesAware ever joins the rolled organic flavors.
+
 ## Residual gaps (next: FW-A — non-ESM output axis)
 
 - **FW-A is the non-ESM output axis** (`format: cjs|iife|umd`), which unlocks P7/T4 (CJS output),

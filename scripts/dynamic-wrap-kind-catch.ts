@@ -95,7 +95,8 @@ async function runCell(
     );
     const signature = run.verdict.kind === "pass" ? "pass" : run.verdict.signature;
     signatureHistogram[signature] = (signatureHistogram[signature] ?? 0) + 1;
-    const graph = await inspectChunkGraph(generated.analyzed, pkg);
+    // Mirror the run's wrap mode (onDemandWrapping: true above) so the inspected graph is the built one.
+    const graph = await inspectChunkGraph(generated.analyzed, pkg, true);
     const dynamicMerged = graph.chunks.some(
       (chunk) => chunk.moduleIds.includes("dw-t") && chunk.moduleIds.length >= 2,
     );

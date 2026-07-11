@@ -101,7 +101,8 @@ async function runCell(
     let mergedChunkCount = 0;
     let hasQuotientCycle = false;
     if (inspect) {
-      const graph = await inspectChunkGraph(generated.analyzed, rolldownPackage);
+      // Mirror the run's wrap mode (onDemandWrapping: true above) so the inspected graph is the built one.
+      const graph = await inspectChunkGraph(generated.analyzed, rolldownPackage, true);
       mergedChunkCount = graph.mergedChunkCount;
       hasQuotientCycle = graph.hasQuotientCycle;
       if (mergedChunkCount > 0) {
