@@ -1,0 +1,157 @@
+{
+  "proof": "FW-A cjs-output campaign (gap-audit Wave 11 / mining P7/T4)",
+  "generatedAt": "2026-07-11T01:46:28.052Z",
+  "head": "874be6deeb0ec7fe482b555c37a3f19cca2d70e5",
+  "dirty": true,
+  "node": "v24.18.0",
+  "cases": 8,
+  "armBracketHolds": true,
+  "brackets": [
+    "object-identity cjs-output arm: RED 8/8 on npm-1.1.5 ({\"bundle-only-crash:[\\\"ReferenceError\\\",\\\"init_module_0002 is not defined\\\"]\":8}), GREEN on snapshot; esm-output GREEN on both — a CJS-arm bug OPEN on the latest release"
+  ],
+  "liveCatches": [],
+  "targets": {
+    "npm-1.1.5": {
+      "path": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+      "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+    },
+    "snapshot": {
+      "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    }
+  },
+  "cells": {
+    "object-identity": {
+      "esm/od": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      },
+      "esm/wa": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      },
+      "cjs/od": {
+        "npm-1.1.5": {
+          "red": 8,
+          "green": 0,
+          "signatureHistogram": {
+            "bundle-only-crash:[\"ReferenceError\",\"init_module_0002 is not defined\"]": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      },
+      "cjs/wa": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      }
+    },
+    "function-hidden": {
+      "esm/od": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      },
+      "esm/wa": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      },
+      "cjs/od": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      },
+      "cjs/wa": {
+        "npm-1.1.5": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        },
+        "snapshot": {
+          "red": 0,
+          "green": 8,
+          "signatureHistogram": {
+            "pass": 8
+          }
+        }
+      }
+    }
+  }
+}

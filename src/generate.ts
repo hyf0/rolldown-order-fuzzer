@@ -1359,6 +1359,194 @@ export function generateOptimizerCycleCase(
   };
 }
 
+/// The FW-A cjs-output witness variants — order-sensitive shapes built with `outputFormat: "cjs"` so
+/// they exercise the `render_chunk_exports` CommonJS arm (the self-rebinding-wrapper defense, live
+/// getters, `__toCommonJS`) the ESM-output pin kept unreachable. Both keep the SOURCE run identical to
+/// an esm build (the format is bundle-side only), so the differential oracle is valid.
+///
+/// - `object-identity` — the wave-8 object-identity double-init witness: an `objectExport` definer
+///   captured TWO ways by an entry (directly and through a barrel), comparing `a === b` at top level.
+///   The entry's top-level objectRef reads make it order-sensitive → order-wrapped; under a CJS output a
+///   wrapped ENTRY's `init_*` emission is where the arm historically breaks. Empirically red
+///   (`ReferenceError: init_* is not defined`) on npm 1.1.5, GREEN on the final snapshot.
+/// - `function-hidden` — an entry whose only use of a cross-chunk import is a function-hidden read
+///   (`function f(){ return imp } … base + f()`), likewise order-wrapping the entry under a CJS output.
+export type CjsOutputWitnessVariant = "object-identity" | "function-hidden";
+
+export function buildCjsOutputWitness(
+  rng: SeededRng,
+  variant: CjsOutputWitnessVariant,
+): { readonly program: ProgramModel; readonly analyzed: AnalyzedProgram } {
+  const baseA = 1_000_000 + rng.integer(900_000);
+  const baseB = 2_000_000 + rng.integer(900_000);
+  const build: BuildConfig = {
+    chunking: { kind: "automatic" },
+    includeDependenciesRecursively: true,
+    preserveEntrySignatures: "allow-extension",
+    lazyBarrel: false,
+    strictExecutionOrder: true,
+    outputFormat: "cjs",
+  };
+
+  if (variant === "object-identity") {
+    // def (objectExport) — captured directly by entryA and forwarded through a barrel; entryA compares
+    // identity across the two paths, entryB shares def so the optimizer places it in a common chunk.
+    const modules: ModuleModel[] = [
+      { id: "def", format: "esm", dependencies: [], events: [], objectExport: true },
+      {
+        id: "barrel",
+        format: "esm",
+        dependencies: [
+          { kind: "esm-reexport-named", target: "def", sourceName: "vdef", exportedName: "vdef2" },
+        ],
+        events: [],
+      },
+      {
+        id: "coa",
+        format: "esm",
+        dependencies: [
+          {
+            kind: "esm-value-import",
+            target: "def",
+            importedName: "vdef",
+            localName: "coa_vdef",
+            objectRef: true,
+          },
+          {
+            kind: "esm-value-import",
+            target: "barrel",
+            importedName: "vdef2",
+            localName: "coa_vdef2",
+            objectRef: true,
+          },
+        ],
+        events: [
+          {
+            module: "coa",
+            phase: "run",
+            value: baseA,
+            identityCheck: { leftBinding: "coa_vdef", rightBinding: "coa_vdef2" },
+          },
+        ],
+      },
+      {
+        id: "cob",
+        format: "esm",
+        dependencies: [
+          {
+            kind: "esm-value-import",
+            target: "def",
+            importedName: "vdef",
+            localName: "cob_vdef",
+            objectRef: true,
+          },
+        ],
+        events: [
+          {
+            module: "cob",
+            phase: "run",
+            value: baseB,
+            identityCheck: { leftBinding: "cob_vdef", rightBinding: "cob_vdef" },
+          },
+        ],
+      },
+    ];
+    const program: ProgramModel = {
+      modules,
+      entries: [
+        { name: "coa", moduleId: "coa" },
+        { name: "cob", moduleId: "cob" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "coa" },
+        { kind: "import-entry", entry: "cob" },
+      ],
+      build,
+    };
+    deepFreeze(program);
+    return { program, analyzed: analyzeProgram(program) };
+  }
+
+  // function-hidden: an inferred-pure non-inlinable definer read ONLY inside a function body at the
+  // entry, so the entry is order-sensitive through a statically-hidden read and order-wraps under cjs.
+  const modules: ModuleModel[] = [
+    {
+      id: "chshared",
+      format: "esm",
+      dependencies: [],
+      events: [],
+      inferredPure: true,
+      pureBase: 7,
+    },
+    {
+      id: "cha",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "chshared",
+          importedName: "vchshared",
+          localName: "cha_v",
+        },
+      ],
+      events: [
+        {
+          module: "cha",
+          phase: "run",
+          value: baseA,
+          reads: [{ binding: "cha_v" }],
+          hiddenReadFn: true,
+        },
+      ],
+    },
+    {
+      id: "chb",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "chshared",
+          importedName: "vchshared",
+          localName: "chb_v",
+        },
+      ],
+      events: [{ module: "chb", phase: "run", value: baseB, reads: [{ binding: "chb_v" }] }],
+    },
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [
+      { name: "cha", moduleId: "cha" },
+      { name: "chb", moduleId: "chb" },
+    ],
+    schedule: [
+      { kind: "import-entry", entry: "cha" },
+      { kind: "import-entry", entry: "chb" },
+    ],
+    build,
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the FW-A cjs-output campaign (deliverable 5). The seed varies only cosmetic fold
+/// values; the structural shape and its red/green verdict pair across the output-arm bracket are stable.
+export function generateCjsOutputWitnessCase(
+  seed: number,
+  variant: CjsOutputWitnessVariant = "object-identity",
+): GeneratedCase {
+  const { program, analyzed } = buildCjsOutputWitness(new SeededRng(seed), variant);
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The dynamic-entry × wrap-kind × merge shape family (FW-B deliverable 2, cluster 4 — the historically
 /// MISSING T1 cell: a dynamically-imported target the optimizer inlines/merges into a common or user
 /// chunk while ≥2 entries share it, where the CJS `__commonJS` / ESM `__esm` wrap-kind must survive the
