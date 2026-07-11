@@ -150,6 +150,25 @@ representable motif was shown necessary-but-insufficient) and is consistent with
 the plan anticipated. No RED-10044 bracket is registered; the finding stands as the documented boundary
 of the technique.
 
+## Residual gaps (known, deliberate)
+
+- **Faithful-reexport mode vs the mixed-format break** (adversarial-review finding): `emitModel`'s
+  `faithfulReexports` mode emits re-export edges the reducer's mixed-format-cycle break does not see
+  (the break runs over the plain `edges` set). Unreachable in the committed pipeline
+  (`DEFAULT_EMIT_CONFIG.faithfulReexports: false`; `repro-10044.ts` uses its own builder), and a bad
+  outcome is rejected loudly by `validateSynchronousCycleFormats` — but wire re-export edges into the
+  break before enabling faithful mode on a mixed-format app.
+- **Leaf-collapse drops sibling identity, not just order:** vendor/leaf collapse checks
+  self-containment (no member imports outside the package) but keeps only one representative — a
+  collapsed sibling's would-be events vanish. Lossless for ORDER (the members carry no inter-member
+  order structure) and the emitted model stays valid; a fidelity loss only if a future witness wants
+  per-sibling observability.
+- **`inducedInDegree` under SCC-quotient:** computed over raw `importedIds` without quotient mapping,
+  so with `sccQuotient: true` (default off) it can undercount a representative's in-degree. It only
+  feeds the event-budget priority (informational), never correctness.
+- **The #10044 class** (emergent link-order bugs) is outside what an anonymized skeleton can carry —
+  the section above records the precise boundary.
+
 ## Acceptance evidence
 
 - **Golden UNCHANGED** — `corpus:check` 458 cases byte-identical (the transplant cell is entirely

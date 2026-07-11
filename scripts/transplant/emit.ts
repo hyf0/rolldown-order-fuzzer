@@ -35,7 +35,12 @@ export interface EmitConfig {
   /// Emit a `build.chunking` organic approximation of the real chunks (default true). Off -> automatic.
   readonly organicChunking: boolean;
   /// Render real re-export edges (star / named / namespace) instead of side-effect imports. Used by the
-  /// #10044 transplant to carry a link-time re-export bug (default false).
+  /// #10044 transplant to carry a link-time re-export bug (default false). CAVEAT (review finding): the
+  /// reducer's mixed-format-cycle break runs over the plain `edges` set only — re-export edges emitted
+  /// here are NOT fed into that break, so a CJS re-export target closing a cycle would survive to
+  /// validation (which rejects it loudly via `validateSynchronousCycleFormats`, never silently). Fine for
+  /// the all-ESM #10044 graph; wire re-export edges into the break before enabling this on a
+  /// mixed-format app.
   readonly faithfulReexports: boolean;
 }
 
