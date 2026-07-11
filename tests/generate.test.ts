@@ -5,6 +5,7 @@ import {
   deriveRegistrationSequence,
   generateCase,
   generateCrossChunkInitCycleCase,
+  generateDynamicWrapKindMergeCase,
   generateOptimizerCycleCase,
   MAX_CASE_SIZE,
   MIXED_TEMPLATE_NAMES,
@@ -1311,6 +1312,43 @@ describe("optimizer runtime-placement cycle shape (FW-B deliverable 1, rolldown 
     };
     expect(deriveCoverageTags(analyzeProgram(grouped))).not.toContain(
       "mechanism:optimizer-runtime-placement-cycle",
+    );
+  });
+});
+
+describe("dynamic-entry × wrap-kind × merge shape (FW-B deliverable 2, cluster 4 / T1)", () => {
+  test("every variant/format produces a valid model tagged with the co-location recipe", () => {
+    const cells = [
+      { variant: "shared-dynamic", format: "cjs" },
+      { variant: "shared-dynamic", format: "esm" },
+      { variant: "static-dynamic-merge", format: "cjs" },
+      { variant: "static-dynamic-merge", format: "esm" },
+      { variant: "identity-double-init", format: "esm" },
+    ] as const;
+    for (const { variant, format } of cells) {
+      const generated = generateDynamicWrapKindMergeCase(0, variant, format);
+      expect(validateProgramModel(generated.analyzed), `${variant}:${format}`).toEqual([]);
+      expect(generated.coverageTags, `${variant}:${format}`).toContain(
+        "mechanism:dynamic-entry-wrap-kind-merge",
+      );
+      // The dynamic-import target dw-t is co-located with other modules in a group (the merge recipe).
+      expect(generated.coverageTags).toContain("mechanism:dynamic-import");
+      // The dynamic target is dynamically imported (a real dynamic entry).
+      const registrations = generated.program.modules.flatMap((m) =>
+        m.dependencies.flatMap((d) => (d.kind === "esm-dynamic-import" ? [d.target] : [])),
+      );
+      expect(registrations).toContain("dw-t");
+    }
+  });
+
+  test("the recipe tag does NOT fire under automatic chunking (no co-locating group)", () => {
+    const generated = generateDynamicWrapKindMergeCase(0, "shared-dynamic", "cjs");
+    const automatic: ProgramModel = {
+      ...generated.program,
+      build: { ...buildConfigOf(generated.program), chunking: { kind: "automatic" } },
+    };
+    expect(deriveCoverageTags(analyzeProgram(automatic))).not.toContain(
+      "mechanism:dynamic-entry-wrap-kind-merge",
     );
   });
 });

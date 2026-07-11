@@ -1245,6 +1245,242 @@ export function generateOptimizerCycleCase(
   };
 }
 
+/// The dynamic-entry × wrap-kind × merge shape family (FW-B deliverable 2, cluster 4 — the historically
+/// MISSING T1 cell: a dynamically-imported target the optimizer inlines/merges into a common or user
+/// chunk while ≥2 entries share it, where the CJS `__commonJS` / ESM `__esm` wrap-kind must survive the
+/// move so the dynamic import still returns the right exports and evaluates ONCE). Three variants, each
+/// parametrized by the dynamic target's format (the wrap-kind axis):
+///
+/// - `shared-dynamic` — the target is dynamically imported by TWO eager entries (a shared dynamic entry),
+///   co-located by an `entriesAware` organic group that merges the disjoint-reachability subgroups. The
+///   target carries an EVENT: at seo:true it must fire EXACTLY ONCE, so a wrap-kind that re-evaluates the
+///   inlined dynamic entry (double-init) emits the event twice — caught by the full-order oracle.
+/// - `static-dynamic-merge` — the target is shared STATIC (a carrier value-imports + folds it) AND DYNAMIC
+///   (an entry triggers it), with a manual group MERGING {carrier, target} at idr:false — the #7757/#7783
+///   "dynamic entry captured by a common chunk with cjs/esm wrap kind" shape. The carrier's value fold +
+///   the target's once-event are the witness.
+/// - `identity-double-init` (ESM target only) — the target is an `objectExport` definer captured TWO ways
+///   by a carrier (directly and through an `export *` barrel), comparing object IDENTITY, while an entry
+///   dynamically imports it and the manual group merges {carrier, barrel, target} at idr:false. A
+///   silent double-init (the numeric oracle cannot see it) makes the late capture a NEW object → the
+///   identity fold shifts by the mismatch sentinel. Composes the object-identity witness into the T1 cell.
+///
+/// All GREEN on rolldown 1.1.x + the snapshot today (cluster 4 is believed fixed for the known shapes),
+/// so this is COVERAGE of a never-crossed cell; the campaign VERIFIES via chunk inspection that the
+/// dynamic entry actually merged, and WATCHES all targets for a fresh red (cluster 4 interacts with the
+/// still-leaky cluster 1). The seed varies only the cosmetic fold values.
+export type DynamicWrapKindVariant =
+  | "shared-dynamic"
+  | "static-dynamic-merge"
+  | "identity-double-init";
+
+export function buildDynamicWrapKindMerge(
+  rng: SeededRng,
+  variant: DynamicWrapKindVariant = "shared-dynamic",
+  targetFormat: ModuleFormat = "cjs",
+): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const tBase = 1 + rng.integer(900_000);
+  const aBase = 1 + rng.integer(900_000);
+  const bBase = 1 + rng.integer(900_000);
+  if (variant === "shared-dynamic") {
+    const program: ProgramModel = {
+      modules: [
+        {
+          id: "dw-t",
+          format: targetFormat,
+          dependencies: [],
+          events: [{ module: "dw-t", phase: "evaluate", value: tBase }],
+        },
+        {
+          id: "dw-a",
+          format: "esm",
+          dependencies: [{ kind: "esm-dynamic-import", target: "dw-t", registration: "dw-r1" }],
+          events: [{ module: "dw-a", phase: "evaluate", value: aBase }],
+        },
+        {
+          id: "dw-b",
+          format: "esm",
+          dependencies: [{ kind: "esm-dynamic-import", target: "dw-t", registration: "dw-r2" }],
+          events: [{ module: "dw-b", phase: "evaluate", value: bBase }],
+        },
+      ],
+      entries: [
+        { name: "entry-dw-a", moduleId: "dw-a" },
+        { name: "entry-dw-b", moduleId: "dw-b" },
+      ],
+      schedule: [
+        { kind: "import-entry", entry: "entry-dw-a" },
+        { kind: "trigger-dynamic-import", registration: "dw-r1" },
+        { kind: "import-entry", entry: "entry-dw-b" },
+        { kind: "trigger-dynamic-import", registration: "dw-r2" },
+      ],
+      build: {
+        // The entriesAware merge co-locates the shared dynamic entry into one common chunk under its
+        // wrap-kind (verified by the campaign's chunk inspection).
+        chunking: {
+          kind: "organic",
+          groups: [
+            {
+              name: "dw-common",
+              test: "module-",
+              entriesAware: true,
+              entriesAwareMergeThreshold: 10_000,
+            },
+          ],
+        },
+        includeDependenciesRecursively: true,
+        preserveEntrySignatures: "allow-extension",
+        lazyBarrel: false,
+        strictExecutionOrder: true,
+      },
+    };
+    deepFreeze(program);
+    return { program, analyzed: analyzeProgram(program) };
+  }
+  if (variant === "identity-double-init") {
+    // ESM-only (objectExport is an ESM construct); the targetFormat argument is ignored for this variant.
+    const program: ProgramModel = {
+      modules: [
+        { id: "dw-t", format: "esm", dependencies: [], events: [], objectExport: true },
+        {
+          id: "dw-bar",
+          format: "esm",
+          dependencies: [{ kind: "esm-reexport-star", target: "dw-t" }],
+          events: [],
+        },
+        {
+          id: "dw-car",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "dw-t",
+              importedName: "vdw_t",
+              localName: "dwd1",
+              objectRef: true,
+            },
+            {
+              kind: "esm-value-import",
+              target: "dw-bar",
+              importedName: "vdw_t",
+              localName: "dwd2",
+              objectRef: true,
+            },
+          ],
+          events: [
+            {
+              module: "dw-car",
+              phase: "evaluate",
+              value: aBase,
+              identityCheck: { leftBinding: "dwd1", rightBinding: "dwd2" },
+            },
+          ],
+        },
+        {
+          id: "dw-ent",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-side-effect-import", target: "dw-car" },
+            { kind: "esm-dynamic-import", target: "dw-t", registration: "dw-r1" },
+          ],
+          events: [{ module: "dw-ent", phase: "evaluate", value: bBase }],
+        },
+      ],
+      entries: [{ name: "entry-dw-ent", moduleId: "dw-ent" }],
+      schedule: [
+        { kind: "import-entry", entry: "entry-dw-ent" },
+        { kind: "trigger-dynamic-import", registration: "dw-r1" },
+      ],
+      build: {
+        chunking: {
+          kind: "manual",
+          groups: [{ name: "dw-common", moduleIds: ["dw-car", "dw-bar", "dw-t"] }],
+        },
+        includeDependenciesRecursively: false,
+        preserveEntrySignatures: "allow-extension",
+        lazyBarrel: false,
+        strictExecutionOrder: true,
+      },
+    };
+    deepFreeze(program);
+    return { program, analyzed: analyzeProgram(program) };
+  }
+  // static-dynamic-merge: the target is shared static (a carrier folds its value) + dynamic (the entry
+  // triggers it), merged with the carrier by a manual group at idr:false.
+  const program: ProgramModel = {
+    modules: [
+      {
+        id: "dw-t",
+        format: targetFormat,
+        dependencies: [],
+        events: [{ module: "dw-t", phase: "evaluate", value: tBase }],
+      },
+      {
+        id: "dw-car",
+        format: "esm",
+        dependencies: [
+          { kind: "esm-value-import", target: "dw-t", importedName: "vdw_t", localName: "dwvt" },
+        ],
+        events: [
+          { module: "dw-car", phase: "evaluate", value: aBase, reads: [{ binding: "dwvt" }] },
+        ],
+      },
+      {
+        id: "dw-ent",
+        format: "esm",
+        dependencies: [
+          { kind: "esm-side-effect-import", target: "dw-car" },
+          { kind: "esm-dynamic-import", target: "dw-t", registration: "dw-r1" },
+        ],
+        events: [{ module: "dw-ent", phase: "evaluate", value: bBase }],
+      },
+    ],
+    entries: [{ name: "entry-dw-ent", moduleId: "dw-ent" }],
+    schedule: [
+      { kind: "import-entry", entry: "entry-dw-ent" },
+      { kind: "trigger-dynamic-import", registration: "dw-r1" },
+    ],
+    build: {
+      chunking: {
+        kind: "manual",
+        groups: [{ name: "dw-common", moduleIds: ["dw-car", "dw-t"] }],
+      },
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the directed dynamic-entry × wrap-kind × merge campaign (FW-B deliverable 2).
+/// Tagged `mechanism:dynamic-entry-wrap-kind-merge`. The seed varies only cosmetic fold values.
+export function generateDynamicWrapKindMergeCase(
+  seed: number,
+  variant: DynamicWrapKindVariant = "shared-dynamic",
+  targetFormat: ModuleFormat = "cjs",
+): GeneratedCase {
+  const { program, analyzed } = buildDynamicWrapKindMerge(
+    new SeededRng(seed),
+    variant,
+    targetFormat,
+  );
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
 /// has been wired — the mutable graph the random generator built, ready to be FROZEN. `finalizeProgram`
 /// is the single point that consumes it.
@@ -3390,6 +3626,37 @@ function hasOptimizerRuntimePlacementRecipe(analyzed: AnalyzedProgram): boolean 
   );
 }
 
+/// The dynamic-entry × wrap-kind × merge RECIPE predicate (FW-B deliverable 2, cluster 4 / T1): a
+/// chunk-splitting config that CO-LOCATES a dynamic-import target with other modules — a MANUAL group
+/// holding a dynamic target plus ≥1 other module, or an `entriesAware` ORGANIC group while the program
+/// carries a dynamic import. Both are the configs under which the optimizer inlines/merges the dynamic
+/// entry into a common or user chunk (the T1 cell). Purely structural; the campaign VERIFIES the actual
+/// merge by chunk inspection.
+function hasDynamicEntryColocationRecipe(analyzed: AnalyzedProgram): boolean {
+  const { program } = analyzed;
+  const chunking = programChunking(program);
+  if (chunking.kind === "automatic") {
+    return false;
+  }
+  const dynamicTargets = new Set(
+    program.modules.flatMap((module) =>
+      module.dependencies.flatMap((dependency) =>
+        dependency.kind === "esm-dynamic-import" ? [dependency.target] : [],
+      ),
+    ),
+  );
+  if (dynamicTargets.size === 0) {
+    return false;
+  }
+  if (chunking.kind === "manual") {
+    return chunking.groups.some(
+      (group) =>
+        group.moduleIds.length >= 2 && group.moduleIds.some((id) => dynamicTargets.has(id)),
+    );
+  }
+  return chunking.groups.some((group) => group.entriesAware === true);
+}
+
 export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[] {
   const tags = new Set<string>();
   // The consumer takes ONLY the AnalyzedProgram and reads the program from it (no separate program
@@ -3575,6 +3842,14 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   // cycle by inspecting the built chunk graph (`moduleIds`/`imports`) — "tag the recipe, verify the merge".
   if (hasOptimizerRuntimePlacementRecipe(analyzed)) {
     tags.add("mechanism:optimizer-runtime-placement-cycle");
+  }
+
+  // The dynamic-entry × wrap-kind × merge RECIPE (FW-B deliverable 2, cluster 4 / T1): a config that
+  // co-locates a dynamic-import target with other modules (a manual group or an entriesAware organic
+  // group), under which the optimizer inlines the dynamic entry into a common/user chunk. The campaign
+  // verifies the merge by chunk inspection.
+  if (hasDynamicEntryColocationRecipe(analyzed)) {
+    tags.add("mechanism:dynamic-entry-wrap-kind-merge");
   }
 
   const registrations = program.modules.flatMap((module) =>
