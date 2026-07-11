@@ -1163,6 +1163,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -1609,6 +1610,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -1735,6 +1737,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -1898,6 +1901,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -2605,6 +2609,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -2757,6 +2762,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -3091,6 +3097,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -3478,6 +3485,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -3617,6 +3625,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -4373,6 +4382,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -4814,6 +4824,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -4948,6 +4959,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -5228,6 +5240,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -5540,6 +5553,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -7393,6 +7407,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -7499,6 +7514,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -7874,6 +7890,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -8779,6 +8796,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -9399,6 +9417,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -9529,6 +9548,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -9915,6 +9935,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -9982,6 +10003,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -11946,6 +11968,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -13912,6 +13935,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -14062,6 +14086,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -14604,6 +14629,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -15159,6 +15185,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -16393,6 +16420,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -16905,6 +16933,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -17412,6 +17441,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -17694,6 +17724,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -18640,6 +18671,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -18959,6 +18991,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -19089,6 +19122,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -20304,6 +20338,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -20863,6 +20898,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -21284,6 +21320,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -21360,6 +21397,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -22218,6 +22256,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -22511,6 +22550,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -22663,6 +22703,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -23334,6 +23375,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -23393,6 +23435,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -23428,6 +23471,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -23631,6 +23675,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -23751,6 +23796,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -23940,6 +23986,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -24246,6 +24293,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -24746,6 +24794,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -24825,6 +24874,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -25011,6 +25061,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -25266,6 +25317,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -25506,6 +25558,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -25795,6 +25848,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -25870,6 +25924,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -25901,6 +25956,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -26393,6 +26449,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -26436,6 +26493,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -26832,6 +26890,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -26942,6 +27001,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -27076,6 +27136,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -27919,6 +27980,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -28184,6 +28246,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -28748,6 +28811,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -28779,6 +28843,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -29409,6 +29474,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -36399,6 +36465,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -36450,6 +36517,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -37138,6 +37206,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -37901,6 +37970,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
@@ -38353,6 +38423,7 @@
     "buildAxes": {
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
