@@ -1458,6 +1458,13 @@ function validateBuildConfig(program: ProgramModel, errors: string[]): void {
   if (typeof build.lazyBarrel !== "boolean") {
     errors.push("build.lazyBarrel: must be a boolean");
   }
+  // W12 minify axis: a plain rollable boolean with NO gate (unlike `cjs`, minify composes with TLA and
+  // every other axis). A persisted `build` predating W12 has no `minify` — tolerated (it resolves to
+  // `false` via `buildConfigOf`, the "old artifact still replays" rule). A PRESENT value must be boolean.
+  const minify: unknown = (build as { readonly minify?: unknown }).minify;
+  if (minify !== undefined && typeof minify !== "boolean") {
+    errors.push("build.minify: must be a boolean");
+  }
   // The chunking discriminant must be one of the three modes. An unknown `kind` (e.g. `{ kind: "bogus" }`)
   // otherwise falls through `programChunking` / the adapter switch to AUTOMATIC silently — a crafted or
   // shrunk model would build a different chunking than it names. Reject it here so the union stays sound.

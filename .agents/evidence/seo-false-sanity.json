@@ -1,8 +1,8 @@
 {
   "proof": "W14c seo:false sanity — the isolation oracle does not false-positive on relaxed order",
-  "generatedAt": "2026-07-11T02:01:59.102Z",
-  "head": "6dee5da52f7ded17d645154a10082b8f68ebd388",
-  "dirty": false,
+  "generatedAt": "2026-07-11T03:43:51.385Z",
+  "head": "74ce4de7392e931e8550d18868cd970b7042b665",
+  "dirty": true,
   "node": "v24.18.0",
   "casesRequested": 300,
   "kept": 300,
@@ -22,7 +22,7 @@
     "bundle-only-crash:[\"TypeError\",\"require_module_0009 is not a function\"]": 1,
     "bundle-only-crash:[\"TypeError\",\"require_module_0003 is not a function\"]": 1,
     "bundle-only-crash:[\"ReferenceError\",\"Cannot access '__orderExport0$2' before initialization\"]": 1,
-    "bundle-only-crash:[\"TypeError\",\"require_group_0.require_module_0001 is not a function\"]": 1,
+    "bundle-only-crash:[\"TypeError\",\"t.r is not a function\"]": 1,
     "bundle-only-crash:[\"Error\",\"Execution event value must be a primitive JSON value\"]": 1,
     "bundle-only-crash:[\"TypeError\",\"init_module_0002 is not a function\"]": 1,
     "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0013 is not a function\"]": 1

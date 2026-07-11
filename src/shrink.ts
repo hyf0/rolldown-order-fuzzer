@@ -257,6 +257,14 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
   if (build.lazyBarrel !== false) {
     yield { ...program, build: { ...build, lazyBarrel: false } };
   }
+  // W12: try the minify axis at its default (false), revealing whether minify is load-bearing. A
+  // minify-ONLY red (a divergence that only reproduces under mangling) rejects this candidate, so minify
+  // stays `true` in the shrunk artifact — the "shrink must reproduce with minify preserved" contract. A
+  // red that does not need minify flips to false, simplifying the artifact. (The whole `build` already
+  // rides along every candidate via `buildConfigOf`, so a preserved minify replays through the adapter.)
+  if (build.minify !== false) {
+    yield { ...program, build: { ...build, minify: false } };
+  }
   // Remove ANY single event (not just the last), including a module's SOLE event — an irrelevant event
   // on an otherwise load-bearing module could not be dropped before, so the case never minimized past it.
   for (const [moduleIndex, module] of program.modules.entries()) {

@@ -556,6 +556,15 @@ export type OutputFormat = "esm" | "cjs";
 ///   modest density in random-mixed (drawn LAST so no source-affecting roll shifts), gated OFF whenever
 ///   any module reaches top-level await (rolldown hard-refuses TLA under a `cjs` output). Source-neutral:
 ///   the SOURCE run is identical; only the bundle build + load path changes.
+/// - `minify` — `OutputOptions.minify` (W12; default `false`). The generator rolls `true` at a modest
+///   density in random-mixed, drawn LAST — after the output-format roll — so it too is RNG-neutral (the
+///   SOURCE run is byte-identical; only the bundle build changes). Minify mangles internal identifiers
+///   and drops whitespace, but the value/event channel is minify-invariant (event payloads are string /
+///   numeric LITERALS the mangler never touches). The one seam it opens is error-identity: a bundle that
+///   crashes throws with a MANGLED identifier (`t is not a function` vs the source's `x is not a
+///   function`), so the oracle normalizes identifier tokens in known error templates before comparing a
+///   minified bundle's error to the source's (`verdict.ts`). No gate (unlike `cjs`, minify composes with
+///   TLA and every other axis). See `.agents/docs/w12-minify-axis.md`.
 export interface BuildConfig {
   readonly chunking: Chunking;
   readonly includeDependenciesRecursively: boolean;
@@ -563,6 +572,7 @@ export interface BuildConfig {
   readonly lazyBarrel: boolean;
   readonly strictExecutionOrder: boolean;
   readonly outputFormat: OutputFormat;
+  readonly minify: boolean;
 }
 
 /// The build config a program with no persisted `build` (a legacy v16 artifact) resolves to, minus its
@@ -574,6 +584,7 @@ export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
   lazyBarrel: false,
   strictExecutionOrder: true,
   outputFormat: "esm",
+  minify: false,
 });
 
 /// The resolved `BuildConfig` of a program: its persisted `build` if present (schema 17), else derived
@@ -590,12 +601,20 @@ export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
 /// global per-group only when the roll asked).
 export function buildConfigOf(program: ProgramModel): BuildConfig {
   if (program.build !== undefined) {
-    // A persisted `build` predating the FW-A output-format axis (a schema-17 artifact) carries the five
-    // W14a/W14c fields but no `outputFormat`; default it to `esm` (the historical fixed value) so an old
-    // artifact still resolves and validates — the same "an old persisted artifact still replays" rule
-    // `packagesOf` / the v16 chunking fallback follow.
-    const persisted = program.build as BuildConfig & { readonly outputFormat?: OutputFormat };
-    return persisted.outputFormat === undefined ? { ...persisted, outputFormat: "esm" } : persisted;
+    // A persisted `build` predating a bundle-side axis carries the older fields but not the newer one;
+    // default each MISSING axis to its historical fixed value so an old artifact still resolves and
+    // validates — the same "an old persisted artifact still replays" rule `packagesOf` / the v16 chunking
+    // fallback follow. `outputFormat` (FW-A) defaults to `esm`; `minify` (W12) defaults to `false`. A
+    // present value (a real boolean / format) is preserved untouched.
+    const persisted = program.build as BuildConfig & {
+      readonly outputFormat?: OutputFormat;
+      readonly minify?: boolean;
+    };
+    return {
+      ...persisted,
+      outputFormat: persisted.outputFormat ?? "esm",
+      minify: persisted.minify ?? false,
+    };
   }
   const chunking = legacyChunking(program);
   return {

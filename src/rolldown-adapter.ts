@@ -55,17 +55,17 @@ const BUILD_CHILD_FINAL_CLOSE_GRACE_MS = 250;
 
 /// The fixed Rolldown build constants that are NOT per-case axes. `preserveEntrySignatures` and
 /// `strictExecutionOrder` moved out of here into the persisted `BuildConfig` (W14a); `format` and the
-/// entry/chunk file names moved out too (FW-A) — they now depend on the `outputFormat` axis, resolved by
-/// `outputFormatFileOptions` below. This constant holds the ESM baseline (the historical values) so the
-/// artifact-identity's `buildOptions` record stays shape-compatible; the adapter overrides `format` /
-/// `entryFileNames` / `chunkFileNames` per case from `buildConfigOf(program)`.
+/// entry/chunk file names moved out too (FW-A), and `minify` moved out (W12) — they now depend on the
+/// persisted axes, resolved by `outputFormatFileOptions` / `buildConfigOf(program).minify` below. This
+/// constant holds the ESM baseline (the historical values) so the artifact-identity's `buildOptions`
+/// record stays shape-compatible; the adapter overrides `format` / `entryFileNames` / `chunkFileNames`
+/// and `minify` per case from `buildConfigOf(program)`.
 export const ROLLDOWN_BUILD_OPTIONS = {
   format: "esm",
   entryFileNames: "entries/[name].js",
   chunkFileNames: "chunks/[name].js",
   assetFileNames: "assets/[name][extname]",
   cleanDir: false,
-  minify: false,
 } as const;
 
 /// The `format` + entry/chunk file names an output format builds with (FW-A). A `cjs` bundle emits
@@ -756,7 +756,9 @@ async function buildWithChild(
       strictExecutionOrder: build.strictExecutionOrder,
       assetFileNames: ROLLDOWN_BUILD_OPTIONS.assetFileNames,
       cleanDir: ROLLDOWN_BUILD_OPTIONS.cleanDir,
-      minify: ROLLDOWN_BUILD_OPTIONS.minify,
+      // W12: the minify axis comes from the persisted BuildConfig (default false); the SOURCE run is
+      // unaffected, so only the bundle build changes.
+      minify: build.minify,
     },
   };
   await writeFile(requestPath, `${JSON.stringify(request)}\n`);

@@ -1217,6 +1217,7 @@ describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
         lazyBarrel: false,
         strictExecutionOrder: true,
         outputFormat: "esm",
+        minify: false,
       },
     } satisfies ProgramModel;
     const analyzed = analyzeProgram(acyclicProbe);

@@ -1,7 +1,7 @@
 {
   "proof": "standing version-bracketed regression red-set (FW-C)",
-  "generatedAt": "2026-07-11T01:53:50.450Z",
-  "head": "6007c980cac0a5d5d9d2ff4132d3266c16ce9fda",
+  "generatedAt": "2026-07-11T03:42:35.529Z",
+  "head": "74ce4de7392e931e8550d18868cd970b7042b665",
   "dirty": true,
   "node": "v24.18.0",
   "manifestPath": "/Users/yunfeihe/Documents/github-opensource/.worktrees/order-fuzzer-ext/regression/index.json",

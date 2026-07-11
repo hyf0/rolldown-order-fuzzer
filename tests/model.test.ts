@@ -2125,15 +2125,37 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     lazyBarrel: true,
     strictExecutionOrder: true,
     outputFormat: "esm",
+    minify: false,
   };
 
   test("buildConfigOf returns the persisted build when present", () => {
     const program: ProgramModel = { ...baseModules(), build };
-    expect(buildConfigOf(program)).toBe(build);
+    // `buildConfigOf` NORMALIZES a persisted build (filling any missing FW-A/W12 axis with its default),
+    // so a fully-populated config comes back deep-EQUAL — not the same reference — to what was persisted.
+    expect(buildConfigOf(program)).toStrictEqual(build);
     expect(programChunking(program)).toEqual({
       kind: "manual",
       groups: [{ name: "g", moduleIds: ["leaf"] }],
     });
+  });
+
+  test("buildConfigOf defaults a pre-W12 persisted build's missing minify axis to false", () => {
+    // A persisted `build` predating the W12 minify axis (and the FW-A output-format axis) carries neither
+    // key; the reader defaults each to its historical fixed value so an old artifact still replays.
+    const legacyBuild = {
+      chunking: { kind: "automatic" },
+      includeDependenciesRecursively: true,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+    };
+    const program = {
+      ...baseModules(),
+      build: legacyBuild,
+    } as unknown as ProgramModel;
+    const resolved = buildConfigOf(program);
+    expect(resolved.minify).toBe(false);
+    expect(resolved.outputFormat).toBe("esm");
   });
 
   test("buildConfigOf derives a v16 program's config: legacy manual resolves IDR to false (W14a.1)", () => {

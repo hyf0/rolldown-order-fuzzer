@@ -86,7 +86,10 @@ export interface BuildChildRequest {
     readonly chunkFileNames: string;
     readonly assetFileNames: string;
     readonly cleanDir: false;
-    readonly minify: false;
+    /// W12 minify axis (`OutputOptions.minify`). `true` mangles internal identifiers + drops whitespace;
+    /// the value/event channel is minify-invariant, and the oracle normalizes error-message identifiers
+    /// so a minified crash's identity still compares. Passed straight to rolldown via `createOutputOptions`.
+    readonly minify: boolean;
   };
 }
 
@@ -218,13 +221,10 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     };
   });
   const output = requireRecord(request.output, "build output");
-  if (
-    (output.format !== "esm" && output.format !== "cjs") ||
-    output.cleanDir !== false ||
-    output.minify !== false
-  ) {
+  if ((output.format !== "esm" && output.format !== "cjs") || output.cleanDir !== false) {
     throw new TypeError("build output constants are invalid");
   }
+  const minify = requireBoolean(output.minify, "build output.minify");
   const strictExecutionOrder = requireBoolean(
     output.strictExecutionOrder,
     "build output.strictExecutionOrder",
@@ -250,7 +250,7 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
       chunkFileNames: requireNonEmptyString(output.chunkFileNames, "build output.chunkFileNames"),
       assetFileNames: requireNonEmptyString(output.assetFileNames, "build output.assetFileNames"),
       cleanDir: false,
-      minify: false,
+      minify,
     },
   };
 }

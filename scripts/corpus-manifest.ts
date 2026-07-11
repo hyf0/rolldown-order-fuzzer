@@ -109,6 +109,10 @@ interface CaseManifest {
     /// case's buildAxes is byte-identical to the pre-FW-A golden and the delta is self-explaining: a
     /// changed case either gained `outputFormat: "cjs"` (the format axis) or a package / new operation.
     readonly outputFormat?: "cjs";
+    /// W12 minify axis. Recorded ONLY when `true` (omitted for the `false` default), so an un-minified
+    /// case's buildAxes is byte-identical to the pre-W12 golden and the delta is self-explaining: a
+    /// changed case either gained `minify: true` (the minify axis) or a format / package / new operation.
+    readonly minify?: true;
   };
   /// The resolved packages (W14b) — present ONLY when the case carries any, so a package-free case's
   /// manifest entry is byte-identical to the pre-package golden AND the golden delta is
@@ -242,13 +246,14 @@ function unexplainedCodeSplitting(
 /// change is a package chunk group, and every in-place root-file change is a package specifier update
 /// or a new-operation file — so a codeSplitting/schedule/render drift the old feature-presence check
 /// would have waved through fails here.
-/// A case's buildAxes with the FW-A `outputFormat` key stripped, so the drift check compares only the
-/// four pre-FW-A axes. An `outputFormat` difference is the format axis (an allowed roll), not a drift.
-function buildAxesWithoutOutputFormat(caseManifest: CaseManifest): unknown {
+/// A case's buildAxes with the two LAST-DRAWN rolled axes (`outputFormat` FW-A, `minify` W12) stripped,
+/// so the drift check compares only the four pre-axis fields. An `outputFormat` / `minify` difference is
+/// an allowed roll drawn after the enrichment, not a pre-enrichment drift.
+function buildAxesWithoutRolledAxes(caseManifest: CaseManifest): unknown {
   if (caseManifest.buildAxes === undefined) {
     return undefined;
   }
-  const { outputFormat: _outputFormat, ...rest } = caseManifest.buildAxes;
+  const { outputFormat: _outputFormat, minify: _minify, ...rest } = caseManifest.buildAxes;
   return rest;
 }
 
@@ -260,17 +265,20 @@ function unexplainedChangeReasons(
   const reasons: string[] = [];
   // (1) The package enrichment is END-STAGE (drawn after the BuildConfig axes are rolled), so it can
   // never move includeDependenciesRecursively / lazyBarrel / preserveEntrySignatures /
-  // strictExecutionOrder. A buildAxes move is a real drift, not a package effect. EXCEPT the FW-A
-  // output-format axis, drawn LAST: an esm case has no `outputFormat` key, a cjs case gains
-  // `outputFormat: "cjs"` — an allowed axis roll. So compare the buildAxes with `outputFormat` STRIPPED;
-  // only a difference in the OTHER four axes is a real drift.
+  // strictExecutionOrder. A buildAxes move is a real drift, not a package effect. EXCEPT the two
+  // LAST-DRAWN axes: the FW-A output-format axis and the W12 minify axis. An esm case has no
+  // `outputFormat` key, a cjs case gains `outputFormat: "cjs"`; an un-minified case has no `minify` key,
+  // a minified case gains `minify: true` — both allowed axis rolls. So compare the buildAxes with BOTH
+  // STRIPPED; only a difference in the OTHER four axes is a real drift.
   if (
-    canonicalJson(buildAxesWithoutOutputFormat(before)) !==
-    canonicalJson(buildAxesWithoutOutputFormat(after))
+    canonicalJson(buildAxesWithoutRolledAxes(before)) !==
+    canonicalJson(buildAxesWithoutRolledAxes(after))
   ) {
     reasons.push("buildAxes drifted (the end-stage enrichment cannot move a pre-enrichment axis)");
   }
   const outputFormatChanged = before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat;
+  const minifyChanged = before.buildAxes?.minify !== after.buildAxes?.minify;
+  const rolledAxisChanged = outputFormatChanged || minifyChanged;
   const membership = program === undefined ? undefined : packageMembershipOf(program);
   const memberIds = new Set(membership?.keys() ?? []);
   // (2) A codeSplitting change must be ONLY appended package chunk groups.
@@ -284,20 +292,20 @@ function unexplainedChangeReasons(
       reasons.push(codeSplitReason);
     }
   }
-  // (3) The case must actually carry a W14b feature (packages or a new operation) OR have changed by the
-  // FW-A output-format axis alone — otherwise a moved package-free, new-op-free, format-unchanged case is
-  // an unexplained regression. A format-only change (a cjs roll, no source-byte / package effect) is
-  // fully accounted for: the source render is format-neutral, so a cjs case's files are byte-identical
-  // and only its buildAxes gained `outputFormat: "cjs"`.
+  // (3) The case must actually carry a W14b feature (packages or a new operation) OR have changed by a
+  // last-drawn axis roll (output-format or minify) alone — otherwise a moved package-free, new-op-free,
+  // axis-unchanged case is an unexplained regression. An axis-only change (a cjs and/or minify roll, no
+  // source-byte / package effect) is fully accounted for: both axes are bundle-side, so the source render
+  // is unchanged and only the buildAxes gained `outputFormat: "cjs"` and/or `minify: true`.
   const carriesPackages = (after.packages?.length ?? 0) > 0;
   const newOp = program !== undefined && carriesNewOperation(program);
-  if (!carriesPackages && !newOp && !outputFormatChanged) {
-    reasons.push("changed without packages, a new operation, or an output-format roll");
+  if (!carriesPackages && !newOp && !rolledAxisChanged) {
+    reasons.push("changed without packages, a new operation, or an output-format/minify roll");
     return reasons;
   }
   if (!carriesPackages && !newOp) {
-    // A format-only change: no packages, no new op, only the output-format axis moved. The source bytes
-    // must therefore be byte-identical (the format axis never touches the rendered source) — a file /
+    // An axis-only change: no packages, no new op, only the output-format and/or minify axis moved. The
+    // source bytes must therefore be byte-identical (neither axis touches the rendered source) — a file /
     // codeSplitting / schedule change with no package or new-op cause would still fall through to the
     // per-file checks below and be flagged.
     for (const beforeFile of before.files) {
@@ -306,7 +314,7 @@ function unexplainedChangeReasons(
       );
       if (afterHash !== undefined && afterHash !== beforeFile.sha256) {
         reasons.push(
-          `output-format-only change altered source file ${beforeFile.path} (the format axis must not touch rendered source)`,
+          `axis-only change altered source file ${beforeFile.path} (the output-format/minify axes must not touch rendered source)`,
         );
       }
     }
@@ -432,6 +440,8 @@ function renderCase(
         strictExecutionOrder: build.strictExecutionOrder,
         // FW-A: only a cjs case records outputFormat, so esm cases stay byte-identical to the old golden.
         ...(build.outputFormat === "cjs" ? { outputFormat: "cjs" as const } : {}),
+        // W12: only a minified case records minify, so un-minified cases stay byte-identical.
+        ...(build.minify ? { minify: true as const } : {}),
       },
       ...(packages.length > 0
         ? {
@@ -655,7 +665,7 @@ function main(argv: readonly string[]): number {
     let unchanged = 0;
     let changedWithPackages = 0;
     let changedNewOpOnly = 0;
-    let changedFormatOnly = 0;
+    let changedAxisOnly = 0;
     const unexplained: string[] = [];
     for (const [key, before] of baselineByKey) {
       const after = currentByKey.get(key);
@@ -673,13 +683,16 @@ function main(argv: readonly string[]): number {
         unexplained.push(`${key}: ${reasons.join("; ")}`);
         continue;
       }
-      // FW-A: a case whose ONLY change is a cjs output-format roll (no packages, no new operation, so its
-      // source files are byte-identical) is a distinct explained category.
-      const outputFormatChanged = before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat;
+      // A case whose ONLY change is a last-drawn axis roll (FW-A output-format and/or W12 minify — no
+      // packages, no new operation, so its source files are byte-identical) is a distinct explained
+      // category.
+      const rolledAxisChanged =
+        before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat ||
+        before.buildAxes?.minify !== after.buildAxes?.minify;
       if ((after.packages?.length ?? 0) > 0) {
         changedWithPackages += 1;
-      } else if (outputFormatChanged && !(program !== undefined && carriesNewOperation(program))) {
-        changedFormatOnly += 1;
+      } else if (rolledAxisChanged && !(program !== undefined && carriesNewOperation(program))) {
+        changedAxisOnly += 1;
       } else {
         changedNewOpOnly += 1;
       }
@@ -692,13 +705,13 @@ function main(argv: readonly string[]): number {
     // "package-free" = the cases carrying NO packages: the byte-identical ones plus the new-op-only
     // changes. (The old wording called the byte-identical count "the package-free corpus", which
     // under-counts by the new-op-only cases.)
-    const packageFree = unchanged + changedNewOpOnly + changedFormatOnly;
+    const packageFree = unchanged + changedNewOpOnly + changedAxisOnly;
     process.stdout.write(
       `explain-delta: ${baselineByKey.size} baseline cases — ${unchanged} byte-identical, ` +
         `${changedWithPackages} changed with packages, ${changedNewOpOnly} changed by a new operation only, ` +
-        `${changedFormatOnly} changed by the output-format axis only, ` +
+        `${changedAxisOnly} changed by an output-format/minify axis roll only, ` +
         `${unexplained.length} unexplained ` +
-        `(${packageFree} package-free = ${unchanged} unchanged + ${changedNewOpOnly} new-op + ${changedFormatOnly} format-only)\n`,
+        `(${packageFree} package-free = ${unchanged} unchanged + ${changedNewOpOnly} new-op + ${changedAxisOnly} axis-only)\n`,
     );
     for (const line of unexplained.slice(0, 40)) {
       process.stderr.write(`UNEXPLAINED: ${line}\n`);

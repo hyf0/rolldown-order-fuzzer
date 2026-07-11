@@ -412,6 +412,9 @@ interface FailureArtifactIdentity {
       // names and the `cjs` `format` are derived from it — the ESM-baseline `ROLLDOWN_BUILD_OPTIONS`
       // strings above are cosmetic once this is recorded).
       readonly outputFormat: BuildConfig["outputFormat"];
+      // W12: the minify axis, so a minified case dedups distinctly from its un-minified twin (identical
+      // source, different bundle bytes → a distinct failure artifact).
+      readonly minify: BuildConfig["minify"];
       readonly codeSplitting:
         | true
         | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> }
@@ -472,6 +475,7 @@ function createFailureArtifactIdentity(
       includeDependenciesRecursively: buildConfig.includeDependenciesRecursively,
       lazyBarrel: buildConfig.lazyBarrel,
       outputFormat: buildConfig.outputFormat,
+      minify: buildConfig.minify,
       codeSplitting: effectiveCodeSplitting(result.generated.program),
     },
     sourceOutcome: result.sourceOutcome,

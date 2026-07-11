@@ -77,6 +77,14 @@ const MAX_RANDOM_MODULES = 48;
 /// never perturbs the source render (see `finalizeProgram`).
 const CJS_OUTPUT_DENOMINATOR = 5;
 
+/// W12: the reciprocal density at which random-mixed rolls `minify: true` (`1/N`). `4` = 25% of cases
+/// build minified. Drawn LAST — after the output-format roll — so it is RNG-neutral (nothing draws after
+/// it, so forcing it off regenerates the pre-W12 golden byte-for-byte). Independent of the output format
+/// (minify has no TLA gate), so ~1/20 of cases are the minify×cjs composition that stresses the
+/// self-rebinding wrapper under the CJS render arm. Meaningful coverage of the whole mangling pass
+/// (identifier renames, whitespace/sequencing) without letting minified cases dominate the corpus.
+const MINIFY_DENOMINATOR = 4;
+
 /// Sample a per-case generation size from a weighted small/medium/large spread. A campaign that does
 /// not pin `--case-size` draws one of these per case (seeded by the case seed) so a single run covers
 /// every scale — small graphs for density and large ones for intra-chunk placement. Deterministic:
@@ -858,6 +866,7 @@ export function buildCrossChunkInitCycle(rng: SeededRng): {
       lazyBarrel: false,
       strictExecutionOrder: true,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -998,6 +1007,7 @@ export function buildFamilyBEagerBarrel(
       lazyBarrel: options.lazyBarrel ?? false,
       strictExecutionOrder: true,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -1091,6 +1101,7 @@ export function buildCrossEntryLeakCase(rng: SeededRng): {
       // The whole point: the leak exists ONLY at seo:false (seo:true is the #9997-fixed control).
       strictExecutionOrder: false,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -1193,6 +1204,7 @@ export function buildStaticCrossEntryLeak(rng: SeededRng): {
       lazyBarrel: false,
       strictExecutionOrder: false,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -1334,6 +1346,7 @@ export function buildOptimizerCycle(
       lazyBarrel: false,
       strictExecutionOrder: true,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -1386,6 +1399,7 @@ export function buildCjsOutputWitness(
     lazyBarrel: false,
     strictExecutionOrder: true,
     outputFormat: "cjs",
+    minify: false,
   };
 
   if (variant === "object-identity") {
@@ -1629,6 +1643,7 @@ export function buildTranspiledCjsInterop(rng: SeededRng): {
       lazyBarrel: false,
       strictExecutionOrder: true,
       outputFormat: "cjs",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -1741,6 +1756,7 @@ export function buildDynamicWrapKindMerge(
         lazyBarrel: false,
         strictExecutionOrder: true,
         outputFormat: "esm",
+        minify: false,
       },
     };
     deepFreeze(program);
@@ -1810,6 +1826,7 @@ export function buildDynamicWrapKindMerge(
         lazyBarrel: false,
         strictExecutionOrder: true,
         outputFormat: "esm",
+        minify: false,
       },
     };
     deepFreeze(program);
@@ -1860,6 +1877,7 @@ export function buildDynamicWrapKindMerge(
       lazyBarrel: false,
       strictExecutionOrder: true,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -1969,6 +1987,7 @@ export function buildExoticImportReads(rng: SeededRng): {
       lazyBarrel: false,
       strictExecutionOrder: true,
       outputFormat: "esm",
+      minify: false,
     },
   };
   deepFreeze(program);
@@ -2213,6 +2232,13 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
   const outputFormatRoll = rng.integer(CJS_OUTPUT_DENOMINATOR);
   const anyTopLevelAwait = enriched.modules.some((module) => module.hasTopLevelAwait === true);
   const outputFormat: OutputFormat = outputFormatRoll === 0 && !anyTopLevelAwait ? "cjs" : "esm";
+  // W12 minify axis, drawn LAST — after the output-format roll AND every source-affecting/enrichment roll.
+  // Nothing draws after it, so it is RNG-neutral: a case's rendered SOURCE bytes and its output-format
+  // value are unchanged from the pre-W12 corpus, and forcing the draw off (always false) regenerates the
+  // pre-W12 golden byte-for-byte. Rolled at `1/MINIFY_DENOMINATOR` with NO gate (minify composes with
+  // every axis, TLA included), so a minify×cjs case exercises the self-rebinding wrapper under the CJS
+  // render arm continuously.
+  const minify = rng.integer(MINIFY_DENOMINATOR) === 0;
   // A cross-entry cell (seo:false + bias) OVERRIDES the rolled chunking with a single entriesAware
   // co-locating group over every module — the #9998 config, which at seo:false runs one entry's
   // top-level when a disjoint-reachability entry loads. Only fires under the opt-in option, so it never
@@ -2238,6 +2264,7 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     lazyBarrel,
     strictExecutionOrder,
     outputFormat,
+    minify,
   };
 
   const program: ProgramModel = {
@@ -4394,6 +4421,9 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   // FW-A output-format axis: `cjs` reaches the whole CommonJS render arm (live getters, `__toCommonJS`,
   // the self-rebinding-wrapper defense) the ESM-output pin kept unreachable.
   tags.add(`axis:output-format:${build.outputFormat}`);
+  // W12 minify axis: `true` mangles internal identifiers and drops whitespace (the prod-build default),
+  // reaching the minify-only order-bug surface — a density scan sees both settings.
+  tags.add(`axis:minify:${String(build.minify)}`);
   // The #9998 cross-entry-leak structural signature (W14c): a seo:false program with a codeSplitting
   // group whose reach spans DISJOINT entry-reachability sets — the config that runs one entry's
   // top-level when a disjoint entry loads, caught by the reachability-isolation oracle.

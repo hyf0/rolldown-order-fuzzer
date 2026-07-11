@@ -393,6 +393,7 @@ describe("withRolldownBuild", () => {
         lazyBarrel: true,
         strictExecutionOrder: true,
         outputFormat: "esm",
+        minify: false,
       },
     };
     try {

@@ -32,6 +32,10 @@ export interface EmitConfig {
   /// groups; `outputFormat` / `strictExecutionOrder` match the app's build (default esm / true).
   readonly outputFormat: "esm" | "cjs";
   readonly strictExecutionOrder: boolean;
+  /// W12 minify axis. Defaults FALSE — the transplant keeps its output readable (and avoids a mangling
+  /// pass it does not need), matching the extract-wrapper convention; a caller may flip it to reproduce a
+  /// minify-only real-app bug.
+  readonly minify: boolean;
   /// Emit a `build.chunking` organic approximation of the real chunks (default true). Off -> automatic.
   readonly organicChunking: boolean;
   /// Render real re-export edges (star / named / namespace) instead of side-effect imports. Used by the
@@ -50,6 +54,7 @@ export const DEFAULT_EMIT_CONFIG: EmitConfig = {
   strictExecutionOrder: true,
   organicChunking: true,
   faithfulReexports: false,
+  minify: false,
 };
 
 /// A metadata-pure package member must be ESM, emit NO events, and carry only value-only ESM deps
@@ -201,6 +206,7 @@ export function emitModel(
     lazyBarrel: false,
     strictExecutionOrder: config.strictExecutionOrder,
     outputFormat: config.outputFormat,
+    minify: config.minify,
   };
 
   const program: ProgramModel = {

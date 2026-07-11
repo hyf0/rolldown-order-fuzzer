@@ -56,10 +56,59 @@ export type EventComparator = (
   actual: readonly ExecutionEvent[],
 ) => PassingVerdict | MismatchVerdict;
 
+/// How a source crash's identity is compared to a bundle crash's (the `source=error && bundle=error`
+/// branch — the ONE place error identity is a false-negative-vs-false-positive decision). The DEFAULT
+/// (`errorsEqual`) is EXACT and is what a minify:false case uses — behavior UNCHANGED. A minify:true case
+/// swaps in the minify-aware comparator (`makeMinifyErrorComparator`), which normalizes identifier tokens
+/// in known error templates on BOTH sides before comparing, so a legal identifier RENAME (`x is not a
+/// function` in the un-minified source vs `t is not a function` in the minified bundle) does not
+/// false-positive as `error-mismatch`. This is the ONE seam the minify policy plugs into, derived from the
+/// persisted `BuildConfig` in `program-run.ts` so campaign / replay / shrink / identity all inherit it. The
+/// error NAME and the message TEMPLATE (everything but the identifier) stay the discriminator. See
+/// `.agents/docs/w12-minify-axis.md`.
+export type ErrorComparator = (source: NormalizedError, bundle: NormalizedError) => boolean;
+
+/// The error templates whose LEADING identifier-expression a minifier renames — the empirically-observed
+/// (W12 legality gate) divergence class minify introduces in the error channel. Each pattern matches a
+/// runtime error a mis-ordered / broken build throws; a match collapses to its `canonical` form, replacing
+/// the mangled identifier with `<id>`. NOTHING ELSE is touched: a message with no renamed identifier (a
+/// NaN-fold reject `Execution event value must be a primitive JSON value`, a `Cannot read properties of
+/// undefined (reading 'foo')` whose property name minify never mangles) does not match any template and
+/// passes through UNCHANGED, keeping its discriminator. So the normalizer only ever loosens the exact
+/// identifier a legal rename moved, never the template or a property name.
+const MINIFY_ERROR_TEMPLATES: readonly (readonly [RegExp, string])[] = [
+  [/^.+ is not a function$/, "<id> is not a function"],
+  [/^.+ is not a constructor$/, "<id> is not a constructor"],
+  [/^.+ is not defined$/, "<id> is not defined"],
+  [/^.+ is not iterable$/, "<id> is not iterable"],
+  [/^Cannot access '.+' before initialization$/, "Cannot access '<id>' before initialization"],
+];
+
+/// Collapse a minified crash message to its identifier-free template form, or return it unchanged when it
+/// carries no renamable identifier. Exported for the minify-axis tests + the legality-gate evidence.
+export function normalizeMinifiedErrorMessage(message: string): string {
+  for (const [pattern, canonical] of MINIFY_ERROR_TEMPLATES) {
+    if (pattern.test(message)) {
+      return canonical;
+    }
+  }
+  return message;
+}
+
+/// The minify-aware error comparator: the error NAME must match EXACTLY (minify never renames an error
+/// constructor), and the messages must match after identifier-template normalization on BOTH sides. Used
+/// only for a minify:true case; a minify:false case keeps the exact `errorsEqual`.
+export function makeMinifyErrorComparator(): ErrorComparator {
+  return (source, bundle) =>
+    source.name === bundle.name &&
+    normalizeMinifiedErrorMessage(source.message) === normalizeMinifiedErrorMessage(bundle.message);
+}
+
 export function classifyVerdict(
   source: ExecutionOutcome,
   bundle: ExecutionOutcome,
   compareEventsFn: EventComparator = compareEvents,
+  errorsEqualFn: ErrorComparator = errorsEqual,
 ): Verdict {
   if (source.status === "harness-error") {
     return invalidHarness("source-harness-error", "source", source.error);
@@ -89,7 +138,7 @@ export function classifyVerdict(
         `source-crash-suppressed:${serializeError(source.error)}`,
       );
     }
-    if (!errorsEqual(source.error, bundle.error)) {
+    if (!errorsEqualFn(source.error, bundle.error)) {
       return mismatch(
         "error-mismatch",
         `error-mismatch:source=${serializeError(source.error)}:bundle=${serializeError(bundle.error)}`,

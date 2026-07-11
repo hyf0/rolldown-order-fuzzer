@@ -1,7 +1,39 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import type { ExecutionEvent, ExecutionOutcome, NormalizedError } from "../src/protocol.ts";
-import { classifyVerdict } from "../src/verdict.ts";
+import {
+  classifyVerdict,
+  makeMinifyErrorComparator,
+  normalizeMinifiedErrorMessage,
+} from "../src/verdict.ts";
+
+describe("normalizeMinifiedErrorMessage (W12 minify error normalizer)", () => {
+  test("collapses the leading identifier of each known runtime-error template to <id>", () => {
+    expect(normalizeMinifiedErrorMessage("t is not a function")).toBe("<id> is not a function");
+    expect(normalizeMinifiedErrorMessage("init_module_0003 is not a function")).toBe(
+      "<id> is not a function",
+    );
+    expect(normalizeMinifiedErrorMessage("Foo is not a constructor")).toBe(
+      "<id> is not a constructor",
+    );
+    expect(normalizeMinifiedErrorMessage("n is not defined")).toBe("<id> is not defined");
+    expect(normalizeMinifiedErrorMessage("x is not iterable")).toBe("<id> is not iterable");
+    expect(normalizeMinifiedErrorMessage("Cannot access 'q' before initialization")).toBe(
+      "Cannot access '<id>' before initialization",
+    );
+  });
+
+  test("leaves a message with NO renamable identifier untouched (keeps its discriminator)", () => {
+    // A NaN-fold reject and a property-read crash carry no mangled identifier — the property name is a
+    // stable discriminator minify never touches, so the normalizer must not collapse it.
+    expect(
+      normalizeMinifiedErrorMessage("Execution event value must be a primitive JSON value"),
+    ).toBe("Execution event value must be a primitive JSON value");
+    expect(
+      normalizeMinifiedErrorMessage("Cannot read properties of undefined (reading 'muiName')"),
+    ).toBe("Cannot read properties of undefined (reading 'muiName')");
+  });
+});
 
 describe("classifyVerdict", () => {
   test("passes matching successful outcomes", () => {
@@ -111,6 +143,50 @@ describe("classifyVerdict", () => {
       reason: "error-mismatch",
       signature:
         'error-mismatch:source=["TypeError","source failed"]:bundle=["ReferenceError","bundle failed"]',
+    });
+  });
+
+  test("W12: the minify error comparator normalizes a renamed identifier so a legal rename passes", () => {
+    // Both sides crash with the SAME template and identical preceding events; only the identifier differs
+    // (the un-minified source's `x` vs the minified bundle's `t`). Under the EXACT comparator (minify:false)
+    // this is a false-positive `error-mismatch`; under the minify comparator it is the correct PASS.
+    const source = error(typeError("x is not a function"), [event("m0", 1)]);
+    const bundle = error(typeError("t is not a function"), [event("m0", 1)]);
+    expect(classifyVerdict(source, bundle).kind).toBe("mismatch");
+    expect(classifyVerdict(source, bundle, undefined, makeMinifyErrorComparator())).toEqual({
+      kind: "pass",
+      signature: "pass",
+    });
+  });
+
+  test("W12: the minify comparator still catches a genuinely different error (name / template)", () => {
+    const source = error(typeError("x is not a function"), [event("m0", 1)]);
+    // Different NAME — a real divergence minify never causes — must still red.
+    expect(
+      classifyVerdict(
+        source,
+        error({ name: "ReferenceError", message: "t is not defined" }, [event("m0", 1)]),
+        undefined,
+        makeMinifyErrorComparator(),
+      ),
+    ).toMatchObject({ kind: "mismatch", reason: "error-mismatch" });
+    // Same name, DIFFERENT template — also still red.
+    expect(
+      classifyVerdict(
+        source,
+        error(typeError("t is not a constructor"), [event("m0", 1)]),
+        undefined,
+        makeMinifyErrorComparator(),
+      ),
+    ).toMatchObject({ kind: "mismatch", reason: "error-mismatch" });
+  });
+
+  test("W12: the minify comparator does not weaken the events comparison after equal errors", () => {
+    // Errors match modulo rename, but the events diverge — the event mismatch must still surface.
+    const source = error(typeError("x is not a function"), [event("m0", 1), event("m1", 2)]);
+    const bundle = error(typeError("t is not a function"), [event("m0", 1), event("m1", 9)]);
+    expect(classifyVerdict(source, bundle, undefined, makeMinifyErrorComparator())).toMatchObject({
+      kind: "mismatch",
     });
   });
 

@@ -1,0 +1,21 @@
+{
+  "proof": "W12 minify-sanity — ordinary shapes minify:true vs the fixed final snapshot",
+  "generatedAt": "2026-07-11T03:43:49.325Z",
+  "head": "74ce4de7392e931e8550d18868cd970b7042b665",
+  "dirty": true,
+  "node": "v24.18.0",
+  "cases": 300,
+  "snapshot": {
+    "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+    "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+  },
+  "minifiedGreen": 299,
+  "minifiedRed": 1,
+  "preexistingRed": 1,
+  "introducedCount": 0,
+  "introduced": [],
+  "signatureHistogram": {
+    "events-reordered:source=[[\"m7\",\"evaluate\",582512],[\"@schedule\",0,\"entry\"],[\"m4\",\"evaluate\",512711],[\"m5\",\"evaluate\",605429],[\"m5\",\"evaluate-1\",374110],[\"m6\",\"evaluate\",322375],[\"m1\",\"evaluate\",457311],[\"m0\",\"evaluate\",813565],[\"m0\",\"evaluate-1\",900961]]": 1
+  },
+  "accepted": true
+}

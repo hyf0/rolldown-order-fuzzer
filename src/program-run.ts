@@ -29,7 +29,13 @@ import {
   type FailedRolldownAdapterResult,
   type ObservedRuntimeIdentity,
 } from "./rolldown-adapter.ts";
-import { classifyVerdict, type EventComparator, type Verdict } from "./verdict.ts";
+import {
+  classifyVerdict,
+  makeMinifyErrorComparator,
+  type ErrorComparator,
+  type EventComparator,
+  type Verdict,
+} from "./verdict.ts";
 
 const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
   /(?:file:\/\/\/|(?:[A-Za-z]:)?[\\/])(?:[^\s"'`]*[\\/])?rolldown-order-fuzzer-[A-Za-z0-9]{6}/g;
@@ -175,13 +181,21 @@ export async function executeProgram(
       "executeProgram: the supplied analysis is for a different program than the one being run",
     );
   }
-  // The ORDER ORACLE, derived ONCE from the persisted BuildConfig: a `seo:false` case uses the
-  // reachability-isolation oracle (a relaxed-order case never uses the full-order oracle, which would
-  // false-positive on legal reorderings); a `seo:true` case uses the default full-order comparison.
+  // The two oracle seams, derived ONCE from the persisted BuildConfig:
+  //  - the ORDER ORACLE: a `seo:false` case uses the reachability-isolation oracle (a relaxed-order case
+  //    never uses the full-order oracle, which would false-positive on legal reorderings); a `seo:true`
+  //    case uses the default full-order comparison.
+  //  - the ERROR COMPARATOR (W12): a `minify:true` case uses the minify-aware comparator (which normalizes
+  //    identifier tokens in known crash templates, so a legal identifier rename does not false-positive as
+  //    `error-mismatch`); a `minify:false` case uses the exact `errorsEqual` (behavior UNCHANGED).
+  const buildConfig = buildConfigOf(program);
   const orderOracle: EventComparator | undefined =
-    buildConfigOf(program).strictExecutionOrder === false
+    buildConfig.strictExecutionOrder === false
       ? makeReachabilityIsolationOracle(analysis)
       : undefined;
+  const errorComparator: ErrorComparator | undefined = buildConfig.minify
+    ? makeMinifyErrorComparator()
+    : undefined;
   const rendered = renderProgram(analysis);
   const sourceOutcome = await dependencies.executeSource(rendered);
   if (sourceOutcome.status === "timeout" || sourceOutcome.status === "harness-error") {
@@ -197,7 +211,7 @@ export async function executeProgram(
       bundleManifest: null,
       bundleFiles: [],
       runtimeIdentity,
-      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome, orderOracle),
+      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome, orderOracle, errorComparator),
     };
   }
 
@@ -218,7 +232,7 @@ export async function executeProgram(
       bundleManifest: built.bundleManifest,
       bundleFiles: built.bundleFiles,
       runtimeIdentity,
-      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome, orderOracle),
+      verdict: classifyCampaignVerdict(sourceOutcome, bundleOutcome, orderOracle, errorComparator),
     };
   }
 
@@ -232,7 +246,12 @@ export async function executeProgram(
     bundleManifest: built.value.bundleManifest,
     bundleFiles: built.value.bundleFiles,
     runtimeIdentity,
-    verdict: classifyCampaignVerdict(sourceOutcome, built.value.bundleOutcome, orderOracle),
+    verdict: classifyCampaignVerdict(
+      sourceOutcome,
+      built.value.bundleOutcome,
+      orderOracle,
+      errorComparator,
+    ),
   };
 }
 
@@ -254,13 +273,15 @@ export async function executeGeneratedCase(
 
 /// Classify a campaign verdict. `compareEventsFn` is the ORDER ORACLE — omitted (full-order) for a
 /// `seo:true` case, and the reachability-isolation comparator for a `seo:false` case (derived from the
-/// persisted `BuildConfig`, so every caller that passes it uses the SAME policy). Crash / error /
-/// build-failure classification is order-independent and unchanged; only the event-sequence comparison
-/// swaps.
+/// persisted `BuildConfig`, so every caller that passes it uses the SAME policy). `errorsEqualFn` is the
+/// ERROR COMPARATOR (W12) — omitted (exact) for a `minify:false` case, the minify-aware comparator for a
+/// `minify:true` case. Crash / build-failure classification is otherwise order-independent and unchanged;
+/// only the event-sequence comparison and the source-vs-bundle crash-identity comparison swap.
 export function classifyCampaignVerdict(
   sourceOutcome: ExecutionOutcome,
   bundleOutcome: CampaignBundleOutcome,
   compareEventsFn?: EventComparator,
+  errorsEqualFn?: ErrorComparator,
 ): CampaignVerdict {
   if (sourceOutcome.status === "harness-error" || sourceOutcome.status === "timeout") {
     return classifyVerdict(
@@ -271,10 +292,11 @@ export function classifyCampaignVerdict(
         events: [],
       },
       compareEventsFn,
+      errorsEqualFn,
     );
   }
   if (bundleOutcome.status !== "not-run") {
-    return classifyVerdict(sourceOutcome, bundleOutcome, compareEventsFn);
+    return classifyVerdict(sourceOutcome, bundleOutcome, compareEventsFn, errorsEqualFn);
   }
   if (bundleOutcome.reason === "adapter-failure") {
     return buildFailureVerdict(bundleOutcome.adapterFailure);

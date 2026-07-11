@@ -1,7 +1,7 @@
 {
   "proof": "W14c 6-cell seo:true reacceptance vs the frozen buggy snapshot",
-  "generatedAt": "2026-07-11T02:09:30.829Z",
-  "head": "78fbed4100aa2a8a46209a0a0c4a809df04b6b89",
+  "generatedAt": "2026-07-11T03:52:13.021Z",
+  "head": "74ce4de7392e931e8550d18868cd970b7042b665",
   "dirty": true,
   "node": "v24.18.0",
   "casesPerCell": 300,
@@ -29,7 +29,7 @@
         "events-reordered:source=[[\"psib19\",\"evaluate\",356875],[\"psib19\",\"evaluate-1\",671647],[\"pconsA19\",\"evaluate\",1435545],[\"pconsA19\",\"evaluate-1\",506822],[\"@schedule\",15,\"entry\"],[\"coscA24\",\"evaluate\",1658579],[\"@schedule\",16,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib9\",\"evaluate\",254489],[\"pconsA9\",\"evaluate\",131657],[\"pconsA9\",\"evaluate-1\",1282417],[\"@schedule\",0,\"entry\"],[\"cos15\",\"evaluate\",253083],[\"cossib15\",\"evaluate\",581015],[\"cossib15\",\"evaluate-1\",20263],[\"coscB15\",\"evaluate\",804215],[\"@schedule\",1,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1,
-        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0021 is not a function\"]": 1,
+        "bundle-only-crash:[\"TypeError\",\"n.c is not a function\"]": 1,
         "events-reordered:source=[[\"objcA29\",\"evaluate\",573226],[\"@schedule\",0,\"entry\"],[\"objcB29\",\"evaluate\",269779],[\"@schedule\",1,\"entry\"],[\"m26\",\"evaluate\",688874],[\"m25\",\"evaluate\",736472],[\"m19\",\"evaluate\",1574826],[\"m19\",\"evaluate-1\",865877],[\"m13\",\"evaluate\",348390],[\"m16\",\"evaluate\",942507],[\"m16\",\"evaluate-1\",757086],[\"m24\",\"evaluate\",643988],[\"m18\",\"evaluate\",157414],[\"m2\",\"evaluate\",418750],[\"m2\",\"evaluate-1\",1214089],[\"m10\",\"evaluate\",259815],[\"m10\",\"evaluate-1\",318789],[\"m11\",\"evaluate\",807664],[\"m11\",\"evaluate-1\",828988],[\"m7\",\"evaluate\",313827],[\"m7\",\"evaluate-1\",51055],[\"m12\",\"evaluate\",752283],[\"m14\",\"evaluate\",324825],[\"m8\",\"evaluate\",1269246],[\"m8\",\"evaluate-1\",723809],[\"m22\",\"evaluate\",1355435],[\"m15\",\"evaluate\",621978],[\"m15\",\"evaluate-1\",626136],[\"m5\",\"evaluate\",2105895],[\"m21\",\"evaluate\",1458461],[\"m6\",\"evaluate\",1506601],[\"m1\",\"evaluate\",2449864],[\"m1\",\"evaluate-1\",715131],[\"ring0\",\"evaluate\",789865],[\"ring0\",\"evaluate-1\",1409394],[\"ring1\",\"evaluate\",472530],[\"ring1\",\"evaluate-1\",16231],[\"m20\",\"evaluate\",458316],[\"m20\",\"evaluate-1\",786216],[\"m0\",\"evaluate\",1229096]]": 1
       },
       "reasonHistogram": {
@@ -57,7 +57,7 @@
         "events-reordered:source=[[\"psib19\",\"evaluate\",356875],[\"psib19\",\"evaluate-1\",671647],[\"pconsA19\",\"evaluate\",1435545],[\"pconsA19\",\"evaluate-1\",506822],[\"@schedule\",15,\"entry\"],[\"coscA24\",\"evaluate\",1658579],[\"@schedule\",16,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib9\",\"evaluate\",254489],[\"pconsA9\",\"evaluate\",131657],[\"pconsA9\",\"evaluate-1\",1282417],[\"@schedule\",0,\"entry\"],[\"cos15\",\"evaluate\",253083],[\"cossib15\",\"evaluate\",581015],[\"cossib15\",\"evaluate-1\",20263],[\"coscB15\",\"evaluate\",804215],[\"@schedule\",1,\"entry\"]]": 1,
         "events-reordered:source=[[\"psib7\",\"evaluate\",421784],[\"pconsA7\",\"evaluate\",786151],[\"@schedule\",3,\"entry\"],[\"m2\",\"evaluate\",519540],[\"m2\",\"evaluate-1\",857926],[\"m1\",\"evaluate\",422360],[\"m0\",\"evaluate\",1186279],[\"@schedule\",4,\"entry\"],[\"@schedule\",5,\"dynamic\"],[\"@schedule\",6,\"dynamic\"],[\"@schedule\",7,\"dynamic\"]]": 1,
-        "bundle-only-crash:[\"TypeError\",\"require___entry_0000.require_module_0021 is not a function\"]": 1
+        "bundle-only-crash:[\"TypeError\",\"n.c is not a function\"]": 1
       },
       "reasonHistogram": {
         "bundle-only-crash": 57,
