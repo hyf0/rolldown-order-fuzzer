@@ -1024,14 +1024,26 @@ function validateEventReads(
         );
       } else {
         validateReadCapability(read, readPath, readFlags, errors);
+        validateExoticReadForm(read, readPath, errors);
       }
       continue;
     }
-    // A computed member access (`binding[k]`) is only meaningful on a namespace import; a value
-    // import or require binding is read directly, not by a runtime key.
+    // A computed member access (`binding[k]`), an intermediate computed hop, or a namespace ALIAS is only
+    // meaningful on a namespace import; a value import or require binding is read directly, not through an
+    // aliased namespace or a runtime key.
     if (read.computed === true) {
       errors.push(
         `${readPath}.computed: a computed member read is only valid on a namespace import binding, ${quote(read.binding)} is a ${binding.kind} binding`,
+      );
+    }
+    if (read.computedHopIndex !== undefined) {
+      errors.push(
+        `${readPath}.computedHopIndex: a computed member hop is only valid on a namespace import binding, ${quote(read.binding)} is a ${binding.kind} binding`,
+      );
+    }
+    if (read.alias === true) {
+      errors.push(
+        `${readPath}.alias: an aliased read is only valid on a namespace import binding, ${quote(read.binding)} is a ${binding.kind} binding`,
       );
     }
     const expectedPath = binding.kind === "require" ? [binding.member] : [];
@@ -1050,6 +1062,31 @@ function validateEventReads(
 /// concatenates the function's source text into a number (a bundle may rename or reformat it — a false
 /// positive); a read that calls a plain numeric binding invokes a number (a TypeError). The guard flag
 /// (the partial-cycle-read sentinel) must likewise match, so the rendered fold is the intended one.
+/// Validate the exotic-read form flags (FW-B deliverable 3) on a NAMESPACE member read: `computed`
+/// (deepest computed) and `computedHopIndex` (an intermediate computed hop) are mutually exclusive — one
+/// read never hides both a deepest and an intermediate access; a `computedHopIndex` must name a real
+/// INTERMEDIATE hop (`0 ≤ index < memberPath.length - 1`, so a static tail follows it), which requires a
+/// nested path (depth ≥ 2). `alias` carries no positional constraint (it aliases the whole binding).
+function validateExoticReadForm(read: ValueRead, readPath: string, errors: string[]): void {
+  const pathLength = read.memberPath?.length ?? 0;
+  if (read.computedHopIndex !== undefined) {
+    if (read.computed === true) {
+      errors.push(
+        `${readPath}: a read cannot set both \`computed\` (deepest) and \`computedHopIndex\` (an intermediate hop)`,
+      );
+    }
+    if (
+      !Number.isInteger(read.computedHopIndex) ||
+      read.computedHopIndex < 0 ||
+      read.computedHopIndex >= pathLength - 1
+    ) {
+      errors.push(
+        `${readPath}.computedHopIndex: must be an intermediate hop index (0 ≤ index < ${pathLength - 1}) leaving a static tail, received ${String(read.computedHopIndex)}`,
+      );
+    }
+  }
+}
+
 function validateReadCapability(
   read: ValueRead,
   readPath: string,

@@ -162,7 +162,14 @@ function carriesNewOperation(program: ProgramModel): boolean {
           (dependency.kind === "esm-namespace-import" &&
             dependency.readMembers.some((path) => path.length >= 2)),
       ) ||
-      (module.format === "esm" && (module.localExports?.length ?? 0) > 0),
+      (module.format === "esm" && (module.localExports?.length ?? 0) > 0) ||
+      // FW-B deliverable 3: an exotic read FORM (a computed intermediate hop `a[imp].y`, or an aliased
+      // namespace read `const x = ns; x.foo`) is a new-operation surface too.
+      module.events.some((event) =>
+        (event.reads ?? []).some(
+          (read) => read.computedHopIndex !== undefined || read.alias === true,
+        ),
+      ),
   );
 }
 
@@ -294,7 +301,14 @@ function unexplainedChangeReasons(
         (dependency.kind === "esm-namespace-import" &&
           dependency.readMembers.some((path) => path.length >= 2)),
     ) ||
-    (module.format === "esm" && (module.localExports?.length ?? 0) > 0);
+    (module.format === "esm" && (module.localExports?.length ?? 0) > 0) ||
+    // FW-B deliverable 3: a module whose event reads carry an exotic FORM (computed intermediate hop /
+    // aliased namespace) carries a new-operation surface.
+    module.events.some((event) =>
+      (event.reads ?? []).some(
+        (read) => read.computedHopIndex !== undefined || read.alias === true,
+      ),
+    );
   const modulesByIdLocal = new Map(program.modules.map((module) => [module.id, module]));
   // An entry whose module IMPORTS a module carrying a new op (the W14c ns-reexport barrel / dead-hop
   // mixed barrel) is an enrichment entry too — the injector added it alongside that new-op module.

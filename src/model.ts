@@ -41,7 +41,28 @@ export interface ValueRead {
   /// differs. Valid only on a namespace member read (a non-empty `memberPath` whose binding is a
   /// namespace import) — see `validate-model.ts`. A statically-invisible use is what family B needs to
   /// slip past on-demand wrapping's per-export liveness (see `.agents/docs/real-app-bug-families.md`).
+  /// Mutually exclusive with `computedHopIndex` (below): `computed` hides the DEEPEST access, that one an
+  /// INTERMEDIATE one — one read never needs both.
   readonly computed?: true;
+  /// When set (FW-B deliverable 3), an INTERMEDIATE namespace hop renders as a COMPUTED access
+  /// `binding[<runtime key>].tail` — the `a[imp].y` exotic read form the rebuilt #10180
+  /// `TopLevelImportReadDetector` must still classify as a top-level read of `binding`. The index names
+  /// which hop of `memberPath` is computed; it must be an INTERMEDIATE hop (`0 ≤ index < memberPath.length
+  /// - 1`), leaving a STATIC tail after it (that is what distinguishes it from `computed`, which hides the
+  /// deepest access). Valid only on a namespace member read whose intermediate hops route through
+  /// `export * as ns` re-exports (so `binding[key]` resolves to a re-exported namespace whose `.tail`
+  /// reads a member) — see `validate-model.ts`. The observed value is identical to the plain member read.
+  readonly computedHopIndex?: number;
+  /// When `true` (FW-B deliverable 3), the read routes through a module-level LOCAL ALIAS of its
+  /// `binding` rather than the binding directly: the renderer emits `const <binding>_alias = <binding>;`
+  /// once per aliased binding in the module and every aliased read renders `<binding>_alias.member…`.
+  /// This is the `const x = ns; x.foo` exotic form the rebuilt #10180 detector must trace back to the
+  /// namespace import `ns` (a local binding aliasing an imported namespace — a read through the alias is
+  /// still a top-level read of the import). Rendering-only: the demand routing and observed value are
+  /// identical to the direct read (the alias is not a separate representation — `binding` still names the
+  /// namespace import, so there is ONE canonical read). Valid only on a namespace import binding read
+  /// (like `computed`) — see `validate-model.ts`.
+  readonly alias?: true;
 }
 
 export interface EventRecord {

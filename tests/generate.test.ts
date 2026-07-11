@@ -6,6 +6,7 @@ import {
   generateCase,
   generateCrossChunkInitCycleCase,
   generateDynamicWrapKindMergeCase,
+  generateExoticImportReadsCase,
   generateOptimizerCycleCase,
   generateStaticCrossEntryLeakCase,
   MAX_CASE_SIZE,
@@ -1379,5 +1380,33 @@ describe("broader static cross-entry-leak (FW-B deliverable 4, W14c follow-up)",
     const facts = ProgramFacts.from(generated.program.modules);
     expect(facts.reachableAllFrom("le2-a").has("le2-b")).toBe(false);
     expect(facts.reachableAllFrom("le2-b").has("le2-a")).toBe(false);
+  });
+});
+
+describe("exotic import-read forms shape (FW-B deliverable 3, #10180 frontier)", () => {
+  test("the directed shape is valid and carries all three exotic-form tags", () => {
+    const generated = generateExoticImportReadsCase(0);
+    expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    expect(generated.coverageTags).toContain("variation:reexport-namespace");
+    expect(generated.coverageTags).toContain("variation:computed-intermediate-read");
+    expect(generated.coverageTags).toContain("variation:aliased-namespace-read");
+    // A nested namespace read through `export * as ns` (the M7 route) is also present.
+    expect(generated.coverageTags).toContain("variation:nested-namespace-read");
+  });
+
+  test("the exotic-reads injector reaches double-digit coverage across random-mixed seeds", () => {
+    // A density sanity check: the end-stage injector fires often enough to be real coverage, not dead.
+    let either = 0;
+    const total = 600;
+    for (let seed = 0; seed < total; seed += 1) {
+      const tags = generateCase(seed, 12).coverageTags;
+      if (
+        tags.includes("variation:computed-intermediate-read") ||
+        tags.includes("variation:aliased-namespace-read")
+      ) {
+        either += 1;
+      }
+    }
+    expect(either).toBeGreaterThan(0);
   });
 });

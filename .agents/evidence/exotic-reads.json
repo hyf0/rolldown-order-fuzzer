@@ -1,0 +1,465 @@
+{
+  "proof": "FW-B wrapping-completeness frontier (#10180): exotic top-level import-read forms (computed intermediate, aliased namespace, nested reexport-namespace)",
+  "generatedAt": "2026-07-11T00:37:43.010Z",
+  "head": "a339d90c4e591789ac9a5d59a8ae4c3a2f1f46b8",
+  "dirty": true,
+  "node": "v24.18.0",
+  "cases": 20,
+  "exoticTags": [
+    "variation:reexport-namespace",
+    "variation:computed-intermediate-read",
+    "variation:aliased-namespace-read"
+  ],
+  "missingTags": [],
+  "completenessCatches": [],
+  "note": "GREEN in every cell = the rebuilt classifier handles these forms (coverage that the generator reaches the churn); an od-only red would be a completeness catch.",
+  "targets": {
+    "npm": {
+      "path": "/tmp/order-fuzzer-regression-targets/1.1.5/node_modules/rolldown/dist/index.mjs",
+      "sha256": "ec605f0de07e8330992ebe7ca564a57e5d57d41ca9ded6513e94f837d0930079"
+    },
+    "snapshot": {
+      "path": "/tmp/rolldown-strict-order-study/final-snapshot-42628c18b/rolldown/dist/index.mjs",
+      "sha256": "f8b4b4f8153f7122034fa6fc6301ef915f03a53ee21da59d0eb0a54d6376bb4a"
+    }
+  },
+  "accepted": true,
+  "cells": {
+    "npm-od": {
+      "green": 20,
+      "red": 0,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass"
+        }
+      ]
+    },
+    "npm-wa": {
+      "green": 20,
+      "red": 0,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass"
+        }
+      ]
+    },
+    "snapshot-od": {
+      "green": 20,
+      "red": 0,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass"
+        }
+      ]
+    },
+    "snapshot-wa": {
+      "green": 20,
+      "red": 0,
+      "signatureHistogram": {
+        "pass": 20
+      },
+      "perSeed": [
+        {
+          "seed": 0,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 1,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 2,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 3,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 4,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 5,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 6,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 7,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 8,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 9,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 10,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 11,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 12,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 13,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 14,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 15,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 16,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 17,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 18,
+          "kind": "pass",
+          "signature": "pass"
+        },
+        {
+          "seed": 19,
+          "kind": "pass",
+          "signature": "pass"
+        }
+      ]
+    }
+  }
+}

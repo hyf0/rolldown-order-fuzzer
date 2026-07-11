@@ -280,6 +280,12 @@ function renderModule(
   if (module.hasTopLevelAwait === true) {
     sections.push(["await 0;"]);
   }
+  // Alias declarations (`const x = ns;`) for any aliased event reads, emitted BEFORE the events so the
+  // alias binds the imported namespace before an event reads through it (FW-B deliverable 3).
+  const aliasDeclarations = renderAliasDeclarations(module);
+  if (aliasDeclarations.length > 0) {
+    sections.push(aliasDeclarations);
+  }
   if (module.events.length > 0) {
     sections.push(renderEvents(module));
   }
@@ -309,18 +315,30 @@ const PARTIAL_READ_SENTINEL = -1;
 /// generator's bounded folds, so it never collides with a legitimate value.
 const OBJECT_IDENTITY_MISMATCH_SENTINEL = 987_654_321;
 
+/// The module-level LOCAL ALIAS variable a `ValueRead.alias` read routes through (`const <name> =
+/// <binding>;`, then `<name>.member`). Deterministic per binding so one declaration serves every aliased
+/// read of that binding in the module (the `const x = ns; x.foo` exotic form — FW-B deliverable 3).
+function aliasVarName(binding: string): string {
+  return `${binding}_alias`;
+}
+
 function renderRead(read: ValueRead): string {
   // Walk the canonical member path (W14c): `binding.p0.p1.…`. Intermediate hops (a re-exported
-  // namespace navigated to reach the export) stay static; only the DEEPEST access is rendered
-  // COMPUTED when `computed` is set (`…[<runtime key>]` — a split literal the bundler cannot fold to
-  // a static member, so which export is used stays invisible to on-demand liveness). An empty path is
+  // namespace navigated to reach the export) stay static UNLESS `computedHopIndex` names one to render
+  // computed (`binding[<key>].tail` — the `a[imp].y` exotic form, FW-B deliverable 3); the DEEPEST access
+  // is rendered COMPUTED when `computed` is set (`…[<runtime key>]` — a split literal the bundler cannot
+  // fold to a static member). A `.alias` read starts from a module-level alias of `binding` (`const x =
+  // ns; x.foo`). All three keep the observed value identical to a plain read; only syntactic visibility /
+  // the binding path differs, stressing the rebuilt #10180 top-level-import-read detector. Empty path is
   // a plain binding read.
   const path = read.memberPath ?? [];
-  let access = read.binding;
+  let access = read.alias === true ? aliasVarName(read.binding) : read.binding;
   for (let index = 0; index < path.length; index += 1) {
     const member = path[index] ?? "";
+    const isDeepestComputed = index === path.length - 1 && read.computed === true;
+    const isIntermediateComputed = read.computedHopIndex === index;
     access =
-      index === path.length - 1 && read.computed === true
+      isDeepestComputed || isIntermediateComputed
         ? `${access}[${computedMemberKey(member)}]`
         : `${access}.${member}`;
   }
@@ -331,6 +349,21 @@ function renderRead(read: ValueRead): string {
   return read.guard === true
     ? `(Number.isFinite(${expression}) ? ${expression} : ${PARTIAL_READ_SENTINEL})`
     : expression;
+}
+
+/// The `const <binding>_alias = <binding>;` declarations for a module — one per DISTINCT binding any of
+/// the module's event reads aliases (`ValueRead.alias`). Rendered after the imports so the alias binds
+/// the imported namespace before the events read through it. Empty when no read aliases.
+function renderAliasDeclarations(module: ModuleModel): string[] {
+  const aliased = new Set<string>();
+  for (const event of module.events) {
+    for (const read of event.reads ?? []) {
+      if (read.alias === true) {
+        aliased.add(read.binding);
+      }
+    }
+  }
+  return [...aliased].map((binding) => `const ${aliasVarName(binding)} = ${binding};`);
 }
 
 /// A runtime-built key for a computed member read `binding[key]`. Splitting the member name into two

@@ -1583,6 +1583,106 @@ export function generateDynamicWrapKindMergeCase(
   };
 }
 
+/// The EXOTIC top-level import-read shape (FW-B deliverable 3, cluster 5 — the #10180
+/// wrapping-completeness frontier) as a DIRECTED program: an inferred-pure inner definer, a
+/// `export * as ns` re-export barrel, and a consumer folding the SAME inner member THREE ways — a plain
+/// NESTED read (`outer.ns.v`), a COMPUTED INTERMEDIATE hop (`outer[k].v` — `a[imp].y`), and an ALIASED
+/// namespace read (`const x = ns; x.v`) — each the statically-visible-but-tricky form the rebuilt
+/// `TopLevelImportReadDetector` must classify as a top-level read of the imported binding. Because the
+/// inner is a non-inlinable inferred-pure value, a detector MISS that dropped its init would fold
+/// `undefined` → NaN; GREEN on current rolldown means the classifier handles every form. The campaign
+/// runs it od (on-demand wrapping — the classifier is live) vs wa (wrap-all, the internal control) on
+/// npm 1.1.5 AND the snapshot; an od-only red is a completeness catch. The seed varies only cosmetic values.
+export function buildExoticImportReads(rng: SeededRng): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const innerBase = 1 + rng.integer(900_000);
+  const modules: readonly ModuleModel[] = [
+    {
+      id: "exin",
+      format: "esm",
+      dependencies: [],
+      events: [],
+      inferredPure: true,
+      pureBase: innerBase,
+    },
+    {
+      id: "exbar",
+      format: "esm",
+      dependencies: [{ kind: "esm-reexport-namespace", target: "exin", exportedName: "exns" }],
+      events: [],
+    },
+    {
+      id: "excon",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-namespace-import",
+          target: "exbar",
+          localName: "exouter",
+          readMembers: [["exns", "vexin"]],
+        },
+        {
+          kind: "esm-namespace-import",
+          target: "exin",
+          localName: "exdirect",
+          readMembers: [["vexin"]],
+        },
+      ],
+      events: [
+        {
+          module: "excon",
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: "exouter", memberPath: ["exns", "vexin"] }],
+        },
+        {
+          module: "excon",
+          phase: "evaluate-1",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: "exouter", memberPath: ["exns", "vexin"], computedHopIndex: 0 }],
+        },
+        {
+          module: "excon",
+          phase: "evaluate-2",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: "exdirect", memberPath: ["vexin"], alias: true }],
+        },
+      ],
+    },
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [{ name: "entry-excon", moduleId: "excon" }],
+    schedule: [{ kind: "import-entry", entry: "entry-excon" }],
+    build: {
+      chunking: { kind: "automatic" },
+      includeDependenciesRecursively: true,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the directed exotic-import-reads campaign (FW-B deliverable 3). Tagged
+/// `variation:computed-intermediate-read` + `variation:aliased-namespace-read` + `variation:reexport-namespace`.
+export function generateExoticImportReadsCase(seed: number): GeneratedCase {
+  const { program, analyzed } = buildExoticImportReads(new SeededRng(seed));
+  const coverageTags = [...deriveCoverageTags(analyzed)];
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags,
+    program,
+    analyzed,
+  };
+}
+
 /// The ordered generation state at the moment every edge, cluster, and dynamic-import registration
 /// has been wired — the mutable graph the random generator built, ready to be FROZEN. `finalizeProgram`
 /// is the single point that consumes it.
@@ -1898,6 +1998,10 @@ const CAMUNDA_REWRITE_PROBABILITY_PERCENT = 10;
 /// operation, accounted for by `explain-delta`'s new-op category).
 const NAMESPACE_REEXPORT_PROBABILITY_PERCENT = 12;
 const DEAD_HOP_PROBABILITY_PERCENT = 8;
+/// FW-B deliverable 3 end-stage injector (drawn AFTER every W14c draw, so a non-firing case is
+/// byte-identical to the W14c corpus; a firing case is the labeled golden delta — its reads carry a new
+/// exotic FORM, accounted for by `explain-delta`'s new-op category).
+const EXOTIC_READS_PROBABILITY_PERCENT = 10;
 
 /// The W14b END-STAGE enrichment: the package/metadata realism cluster. Sub-steps in fixed order —
 /// (1) the family-B eager-barrel conjunction (the vben shape), (2) the retained-reference witness,
@@ -1925,6 +2029,10 @@ function applyW14bEnrichment(rng: SeededRng, input: W14bEnrichmentInput): W14bEn
   if (input.regime !== "pure-cjs") {
     injectNamespaceReexport(rng, w14cModules, entries, schedule);
     injectDeadBarrelHop(rng, w14cModules, entries, schedule);
+    // FW-B deliverable 3: the exotic top-level import-read forms the rebuilt #10180 detector must
+    // classify (computed intermediate `a[imp].y`, aliased namespace `const x = ns; x.foo`, nested read
+    // through `export * as ns`). Drawn LAST so a non-firing case stays byte-identical to the W14c corpus.
+    injectExoticImportReads(rng, w14cModules, entries, schedule);
   }
 
   return { modules: w14cModules, entries, schedule, chunking, packages };
@@ -2430,6 +2538,110 @@ function injectDeadBarrelHop(
     { kind: "import-entry", entry: `entry-${pageBId}` },
     { kind: "import-entry", entry: `entry-${pageAId}` },
   );
+}
+
+/// Inject the EXOTIC top-level import-read cluster (FW-B deliverable 3 — the #10180 wrapping-completeness
+/// frontier). Rolldown is ACTIVELY re-architecting the order-sensitivity classifier (#10168 split the
+/// metadata, #10180 rebuilt `TopLevelImportReadDetector`); its own rationale is that "the order-sensitivity
+/// signal must be complete: it may never miss a top-level read of an imported binding", and the
+/// per-expression-form analyzer "is exactly how gaps slip in". This cluster generates the exotic
+/// statically-visible-but-tricky read forms that detector must still classify, all via the canonical
+/// member-PATH representation and the `export * as ns` op — ONE inner definer, a namespace-reexport barrel,
+/// and a consumer folding the SAME inner member THREE ways, each a distinct form:
+///
+/// - `outer.ns.vInner` — a NESTED member read through the `export * as ns` re-export (the M7 route);
+/// - `outer[<key>].vInner` — a COMPUTED INTERMEDIATE hop (`a[imp].y`): the `ns` hop is a runtime key with
+///   a STATIC `.vInner` tail, so the detector must see `outer` is read despite the dynamic middle access;
+/// - `const direct_alias = direct; direct_alias.vInner` — an ALIASED namespace (`const x = ns; x.foo`):
+///   a local binding aliasing the namespace import, read through the alias.
+///
+/// The inner is an inferred-pure definer (a non-inlinable value), so a detector MISS that dropped its init
+/// would fold `undefined` → NaN (the event channel rejects it). All GREEN on current rolldown (the rebuilt
+/// classifier handles these), so this is COVERAGE that the generator reaches the churning detector paths;
+/// an od-only red would be a completeness catch. ESM-only, drawn last so a non-firing case is
+/// byte-identical to the W14c corpus.
+function injectExoticImportReads(
+  rng: SeededRng,
+  modules: ModuleModel[],
+  entries: EntryModel[],
+  schedule: ScheduleOperation[],
+): void {
+  if (rng.integer(100) >= EXOTIC_READS_PROBABILITY_PERCENT) {
+    return;
+  }
+  if (MAX_RANDOM_MODULES - modules.length < 3) {
+    return;
+  }
+  const counter = modules.length;
+  const innerId = `exin${counter}`;
+  const barrelId = `exbar${counter}`;
+  const consumerId = `excon${counter}`;
+  const nsName = `exns${counter}`;
+  const innerExport = `v${innerId}`;
+  const outerLocal = `exouter${counter}`;
+  const directLocal = `exdirect${counter}`;
+
+  modules.push(
+    {
+      id: innerId,
+      format: "esm",
+      dependencies: [],
+      events: [],
+      inferredPure: true,
+      pureBase: 1 + rng.integer(900_000),
+    },
+    {
+      id: barrelId,
+      format: "esm",
+      dependencies: [{ kind: "esm-reexport-namespace", target: innerId, exportedName: nsName }],
+      events: [],
+    },
+    {
+      id: consumerId,
+      format: "esm",
+      dependencies: [
+        // The nested route through the `export * as ns` barrel (path [ns, member]).
+        {
+          kind: "esm-namespace-import",
+          target: barrelId,
+          localName: outerLocal,
+          readMembers: [[nsName, innerExport]],
+        },
+        // The DIRECT namespace import of the inner definer (for the classic `const x = ns; x.foo` alias).
+        {
+          kind: "esm-namespace-import",
+          target: innerId,
+          localName: directLocal,
+          readMembers: [[innerExport]],
+        },
+      ],
+      events: [
+        // Form 3: the plain nested read through the namespace re-export.
+        {
+          module: consumerId,
+          phase: "evaluate",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: outerLocal, memberPath: [nsName, innerExport] }],
+        },
+        // Form 1: `a[imp].y` — the `ns` hop computed, the member tail static.
+        {
+          module: consumerId,
+          phase: "evaluate-1",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: outerLocal, memberPath: [nsName, innerExport], computedHopIndex: 0 }],
+        },
+        // Form 2: `const x = ns; x.foo` — an aliased single-member namespace read.
+        {
+          module: consumerId,
+          phase: "evaluate-2",
+          value: rng.integer(1_000_000),
+          reads: [{ binding: directLocal, memberPath: [innerExport], alias: true }],
+        },
+      ],
+    },
+  );
+  entries.push({ name: `entry-${consumerId}`, moduleId: consumerId });
+  schedule.push({ kind: "import-entry", entry: `entry-${consumerId}` });
 }
 
 /// Package an injected family-A conjunction cluster (compose family A BEHIND a package boundary):
@@ -4108,6 +4320,25 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
     )
   ) {
     tags.add("variation:computed-member-read");
+  }
+  // FW-B deliverable 3 exotic read forms (the #10180 detector frontier): a COMPUTED INTERMEDIATE hop
+  // (`a[imp].y`) and an ALIASED namespace read (`const x = ns; x.foo`) — the statically-visible-but-tricky
+  // forms the rebuilt TopLevelImportReadDetector must classify as top-level import reads.
+  if (
+    program.modules.some((module) =>
+      module.events.some((event) =>
+        (event.reads ?? []).some((read) => read.computedHopIndex !== undefined),
+      ),
+    )
+  ) {
+    tags.add("variation:computed-intermediate-read");
+  }
+  if (
+    program.modules.some((module) =>
+      module.events.some((event) => (event.reads ?? []).some((read) => read.alias === true)),
+    )
+  ) {
+    tags.add("variation:aliased-namespace-read");
   }
   // A callable-reads-own-state definer (Task 2): an exported function reads its module's own
   // init-assigned state var, called by consumers — the d3-scale/shadcn read-side witness.

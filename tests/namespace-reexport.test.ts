@@ -135,3 +135,89 @@ describe("export * as ns from (namespace re-export, M7)", () => {
     expect(analyzed.plan.requestedNames.get("other") ?? []).not.toContain("ns");
   });
 });
+
+/// FW-B deliverable 3 — the exotic top-level import-read forms the rebuilt #10180 detector must classify.
+/// Built on the M7 namespace re-export fixture above (a nested `outer.ns.vinner` read).
+function exoticReadProgram(read: {
+  readonly computedHopIndex?: number;
+  readonly alias?: true;
+  readonly computed?: true;
+}): ProgramModel {
+  const program = nsReexportProgram();
+  return {
+    ...program,
+    modules: [
+      program.modules[0]!,
+      program.modules[1]!,
+      {
+        ...program.modules[2]!,
+        events: [
+          {
+            module: "ent",
+            phase: "evaluate",
+            value: 1,
+            reads: [{ binding: "outer", memberPath: ["ns", "vinner"], ...read }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+describe("exotic import-read forms (FW-B deliverable 3, #10180 frontier)", () => {
+  test("a computed INTERMEDIATE hop renders `outer[<key>].vinner` (a[imp].y) and validates green", () => {
+    const analyzed = analyzeProgram(exoticReadProgram({ computedHopIndex: 0 }));
+    expect(validateProgramModel(analyzed)).toEqual([]);
+    const entry = fileContents(renderProgram(analyzed).files, "module-0002.mjs");
+    // The `ns` hop is computed (a split-literal runtime key), the `.vinner` tail stays static.
+    expect(entry).toContain('outer["n" + "s"].vinner');
+    expect(entry).not.toContain("outer.ns.vinner");
+  });
+
+  test("an ALIASED namespace read renders `const outer_alias = outer;` then `outer_alias.ns.vinner`", () => {
+    const analyzed = analyzeProgram(exoticReadProgram({ alias: true }));
+    expect(validateProgramModel(analyzed)).toEqual([]);
+    const entry = fileContents(renderProgram(analyzed).files, "module-0002.mjs");
+    expect(entry).toContain("const outer_alias = outer;");
+    expect(entry).toContain("outer_alias.ns.vinner");
+  });
+
+  test("computedHopIndex must be an INTERMEDIATE hop (a deepest index is rejected)", () => {
+    // Index 1 is the deepest hop of `[ns, vinner]` — no static tail follows, so it is not intermediate.
+    const errors = validateProgramModel(analyzeProgram(exoticReadProgram({ computedHopIndex: 1 })));
+    expect(errors.some((e) => e.includes("computedHopIndex") && e.includes("intermediate"))).toBe(
+      true,
+    );
+  });
+
+  test("computed (deepest) and computedHopIndex (intermediate) are mutually exclusive", () => {
+    const errors = validateProgramModel(
+      analyzeProgram(exoticReadProgram({ computed: true, computedHopIndex: 0 })),
+    );
+    expect(errors.some((e) => e.includes("cannot set both"))).toBe(true);
+  });
+
+  test("alias and computedHopIndex are rejected on a non-namespace (value import) binding", () => {
+    const program: ProgramModel = {
+      modules: [
+        { id: "def", format: "esm", dependencies: [], events: [], inferredPure: true, pureBase: 7 },
+        {
+          id: "ent",
+          format: "esm",
+          dependencies: [
+            { kind: "esm-value-import", target: "def", importedName: "vdef", localName: "d" },
+          ],
+          events: [
+            { module: "ent", phase: "evaluate", value: 1, reads: [{ binding: "d", alias: true }] },
+          ],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "ent" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    };
+    const errors = validateProgramModel(analyzeProgram(program));
+    expect(errors.some((e) => e.includes(".alias") && e.includes("namespace import binding"))).toBe(
+      true,
+    );
+  });
+});
