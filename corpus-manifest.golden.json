@@ -6981,7 +6981,7 @@
   },
   {
     "buildAxes": {
-      "includeDependenciesRecursively": true,
+      "includeDependenciesRecursively": false,
       "lazyBarrel": false,
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
@@ -6989,8 +6989,10 @@
     "codeSplitting": {
       "groups": [
         {
-          "moduleIds": ["fbdef15", "fbsib15"],
-          "name": "fb-pref15"
+          "entriesAware": true,
+          "entriesAwareMergeThreshold": 102400,
+          "moduleIds": ["m10", "fbfirst15"],
+          "name": "entries-aware-apps"
         }
       ]
     },
@@ -12095,26 +12097,19 @@
   },
   {
     "buildAxes": {
-      "includeDependenciesRecursively": true,
+      "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "minify": true,
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
     "codeSplitting": {
-      "organicGroups": [
+      "groups": [
         {
-          "includeDependenciesRecursively": true,
-          "name": "organic-hot",
-          "priority": 2,
-          "test": "\\.mjs$"
-        },
-        {
-          "includeDependenciesRecursively": false,
-          "maxSize": 870,
-          "minShareCount": 2,
-          "name": "organic-shared",
-          "priority": 1
+          "entriesAware": true,
+          "entriesAwareMergeThreshold": 102400,
+          "moduleIds": ["m2", "m13"],
+          "name": "entries-aware-apps"
         }
       ]
     },
@@ -16160,8 +16155,10 @@
     "codeSplitting": {
       "groups": [
         {
-          "moduleIds": ["fbdef20", "fbsib20"],
-          "name": "fb-pref20"
+          "entriesAware": true,
+          "entriesAwareMergeThreshold": 102400,
+          "moduleIds": ["m1", "fbfirst20"],
+          "name": "entries-aware-apps"
         }
       ]
     },
@@ -20746,24 +20743,12 @@
       "strictExecutionOrder": true
     },
     "codeSplitting": {
-      "organicGroups": [
+      "groups": [
         {
-          "includeDependenciesRecursively": true,
-          "name": "organic-hot",
-          "priority": 2,
-          "test": "\\.cjs$"
-        },
-        {
-          "includeDependenciesRecursively": false,
-          "maxSize": 350,
-          "minShareCount": 1,
-          "name": "organic-shared",
-          "priority": 1
-        },
-        {
-          "name": "fb-pref15",
-          "priority": 9,
-          "test": "node_modules[\\\\/]fbpkg15[\\\\/](fbdef15|fbsib15)\\.mjs$"
+          "entriesAware": true,
+          "entriesAwareMergeThreshold": 102400,
+          "moduleIds": ["m1", "fbfirst15"],
+          "name": "entries-aware-apps"
         }
       ]
     },

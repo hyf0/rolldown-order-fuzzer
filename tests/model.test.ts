@@ -2207,6 +2207,41 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     );
   });
 
+  test("accepts and validates entriesAware fields on an exact manual group", () => {
+    const valid: ProgramModel = {
+      ...baseModules(),
+      build: {
+        ...build,
+        chunking: {
+          kind: "manual",
+          groups: [
+            {
+              name: "g",
+              moduleIds: ["leaf"],
+              entriesAware: true,
+              entriesAwareMergeThreshold: 100 * 1024,
+            },
+          ],
+        },
+      },
+    };
+    expect(validateProgramModel(analyzeProgram(valid))).toEqual([]);
+
+    const invalid = structuredClone(valid) as ProgramModel;
+    const group = buildConfigOf(invalid).chunking;
+    if (group.kind !== "manual") {
+      throw new Error("expected exact manual chunking");
+    }
+    (group.groups[0] as { entriesAware: unknown }).entriesAware = "yes";
+    (group.groups[0] as { entriesAwareMergeThreshold: number }).entriesAwareMergeThreshold = -1;
+    expect(validateProgramModel(analyzeProgram(invalid))).toEqual(
+      expect.arrayContaining([
+        "manualChunkGroups[0].entriesAware: must be a boolean",
+        "manualChunkGroups[0].entriesAwareMergeThreshold: must be a finite non-negative number",
+      ]),
+    );
+  });
+
   test("accepts a valid build config, including strictExecutionOrder:false (W14c rollable axis)", () => {
     expect(validateProgramModel(analyzeProgram({ ...baseModules(), build }))).toEqual([]);
     // seo:false is REPRESENTABLE as of W14c — it is tied to the reachability-isolation oracle in

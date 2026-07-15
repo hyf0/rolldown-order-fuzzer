@@ -85,6 +85,15 @@ const CJS_OUTPUT_DENOMINATOR = 5;
 /// (identifier renames, whitespace/sequencing) without letting minified cases dominate the corpus.
 const MINIFY_DENOMINATOR = 4;
 
+/// Every eligible random-mixed case gains the #10259-inspired manual code-splitting group. Eligibility
+/// is deliberately structural: at least two effectful ESM entries each own an effectful ESM "app"
+/// dependency, one selected app keeps an effectful entry-private
+/// side-effect dependency outside the group, and the source graph is acyclic. The group then uses
+/// `entriesAware` plus a large merge threshold to manufacture the same entry-chunk <-> common-chunk
+/// cycle as the public repro. The factor runs LAST, after every source-affecting roll and the
+/// output/minify axes, so this bundle-only factor cannot perturb the rendered source corpus or any
+/// older axis.
+
 /// Sample a per-case generation size from a weighted small/medium/large spread. A campaign that does
 /// not pin `--case-size` draws one of these per case (seeded by the case seed) so a single run covers
 /// every scale — small graphs for density and large ones for intra-chunk placement. Deterministic:
@@ -884,6 +893,124 @@ export function generateCrossChunkInitCycleCase(seed: number): GeneratedCase {
     size: program.modules.length,
     template: "random-mixed",
     coverageTags,
+    program,
+    analyzed,
+  };
+}
+
+/// The #10259-inspired entries-aware manual-code-splitting shape. Its SOURCE graph is a seven-module
+/// DAG with three independent entries:
+///
+///     personal -> app-personal -> leaf
+///     admin    -> app-admin
+///     theming  -> app-theming
+///
+/// One exact manual `codeSplitting.groups` group captures only the three app modules. `entriesAware` first
+/// gives them distinct entry-reachability subgroups; the large merge threshold folds the tiny subgroups
+/// back into one common chunk. The personal-only leaf remains in the personal entry chunk, so the common
+/// chunk imports personal for `leaf` while personal imports the common chunk for `app-personal`: an
+/// emitted chunk cycle manufactured from an acyclic source graph. Loading admin first is the important
+/// schedule order — the buggy strict wrapper form reaches personal through that cycle before the common
+/// chunk has assigned `init_app_personal`, producing `init_* is not a function`.
+///
+/// The released Rolldown path is RED in both on-demand and wrap-all strict modes; the declaration-form
+/// wrapper implementation is GREEN in both while retaining the emitted chunk cycle. This builder is the
+/// deterministic proof for the broader random factor added by `withEntriesAwareChunkCycleFactor`.
+export function buildEntriesAwareChunkCycle(rng: SeededRng): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const base = 1 + rng.integer(900_000);
+  const event = (module: string, offset: number): EventRecord => ({
+    module,
+    phase: "evaluate",
+    value: base + offset,
+  });
+  const modules: readonly ModuleModel[] = [
+    { id: "ea-leaf", format: "esm", dependencies: [], events: [event("ea-leaf", 0)] },
+    {
+      id: "ea-app-personal",
+      format: "esm",
+      dependencies: [{ kind: "esm-side-effect-import", target: "ea-leaf" }],
+      events: [event("ea-app-personal", 1)],
+    },
+    {
+      id: "ea-app-admin",
+      format: "esm",
+      dependencies: [],
+      events: [event("ea-app-admin", 2)],
+    },
+    {
+      id: "ea-app-theming",
+      format: "esm",
+      dependencies: [],
+      events: [event("ea-app-theming", 3)],
+    },
+    {
+      id: "ea-personal",
+      format: "esm",
+      dependencies: [{ kind: "esm-side-effect-import", target: "ea-app-personal" }],
+      events: [event("ea-personal", 4)],
+    },
+    {
+      id: "ea-admin",
+      format: "esm",
+      dependencies: [{ kind: "esm-side-effect-import", target: "ea-app-admin" }],
+      events: [event("ea-admin", 5)],
+    },
+    {
+      id: "ea-theming",
+      format: "esm",
+      dependencies: [{ kind: "esm-side-effect-import", target: "ea-app-theming" }],
+      events: [event("ea-theming", 6)],
+    },
+  ];
+  const appIds = ["ea-app-personal", "ea-app-admin", "ea-app-theming"];
+  const program: ProgramModel = {
+    modules,
+    entries: [
+      { name: "personal", moduleId: "ea-personal" },
+      { name: "admin", moduleId: "ea-admin" },
+      { name: "theming", moduleId: "ea-theming" },
+    ],
+    schedule: [
+      { kind: "import-entry", entry: "admin" },
+      { kind: "import-entry", entry: "theming" },
+      { kind: "import-entry", entry: "personal" },
+    ],
+    build: {
+      chunking: {
+        kind: "manual",
+        groups: [
+          {
+            name: "ea-apps",
+            moduleIds: appIds,
+            entriesAware: true,
+            entriesAwareMergeThreshold: 100 * 1024,
+          },
+        ],
+      },
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+      outputFormat: "esm",
+      minify: false,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+/// A generated case for the deterministic #10259 entries-aware chunk-cycle proof. The seed varies only
+/// event values; topology, selected manual-code-splitting modules, and schedule order stay fixed.
+export function generateEntriesAwareChunkCycleCase(seed: number): GeneratedCase {
+  const { program, analyzed } = buildEntriesAwareChunkCycle(new SeededRng(seed));
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags: [...deriveCoverageTags(analyzed)],
     program,
     analyzed,
   };
@@ -2239,27 +2366,39 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
   // every axis, TLA included), so a minify×cjs case exercises the self-rebinding wrapper under the CJS
   // render arm continuously.
   const minify = rng.integer(MINIFY_DENOMINATOR) === 0;
+  // The #10259-inspired entriesAware manual-code-splitting factor runs LAST. It can only change
+  // the bundle-side chunking config: source modules, packages, schedule, and every older build axis have
+  // already been fixed. The helper declines unless the final graph contains the exact useful ingredients
+  // (multiple ESM entries, private app modules, an app-private leaf, and no source cycle), so a tagged case
+  // is a real candidate for an entriesAware-manufactured CHUNK cycle rather than a dead boolean flip.
+  const ordinaryChunking = chunkingUnionOf(enriched.chunking);
+  const entriesAwareFactor =
+    strictExecutionOrder === true && outputFormat === "esm"
+      ? withEntriesAwareChunkCycleFactor(enriched.modules, enriched.entries, ordinaryChunking)
+      : { chunking: ordinaryChunking, applied: false };
   // A cross-entry cell (seo:false + bias) OVERRIDES the rolled chunking with a single entriesAware
   // co-locating group over every module — the #9998 config, which at seo:false runs one entry's
   // top-level when a disjoint-reachability entry loads. Only fires under the opt-in option, so it never
   // touches the corpus.
-  const resolvedChunking: Chunking =
-    context.options.crossEntryGroupBias === true && strictExecutionOrder === false
-      ? {
-          kind: "organic",
-          groups: [
-            {
-              name: "cross-entry-common",
-              test: "module-",
-              entriesAware: true,
-              entriesAwareMergeThreshold: 10_000,
-            },
-          ],
-        }
-      : chunkingUnionOf(enriched.chunking);
+  const usesCrossEntryGroup =
+    context.options.crossEntryGroupBias === true && strictExecutionOrder === false;
+  const resolvedChunking: Chunking = usesCrossEntryGroup
+    ? {
+        kind: "organic",
+        groups: [
+          {
+            name: "cross-entry-common",
+            test: "module-",
+            entriesAware: true,
+            entriesAwareMergeThreshold: 10_000,
+          },
+        ],
+      }
+    : entriesAwareFactor.chunking;
   const build: BuildConfig = {
     chunking: resolvedChunking,
-    includeDependenciesRecursively,
+    includeDependenciesRecursively:
+      !usesCrossEntryGroup && entriesAwareFactor.applied ? false : includeDependenciesRecursively,
     preserveEntrySignatures: "allow-extension",
     lazyBarrel,
     strictExecutionOrder,
@@ -3310,6 +3449,178 @@ function buildOrganicChunkGroups(
   }
 }
 
+interface EntriesAwareAppCandidate {
+  readonly entryId: string;
+  readonly appId: string;
+  readonly privateDependencyIds: readonly string[];
+}
+
+interface EntriesAwareChunkCycleFactor {
+  readonly chunking: Chunking;
+  readonly applied: boolean;
+}
+
+/// Find two entry-private, effectful ESM app modules whose co-location can manufacture the
+/// entry-chunk <-> common-chunk cycle. At least one app must have an effectful side-effect dependency
+/// that remains outside the selected group. `allowedAppIds` is used by the coverage-tag predicate to
+/// prove that an already-persisted exact-manual group carries the recipe; generation omits it and lets
+/// the helper choose the pair before constructing that group. `requireStableReturnEdge` additionally
+/// requires the private target to be a dependency-free leaf with no other importer and the app's only
+/// synchronous dependency; that stricter form owns the mechanism tag.
+function findMergedEntryAppPair(
+  modules: readonly ModuleModel[],
+  entries: readonly EntryModel[],
+  allowedAppIds?: ReadonlySet<string>,
+  requireStableReturnEdge = false,
+): readonly [EntriesAwareAppCandidate, EntriesAwareAppCandidate] | undefined {
+  if (entries.length < 2) {
+    return undefined;
+  }
+  const facts = ProgramFacts.from(modules);
+  if (facts.cycles().cyclicMembers.size > 0) {
+    return undefined;
+  }
+  const modulesById = new Map(modules.map((module) => [module.id, module]));
+  const entryIds = new Set(entries.map((entry) => entry.moduleId));
+  const esmEntries = entries.filter((entry) => {
+    const module = modulesById.get(entry.moduleId);
+    return module?.format === "esm" && module.events.length > 0;
+  });
+  if (esmEntries.length < 2) {
+    return undefined;
+  }
+  const closures = new Map(
+    entries.map((entry) => [entry.moduleId, facts.closureFrom(entry.moduleId)]),
+  );
+  const candidates: EntriesAwareAppCandidate[] = [];
+  for (const entry of esmEntries) {
+    const entryModule = modulesById.get(entry.moduleId);
+    if (entryModule?.format !== "esm") {
+      continue;
+    }
+    const seenTargets = new Set<string>();
+    for (const dependency of entryModule.dependencies) {
+      if (
+        dependency.kind !== "esm-side-effect-import" &&
+        dependency.kind !== "esm-value-import" &&
+        dependency.kind !== "esm-namespace-import"
+      ) {
+        continue;
+      }
+      const appId = dependency.target;
+      if (
+        seenTargets.has(appId) ||
+        entryIds.has(appId) ||
+        (allowedAppIds !== undefined && !allowedAppIds.has(appId))
+      ) {
+        continue;
+      }
+      seenTargets.add(appId);
+      const app = modulesById.get(appId);
+      if (app?.format !== "esm" || app.events.length === 0) {
+        continue;
+      }
+      const owners = entries.filter(
+        (candidate) => closures.get(candidate.moduleId)?.has(appId) === true,
+      );
+      if (owners.length !== 1 || owners[0]?.moduleId !== entry.moduleId) {
+        continue;
+      }
+      const privateDependencyIds: string[] = [];
+      for (const appDependency of app.dependencies) {
+        // The private edge must be side-effect-only, matching the real failure shape. Any value,
+        // namespace, or dynamic edge to the same target makes Rolldown keep it in a separate chunk,
+        // which removes the return edge to the owning entry.
+        if (appDependency.kind !== "esm-side-effect-import") {
+          continue;
+        }
+        const dependencyId = appDependency.target;
+        const privateDependency = modulesById.get(dependencyId);
+        if (
+          app.dependencies.some(
+            (candidate) =>
+              candidate.target === dependencyId && candidate.kind !== "esm-side-effect-import",
+          ) ||
+          entryIds.has(dependencyId) ||
+          privateDependency?.format !== "esm" ||
+          privateDependency.events.length === 0 ||
+          (requireStableReturnEdge &&
+            (privateDependency.dependencies.length !== 0 ||
+              app.dependencies.filter((candidate) => candidate.kind !== "esm-dynamic-import")
+                .length !== 1 ||
+              modules.some((candidate) =>
+                candidate.dependencies.some(
+                  (dependency) => dependency.target === dependencyId && candidate.id !== app.id,
+                ),
+              ))) ||
+          entries.some(
+            (other) =>
+              other.moduleId !== entry.moduleId &&
+              closures.get(other.moduleId)?.has(dependencyId) === true,
+          )
+        ) {
+          continue;
+        }
+        privateDependencyIds.push(dependencyId);
+      }
+      candidates.push({
+        entryId: entry.moduleId,
+        appId,
+        privateDependencyIds: [...new Set(privateDependencyIds)],
+      });
+    }
+  }
+
+  for (let left = 0; left < candidates.length; left += 1) {
+    for (let right = left + 1; right < candidates.length; right += 1) {
+      const a = candidates[left];
+      const b = candidates[right];
+      if (a === undefined || b === undefined || a.entryId === b.entryId || a.appId === b.appId) {
+        continue;
+      }
+      const selectedIds = allowedAppIds ?? new Set([a.appId, b.appId]);
+      if (
+        a.privateDependencyIds.some((id) => !selectedIds.has(id)) ||
+        b.privateDependencyIds.some((id) => !selectedIds.has(id))
+      ) {
+        return [a, b];
+      }
+    }
+  }
+  return undefined;
+}
+
+/// Add the #10259-inspired manual-code-splitting group to an eligible FINAL random graph. The existing
+/// chunking config is REPLACED by one exact module-id group when the factor fires. Keeping an earlier
+/// organic group would let it claim the private leaf and dissolve the return edge, so a tagged recipe
+/// must have the same single selective group as the deterministic proof. App, entry, and private-leaf
+/// modules all carry observable top-level work, preventing inlining/DCE from erasing the cycle recipe.
+function withEntriesAwareChunkCycleFactor(
+  modules: readonly ModuleModel[],
+  entries: readonly EntryModel[],
+  chunking: Chunking,
+): EntriesAwareChunkCycleFactor {
+  const unchanged = (): EntriesAwareChunkCycleFactor => ({ chunking, applied: false });
+  const selected = findMergedEntryAppPair(modules, entries);
+  if (selected === undefined) {
+    return unchanged();
+  }
+  return {
+    applied: true,
+    chunking: {
+      kind: "manual",
+      groups: [
+        {
+          name: "entries-aware-apps",
+          moduleIds: selected.map((candidate) => candidate.appId),
+          entriesAware: true,
+          entriesAwareMergeThreshold: 100 * 1024,
+        },
+      ],
+    },
+  };
+}
+
 /// A dependency that forwards an export without binding it locally (a barrel edge).
 function isReexportDependency(dependency: DependencyOperation): boolean {
   return dependency.kind === "esm-reexport-named" || dependency.kind === "esm-reexport-star";
@@ -4316,6 +4627,36 @@ function hasDynamicEntryColocationRecipe(analyzed: AnalyzedProgram): boolean {
   return chunking.groups.some((group) => group.entriesAware === true);
 }
 
+/// The strict-wrapper init-cycle RECIPE exercised by the entries-aware manual-splitting factor: an
+/// acyclic ESM source graph, at least two effectful entries whose private app modules are captured by
+/// one exact group, and a uniquely imported, dependency-free app-private side-effect leaf left outside
+/// that group. The tag describes
+/// the structural recipe independently from the `entriesAware` option: a plain exact group can also
+/// manufacture the same chunk cycle, while `variation:entries-aware-group` records whether that option
+/// is actually present. Actual emitted chunk cycles remain an acceptance-script fact.
+function hasMergedEntryGroupInitCycleRecipe(analyzed: AnalyzedProgram): boolean {
+  const { program } = analyzed;
+  const build = buildConfigOf(program);
+  const chunking = programChunking(program);
+  if (
+    chunking.kind !== "manual" ||
+    build.strictExecutionOrder !== true ||
+    build.outputFormat !== "esm" ||
+    build.includeDependenciesRecursively !== false
+  ) {
+    return false;
+  }
+  return chunking.groups.some((group) => {
+    if (group.moduleIds.length < 2) {
+      return false;
+    }
+    return (
+      findMergedEntryAppPair(program.modules, program.entries, new Set(group.moduleIds), true) !==
+      undefined
+    );
+  });
+}
+
 export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[] {
   const tags = new Set<string>();
   // The consumer takes ONLY the AnalyzedProgram and reads the program from it (no separate program
@@ -4399,12 +4740,18 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   if (chunking.kind === "manual") {
     tags.add("mechanism:manual-chunks");
     tags.add("chunking:explicit");
+    if (chunking.groups.some((group) => group.entriesAware === true)) {
+      tags.add("variation:entries-aware-group");
+    }
     if (manualGroupsSeparateFormats(chunking.groups, modulesById)) {
       tags.add("mechanism:separate-interop");
     }
   } else if (chunking.kind === "organic") {
     tags.add("chunking:organic");
     tags.add("mechanism:organic-chunks");
+    if (chunking.groups.some((group) => group.entriesAware === true)) {
+      tags.add("variation:entries-aware-group");
+    }
   } else {
     tags.add("chunking:default");
   }
@@ -4517,6 +4864,10 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   // cycle by inspecting the built chunk graph (`moduleIds`/`imports`) — "tag the recipe, verify the merge".
   if (hasOptimizerRuntimePlacementRecipe(analyzed)) {
     tags.add("mechanism:optimizer-runtime-placement-cycle");
+  }
+
+  if (hasMergedEntryGroupInitCycleRecipe(analyzed)) {
+    tags.add("mechanism:merged-entry-group-init-cycle");
   }
 
   // The dynamic-entry × wrap-kind × merge RECIPE (FW-B deliverable 2, cluster 4 / T1): a config that

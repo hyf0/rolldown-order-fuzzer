@@ -67,6 +67,16 @@ compositions rather than dead coverage: vendor-share merge (`minShareCount≥2`)
 (`\.mjs$`/`\.cjs$` test), and two-group priority competition. `minShareCount` is capped at the case's
 entry count so a share threshold can actually capture something.
 
+### Entries-aware manual-code-splitting factor (#10259 follow-up)
+
+`entriesAware` used to be representable but absent from the ordinary strict random corpus: it appeared only in directed or opt-in cells. A 10,000-seed size-12 scan found zero ordinary random-mixed cases carrying it. That left the public #10259 mechanism unexpressed even though exact manual groups already covered a different way to manufacture chunk cycles.
+
+The new end-stage factor is deliberately a joint structural selection, not a free boolean roll. It only applies to strict ESM output when the final source graph is acyclic, at least two effectful ESM entries each own a distinct effectful ESM app dependency, and at least one selected app has an effectful entry-private side-effect dependency outside the group. It replaces the previous chunking config with one exact manual group over the two app ids, sets `entriesAware:true` plus `entriesAwareMergeThreshold:100 * 1024`, and forces global `includeDependenciesRecursively:false`. Replacing older groups prevents one from capturing the private dependency and dissolving the return edge.
+
+Exact model ids, rather than a rendered-path regex, keep membership stable when shrinking removes or renumbers a root module. The factor runs after every source-affecting roll and after the output-format/minify axes, so it cannot alter source files, packages, schedules, or those older axes.
+
+`buildEntriesAwareChunkCycle` is the deterministic proof shape: three entries each import one app module, the personal app imports one private leaf, and the group selects only the apps. The emitted app/common chunk imports the personal entry chunk for the leaf while the personal entry imports the common chunk for its app. `scripts/entries-aware-cycle-catch.ts` verifies that the chunk cycle exists in every cell, released Rolldown fails with `init_* is not a function` in both strict modes, and the declaration-form wrapper implementation passes in both.
+
 ### Why the oracle stays valid
 
 Chunking is BUNDLE-SIDE ONLY — the source run executes the rendered `.mjs`/`.cjs` files directly and
@@ -103,9 +113,8 @@ composition (or panics on a cyclic chunk graph) is a genuine bug: an `events-reo
 ## Invariants (do not break)
 
 - One chunking config per case; `manualChunkGroups` and `organicChunkGroups` never coexist (validated).
-- Organic groups reference no module id, so they survive a module drop unchanged — `shrink.ts`
-  `dropModule` preserves them for byte-identical replay, and a shrink candidate can drop the whole
-  organic config to reveal whether chunking is load-bearing for a bug.
+- `variation:entries-aware-group` means the persisted config genuinely contains an `entriesAware:true` group. `mechanism:merged-entry-group-init-cycle` separately marks the exact-manual structural recipe with a unique dependency-free private side-effect leaf and no other synchronous app dependency; output chunk inspection remains the final proof for a particular build.
+- Organic groups carry no structured module-id list, so they survive a module drop unchanged — `shrink.ts` `dropModule` preserves the regex/threshold descriptor, and a shrink candidate can drop the whole organic config to reveal whether chunking is load-bearing for a bug. The strict entries-aware cycle factor instead uses exact manual ids, which shrink with the model and cannot drift when renderer path indices change.
 - The chunking config is threaded through BOTH the campaign path
   (`main.ts` → `rolldown-adapter.ts` → `rolldown-build-child.ts`) and the replay/shrink path (same
   functions, driven from `shrink.ts`). `FAILURE_ARTIFACT_SCHEMA_VERSION` bumped 14 → 15; the artifact

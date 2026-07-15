@@ -101,6 +101,8 @@ The fixed scenarios passed the complete pipeline (1000-seed clean campaigns), so
 
 The first random-mixed window immediately reproduced the released-Rolldown crash family `init_<m> is not a function` (cyclic chunk graphs from manual groups; fixed by declaration-form wrappers in rolldown#10104), which the fixed templates could not reach.
 
+The strict random corpus now also carries an exact-manual-splitting + entries-aware factor inspired by the execution-order failure reported in rolldown#10259. It is generated only for strict ESM output and an acyclic multi-entry graph with effectful entry-private app modules plus an effectful private side-effect dependency outside the group, so `entriesAwareMergeThreshold` can manufacture a common-chunk ↔ entry-chunk cycle instead of merely toggling a configuration bit. `variation:entries-aware-group` records the option and `mechanism:merged-entry-group-init-cycle` records the structural recipe. `buildEntriesAwareChunkCycle` is the fixed three-entry proof shape; `scripts/entries-aware-cycle-catch.ts` verifies the actual emitted cycle plus released-red/new-green behavior in both strict wrapping modes. See [entries-aware-chunk-cycle](./entries-aware-chunk-cycle.md).
+
 ## Rolldown build contract
 
 Each build runs in a dedicated Node child process whose working directory is the adapter's unique temporary directory. The parent passes absolute source and bundle paths plus serializable build options; the child reconstructs manual chunk predicates, imports the configured Rolldown package, runs the build, waits for `bundle.close()`, and returns serializable output metadata.

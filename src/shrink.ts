@@ -99,6 +99,10 @@ async function main(): Promise<void> {
   process.stderr.write(`Final signature: ${finalSignature}\n`);
 }
 
+/// The optional entries-aware levers of an exact-manual group, each individually droppable when
+/// shrinking. Module membership is already shrunk by `dropModule` and whole-group removal below.
+const MANUAL_OPTIONAL_FIELDS = ["entriesAware", "entriesAwareMergeThreshold"] as const;
+
 /// The optional levers of an organic chunk group, each individually droppable when shrinking.
 const ORGANIC_OPTIONAL_FIELDS = [
   "test",
@@ -107,6 +111,8 @@ const ORGANIC_OPTIONAL_FIELDS = [
   "minShareCount",
   "priority",
   "includeDependenciesRecursively",
+  "entriesAware",
+  "entriesAwareMergeThreshold",
 ] as const;
 
 /// Canonicalize a LEGACY (schema ≤17) program's `sideEffectFree` flags onto the `packages`
@@ -215,12 +221,25 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
   // is preserved, which also reveals whether the chunking is load-bearing.
   const chunking = programChunking(program);
   if (chunking.kind === "manual") {
-    for (const [index] of chunking.groups.entries()) {
+    for (const [index, group] of chunking.groups.entries()) {
       const groups = chunking.groups.filter((_, i) => i !== index);
       yield withChunking(
         program,
         groups.length > 0 ? { kind: "manual", groups } : { kind: "automatic" },
       );
+      for (const field of MANUAL_OPTIONAL_FIELDS) {
+        if (group[field] === undefined) {
+          continue;
+        }
+        const trimmed = { ...group };
+        delete (trimmed as Record<string, unknown>)[field];
+        yield withChunking(program, {
+          kind: "manual",
+          groups: chunking.groups.map((candidate, groupIndex) =>
+            groupIndex === index ? trimmed : candidate,
+          ),
+        });
+      }
     }
   }
   if (chunking.kind === "organic") {

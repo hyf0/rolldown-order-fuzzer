@@ -203,7 +203,16 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       ],
       entries: [{ name: "main", moduleId: "entry" }],
       schedule: [{ kind: "import-entry", entry: "main" }],
-      organicChunkGroups: [{ name: "g", minShareCount: 2, maxSize: 500, priority: 1 }],
+      organicChunkGroups: [
+        {
+          name: "g",
+          minShareCount: 2,
+          maxSize: 500,
+          priority: 1,
+          entriesAware: true,
+          entriesAwareMergeThreshold: 10_000,
+        },
+      ],
     } satisfies ProgramModel;
     // A candidate drops one optional field (e.g. maxSize) while keeping the organic config. The shrinker
     // re-canonicalizes chunking onto `build.chunking`, so read it through `programChunking`.
@@ -213,6 +222,59 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       return group !== undefined && group.maxSize === undefined && group.minShareCount === 2;
     });
     expect(trimmed).toBeDefined();
+    const withoutEntriesAware = findValidCandidate(program, (candidate) => {
+      const chunking = programChunking(candidate);
+      const group = chunking.kind === "organic" ? chunking.groups[0] : undefined;
+      return group !== undefined && group.entriesAware === undefined;
+    });
+    expect(withoutEntriesAware).toBeDefined();
+    const withoutMergeThreshold = findValidCandidate(program, (candidate) => {
+      const chunking = programChunking(candidate);
+      const group = chunking.kind === "organic" ? chunking.groups[0] : undefined;
+      return group !== undefined && group.entriesAwareMergeThreshold === undefined;
+    });
+    expect(withoutMergeThreshold).toBeDefined();
+  });
+
+  test("shrinks entriesAware fields from an exact manual group independently", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [{ kind: "esm-side-effect-import", target: "leaf" }],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+        {
+          id: "leaf",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "leaf", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      manualChunkGroups: [
+        {
+          name: "g",
+          moduleIds: ["leaf"],
+          entriesAware: true,
+          entriesAwareMergeThreshold: 100 * 1024,
+        },
+      ],
+    } satisfies ProgramModel;
+    const withoutEntriesAware = findValidCandidate(program, (candidate) => {
+      const chunking = programChunking(candidate);
+      const group = chunking.kind === "manual" ? chunking.groups[0] : undefined;
+      return group?.entriesAware === undefined && group?.entriesAwareMergeThreshold === 100 * 1024;
+    });
+    expect(withoutEntriesAware).toBeDefined();
+    const withoutMergeThreshold = findValidCandidate(program, (candidate) => {
+      const chunking = programChunking(candidate);
+      const group = chunking.kind === "manual" ? chunking.groups[0] : undefined;
+      return group?.entriesAware === true && group.entriesAwareMergeThreshold === undefined;
+    });
+    expect(withoutMergeThreshold).toBeDefined();
   });
 
   test("dropping the last read of an event with hiddenReadFn also drops hiddenReadFn", () => {

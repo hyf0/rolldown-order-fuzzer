@@ -46,6 +46,9 @@ export {
 
 const UINT32_RANGE = 0x1_0000_0000;
 
+// 20: exact-manual chunk groups gain the optional `entriesAware` / `entriesAwareMergeThreshold` fields,
+// allowing the strict random corpus to persist a stable manual-splitting + entries-aware chunk-cycle
+// recipe. Backward compatible: both fields are optional, so every v19 model keeps its old behavior.
 // 19: W14c — the canonical member-PATH `ValueRead` (subsuming the single-member namespace read), the
 // `export * as ns from` namespace re-export operation, the enriched canonical `RouteHop`
 // (target + exported/imported name), `strictExecutionOrder` becomes a rollable axis tied to the
@@ -67,7 +70,7 @@ const UINT32_RANGE = 0x1_0000_0000;
 // per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 19 as const;
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 20 as const;
 
 export interface CampaignSummary {
   readonly casesRun: number;

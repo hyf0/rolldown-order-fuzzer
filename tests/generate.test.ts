@@ -6,6 +6,7 @@ import {
   generateCase,
   generateCrossChunkInitCycleCase,
   generateDynamicWrapKindMergeCase,
+  generateEntriesAwareChunkCycleCase,
   generateExoticImportReadsCase,
   generateOptimizerCycleCase,
   generateStaticCrossEntryLeakCase,
@@ -706,6 +707,54 @@ describe("organic chunking axis (wave 6)", () => {
     expect(randomMixed).toBeGreaterThan(0);
     expect(organic / randomMixed).toBeGreaterThanOrEqual(0.4);
   });
+
+  test("random-mixed reaches the selective entriesAware manual-code-splitting factor", () => {
+    let randomMixed = 0;
+    let entriesAware = 0;
+    let stableCycleRecipes = 0;
+    for (let seed = 0; seed < 6_000; seed += 1) {
+      const generated = generateCase(seed, 12);
+      if (generated.template !== "random-mixed") {
+        continue;
+      }
+      randomMixed += 1;
+      if (!generated.coverageTags.includes("variation:entries-aware-group")) {
+        continue;
+      }
+      entriesAware += 1;
+      if (generated.coverageTags.includes("mechanism:merged-entry-group-init-cycle")) {
+        stableCycleRecipes += 1;
+      }
+      const build = buildConfigOf(generated.program);
+      const chunking = programChunking(generated.program);
+      expect(build.strictExecutionOrder).toBe(true);
+      expect(build.outputFormat).toBe("esm");
+      expect(build.includeDependenciesRecursively).toBe(false);
+      expect(generated.program.entries.length).toBeGreaterThanOrEqual(2);
+      expect(ProgramFacts.from(generated.program.modules).cycles().cyclicMembers.size).toBe(0);
+      expect(chunking.kind).toBe("manual");
+      if (chunking.kind === "manual") {
+        expect(chunking.groups).toHaveLength(1);
+        const group = chunking.groups[0];
+        expect(group?.entriesAware).toBe(true);
+        expect(group?.entriesAwareMergeThreshold).toBe(100 * 1024);
+        expect(group?.moduleIds).toHaveLength(2);
+        expect(
+          group?.moduleIds.every(
+            (moduleId) =>
+              generated.program.modules.find((module) => module.id === moduleId)?.events.length !==
+              0,
+          ),
+        ).toBe(true);
+      }
+      expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    }
+    expect(randomMixed).toBeGreaterThan(0);
+    // The factor is deliberately selective, but it must be campaign-visible rather than a one-seed
+    // accident. The current deterministic window produces dozens of cases.
+    expect(entriesAware).toBeGreaterThanOrEqual(50);
+    expect(stableCycleRecipes).toBeGreaterThanOrEqual(5);
+  });
 });
 
 describe("size mix (wave 6)", () => {
@@ -1263,6 +1312,65 @@ describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
       "cc-interop",
       "cc-shared",
     ]);
+  });
+});
+
+describe("entriesAware manual-code-splitting chunk cycle (rolldown #10259)", () => {
+  test("builds a valid three-entry DAG with only the app modules selected", () => {
+    const generated = generateEntriesAwareChunkCycleCase(0);
+    expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    expect(ProgramFacts.from(generated.program.modules).cycles().cyclicMembers.size).toBe(0);
+    expect(generated.program.entries.map((entry) => entry.name)).toEqual([
+      "personal",
+      "admin",
+      "theming",
+    ]);
+    // Admin first is the failing evaluation order on the released implementation: it enters the common
+    // app chunk, follows the chunk-cycle import into personal, then calls back into app-personal.
+    expect(generated.program.schedule[0]).toEqual({ kind: "import-entry", entry: "admin" });
+
+    const chunking = programChunking(generated.program);
+    expect(chunking.kind).toBe("manual");
+    if (chunking.kind !== "manual") {
+      return;
+    }
+    const group = chunking.groups.find((candidate) => candidate.entriesAware === true);
+    expect(group).toBeDefined();
+    expect(group?.entriesAwareMergeThreshold).toBe(100 * 1024);
+    expect(group?.moduleIds).toEqual(["ea-app-personal", "ea-app-admin", "ea-app-theming"]);
+    expect(group?.moduleIds).not.toContain("ea-leaf");
+    expect(group?.moduleIds).not.toContain("ea-personal");
+    expect(buildConfigOf(generated.program).includeDependenciesRecursively).toBe(false);
+  });
+
+  test("separates the entriesAware option from the structural cycle recipe", () => {
+    const generated = generateEntriesAwareChunkCycleCase(0);
+    expect(generated.coverageTags).toContain("variation:entries-aware-group");
+    expect(generated.coverageTags).toContain("mechanism:merged-entry-group-init-cycle");
+    expect(generated.coverageTags).toContain("mechanism:multiple-entries");
+    expect(generated.coverageTags).toContain("axis:strict-execution-order:true");
+    expect(generated.coverageTags).toContain("chunking:explicit");
+
+    const build = buildConfigOf(generated.program);
+    if (build.chunking.kind !== "manual") {
+      throw new Error("expected exact manual chunking");
+    }
+    const withoutEntriesAware: ProgramModel = {
+      ...generated.program,
+      build: {
+        ...build,
+        chunking: {
+          kind: "manual",
+          groups: build.chunking.groups.map((group) => ({
+            name: group.name,
+            moduleIds: group.moduleIds,
+          })),
+        },
+      },
+    };
+    const ablatedTags = deriveCoverageTags(analyzeProgram(withoutEntriesAware));
+    expect(ablatedTags).not.toContain("variation:entries-aware-group");
+    expect(ablatedTags).toContain("mechanism:merged-entry-group-init-cycle");
   });
 });
 

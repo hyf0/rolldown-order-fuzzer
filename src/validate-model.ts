@@ -1528,6 +1528,17 @@ function validateManualChunkGroups(
         );
       }
     }
+    if (group.entriesAware !== undefined && typeof group.entriesAware !== "boolean") {
+      errors.push(`manualChunkGroups[${groupIndex}].entriesAware: must be a boolean`);
+    }
+    if (
+      group.entriesAwareMergeThreshold !== undefined &&
+      (!Number.isFinite(group.entriesAwareMergeThreshold) || group.entriesAwareMergeThreshold < 0)
+    ) {
+      errors.push(
+        `manualChunkGroups[${groupIndex}].entriesAwareMergeThreshold: must be a finite non-negative number`,
+      );
+    }
   }
 }
 

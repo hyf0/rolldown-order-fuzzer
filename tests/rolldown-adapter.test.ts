@@ -380,14 +380,25 @@ describe("withRolldownBuild", () => {
         "",
       ].join("\n"),
     );
-    // A program whose persisted BuildConfig carries a manual chunk group (so codeSplitting has groups
-    // the global includeDependenciesRecursively applies to), idr:false, and lazyBarrel:true.
+    // A program whose persisted BuildConfig carries an entries-aware exact manual chunk group (so
+    // codeSplitting has groups the global includeDependenciesRecursively applies to), idr:false, and
+    // lazyBarrel:true.
     const base = singleEntryProgram();
     const program: ProgramModel = {
       ...base,
       modules: [...base.modules, { id: "leaf", format: "esm", dependencies: [], events: [] }],
       build: {
-        chunking: { kind: "manual", groups: [{ name: "g", moduleIds: ["leaf"] }] },
+        chunking: {
+          kind: "manual",
+          groups: [
+            {
+              name: "g",
+              moduleIds: ["leaf"],
+              entriesAware: true,
+              entriesAwareMergeThreshold: 100 * 1024,
+            },
+          ],
+        },
         includeDependenciesRecursively: false,
         preserveEntrySignatures: "allow-extension",
         lazyBarrel: true,
@@ -406,11 +417,20 @@ describe("withRolldownBuild", () => {
         { packageSpecifier: pathToFileURL(packagePath).href, onDemandWrapping: true },
       );
       const captured = JSON.parse(await readFile(capturePath, "utf8"));
-      expect(captured.experimental).toEqual({ onDemandWrapping: true, lazyBarrel: true });
+      expect(captured.experimental).toEqual({
+        onDemandWrapping: true,
+        lazyBarrel: true,
+        chunkOptimization: true,
+      });
       expect(captured.preserveEntrySignatures).toBe("allow-extension");
       expect(captured.strictExecutionOrder).toBe(true);
       // The global includeDependenciesRecursively:false rides on the codeSplitting object.
       expect(captured.codeSplitting.includeDependenciesRecursively).toBe(false);
+      expect(captured.codeSplitting.groups[0]).toMatchObject({
+        name: "g",
+        entriesAware: true,
+        entriesAwareMergeThreshold: 100 * 1024,
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1692,6 +1712,22 @@ describe("withRolldownBuild", () => {
       {
         ...valid,
         manualChunkGroups: [{ name: "shared", modulePaths: ["relative/module.mjs"] }],
+      },
+      {
+        ...valid,
+        manualChunkGroups: [
+          { name: "shared", modulePaths: ["/tmp/source/shared.mjs"], entriesAware: "yes" },
+        ],
+      },
+      {
+        ...valid,
+        manualChunkGroups: [
+          {
+            name: "shared",
+            modulePaths: ["/tmp/source/shared.mjs"],
+            entriesAwareMergeThreshold: -1,
+          },
+        ],
       },
       { ...valid, output: { ...valid.output, format: "iife" } },
       // The build child accepts any BOOLEAN strictExecutionOrder (a non-boolean is invalid); the

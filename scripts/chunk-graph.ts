@@ -57,14 +57,21 @@ function codeSplittingFor(
   if (chunking.kind === "manual") {
     const groups = chunking.groups.map((group) => {
       const paths = new Set(group.moduleIds.map((id) => abs(id)));
-      return { name: group.name, test: (moduleId: string) => paths.has(resolve(moduleId)) };
+      return {
+        name: group.name,
+        test: (moduleId: string) => paths.has(resolve(moduleId)),
+        ...(group.entriesAware === undefined ? {} : { entriesAware: group.entriesAware }),
+        ...(group.entriesAwareMergeThreshold === undefined
+          ? {}
+          : { entriesAwareMergeThreshold: group.entriesAwareMergeThreshold }),
+      };
     });
     return {
       codeSplitting: {
         groups,
         includeDependenciesRecursively: build.includeDependenciesRecursively,
       },
-      chunkOptimization: false,
+      chunkOptimization: chunking.groups.some((group) => group.entriesAware === true),
     };
   }
   if (chunking.kind === "organic") {
@@ -190,6 +197,7 @@ export async function inspectChunkGraph(
       dir: join(dir, "dist"),
       strictExecutionOrder: build.strictExecutionOrder,
       codeSplitting,
+      minify: build.minify,
     });
     await bundle.close?.();
     const chunks: ChunkNode[] = [];

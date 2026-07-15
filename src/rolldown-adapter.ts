@@ -732,6 +732,10 @@ async function buildWithChild(
       modulePaths: group.moduleIds.map((moduleId) =>
         resolve(sourceDirectory, requiredPath(rendered.modulePaths, moduleId, "module")),
       ),
+      ...(group.entriesAware === undefined ? {} : { entriesAware: group.entriesAware }),
+      ...(group.entriesAwareMergeThreshold === undefined
+        ? {}
+        : { entriesAwareMergeThreshold: group.entriesAwareMergeThreshold }),
     })),
     // Organic (size/share-driven) groups pass through as serializable descriptors; the child maps
     // them onto rolldown's `codeSplitting.groups` and reconstructs each regex `test` from its source.

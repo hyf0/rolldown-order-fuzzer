@@ -35,10 +35,12 @@
 ///   node scripts/corpus-manifest.ts explain-delta <path>  # diff against an OLD golden and PROVE the
 ///                                                         # delta CAUSALLY: each changed case's delta
 ///                                                         # must be accounted for by the allowed W14b
-///                                                         # transformations only (package
+///                                                         # transformations plus the final
+///                                                         # entries-aware factor (package
 ///                                                         # path/specifier/package.json additions, a
 ///                                                         # new-operation file, an appended package
-///                                                         # chunk group) — a render error, a buildAxes
+///                                                         # chunk group, or the reserved exact-manual
+///                                                         # replacement) — a render error, a buildAxes
 ///                                                         # drift, a non-package codeSplitting move, or
 ///                                                         # an unexplained root-file change fails it
 ///                                                         # (exit 1)
@@ -185,6 +187,8 @@ interface CodeSplittingGroup {
   readonly name?: string;
   readonly moduleIds?: readonly string[];
   readonly test?: string;
+  readonly entriesAware?: boolean;
+  readonly entriesAwareMergeThreshold?: number;
 }
 
 /// The chunk groups of an `effectiveCodeSplitting` descriptor (`{groups}` manual / `{organicGroups}`
@@ -211,6 +215,24 @@ function isPackageChunkGroup(group: CodeSplittingGroup, memberIds: ReadonlySet<s
   return false;
 }
 
+/// The entries-aware END-STAGE factor's exact manual-code-splitting group. It is the only ordinary
+/// random group with this reserved name and option pair; its stable model ids let the golden attribute
+/// this config-only delta without trusting a mutable coverage tag.
+function isEntriesAwareChunkCycleGroup(group: CodeSplittingGroup): boolean {
+  return (
+    group.name === "entries-aware-apps" &&
+    group.entriesAware === true &&
+    group.entriesAwareMergeThreshold === 100 * 1024 &&
+    group.test === undefined &&
+    group.moduleIds?.length === 2
+  );
+}
+
+function isEntriesAwareChunkCycleConfig(codeSplitting: unknown): boolean {
+  const groups = codeSplittingGroups(codeSplitting);
+  return groups.length === 1 && groups[0] !== undefined && isEntriesAwareChunkCycleGroup(groups[0]);
+}
+
 /// PROVE a codeSplitting change is caused ONLY by the package enrichment: every group the OLD case had
 /// must survive (none dropped), and every group the NEW case ADDED must be a package chunk group. A
 /// dropped base group or an added NON-package group is an unexplained chunking change (the reviewer's
@@ -230,18 +252,19 @@ function unexplainedCodeSplitting(
     }
     remainingNew.splice(index, 1);
   }
-  const addedNonPackage = codeSplittingGroups(after).filter(
+  const addedUnexplained = codeSplittingGroups(after).filter(
     (group) =>
       remainingNew.includes(canonicalJson(group)) && !isPackageChunkGroup(group, memberIds),
   );
-  return addedNonPackage.length > 0
-    ? "codeSplitting changed by a non-package chunk group"
+  return addedUnexplained.length > 0
+    ? "codeSplitting changed by an unrecognized chunk group"
     : undefined;
 }
 
 /// The reasons a changed case is NOT fully explained by the allowed W14b transformations (package
 /// path/specifier/package.json additions, identified new-operation files, an appended package chunk
-/// group). An empty list means the change is causally accounted for. Deliberately does NOT trust
+/// group, or the reserved final exact-manual factor). An empty list means the change is causally
+/// accounted for. Deliberately does NOT trust
 /// `packages.length > 0` alone: it PROVES the structural axes did not drift (`buildAxes`), the chunking
 /// change is a package chunk group, and every in-place root-file change is a package specifier update
 /// or a new-operation file — so a codeSplitting/schedule/render drift the old feature-presence check
@@ -263,6 +286,9 @@ function unexplainedChangeReasons(
   program: ProgramModel | undefined,
 ): string[] {
   const reasons: string[] = [];
+  const entriesAwareFactorChanged =
+    isEntriesAwareChunkCycleConfig(after.codeSplitting) &&
+    !isEntriesAwareChunkCycleConfig(before.codeSplitting);
   // (1) The package enrichment is END-STAGE (drawn after the BuildConfig axes are rolled), so it can
   // never move includeDependenciesRecursively / lazyBarrel / preserveEntrySignatures /
   // strictExecutionOrder. A buildAxes move is a real drift, not a package effect. EXCEPT the two
@@ -270,24 +296,43 @@ function unexplainedChangeReasons(
   // `outputFormat` key, a cjs case gains `outputFormat: "cjs"`; an un-minified case has no `minify` key,
   // a minified case gains `minify: true` — both allowed axis rolls. So compare the buildAxes with BOTH
   // STRIPPED; only a difference in the OTHER four axes is a real drift.
-  if (
-    canonicalJson(buildAxesWithoutRolledAxes(before)) !==
-    canonicalJson(buildAxesWithoutRolledAxes(after))
-  ) {
-    reasons.push("buildAxes drifted (the end-stage enrichment cannot move a pre-enrichment axis)");
+  const beforeAxes = buildAxesWithoutRolledAxes(before);
+  const afterAxes = buildAxesWithoutRolledAxes(after);
+  const comparableBeforeAxes =
+    entriesAwareFactorChanged && typeof beforeAxes === "object" && beforeAxes !== null
+      ? Object.fromEntries(
+          Object.entries(beforeAxes as Record<string, unknown>).filter(
+            ([key]) => key !== "includeDependenciesRecursively",
+          ),
+        )
+      : beforeAxes;
+  const comparableAfterAxes =
+    entriesAwareFactorChanged && typeof afterAxes === "object" && afterAxes !== null
+      ? Object.fromEntries(
+          Object.entries(afterAxes as Record<string, unknown>).filter(
+            ([key]) => key !== "includeDependenciesRecursively",
+          ),
+        )
+      : afterAxes;
+  if (canonicalJson(comparableBeforeAxes) !== canonicalJson(comparableAfterAxes)) {
+    reasons.push("buildAxes drifted outside the explicitly allowed end-stage changes");
+  }
+  if (entriesAwareFactorChanged && after.buildAxes?.includeDependenciesRecursively !== false) {
+    reasons.push(
+      "the entriesAware chunk-cycle factor must force includeDependenciesRecursively:false",
+    );
   }
   const outputFormatChanged = before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat;
   const minifyChanged = before.buildAxes?.minify !== after.buildAxes?.minify;
   const rolledAxisChanged = outputFormatChanged || minifyChanged;
   const membership = program === undefined ? undefined : packageMembershipOf(program);
   const memberIds = new Set(membership?.keys() ?? []);
-  // (2) A codeSplitting change must be ONLY appended package chunk groups.
+  // (2) A codeSplitting change must be only appended package chunk groups, unless the recognized final
+  // entries-aware factor replaces the whole config with its one exact group.
   if (canonicalJson(before.codeSplitting) !== canonicalJson(after.codeSplitting)) {
-    const codeSplitReason = unexplainedCodeSplitting(
-      before.codeSplitting,
-      after.codeSplitting,
-      memberIds,
-    );
+    const codeSplitReason = entriesAwareFactorChanged
+      ? undefined
+      : unexplainedCodeSplitting(before.codeSplitting, after.codeSplitting, memberIds);
     if (codeSplitReason !== undefined) {
       reasons.push(codeSplitReason);
     }
@@ -299,22 +344,23 @@ function unexplainedChangeReasons(
   // is unchanged and only the buildAxes gained `outputFormat: "cjs"` and/or `minify: true`.
   const carriesPackages = (after.packages?.length ?? 0) > 0;
   const newOp = program !== undefined && carriesNewOperation(program);
-  if (!carriesPackages && !newOp && !rolledAxisChanged) {
-    reasons.push("changed without packages, a new operation, or an output-format/minify roll");
+  if (!carriesPackages && !newOp && !rolledAxisChanged && !entriesAwareFactorChanged) {
+    reasons.push(
+      "changed without packages, a new operation, an output-format/minify roll, or the entriesAware chunking factor",
+    );
     return reasons;
   }
   if (!carriesPackages && !newOp) {
-    // An axis-only change: no packages, no new op, only the output-format and/or minify axis moved. The
-    // source bytes must therefore be byte-identical (neither axis touches the rendered source) — a file /
-    // codeSplitting / schedule change with no package or new-op cause would still fall through to the
-    // per-file checks below and be flagged.
+    // A bundle-only change: no packages and no new source operation, only the output-format/minify axes
+    // and/or the entriesAware chunking factor moved. Source bytes must therefore be byte-identical — a
+    // rendered-file change with no package or new-operation cause is still unexplained.
     for (const beforeFile of before.files) {
       const afterHash = new Map(after.files.map((file) => [file.path, file.sha256])).get(
         beforeFile.path,
       );
       if (afterHash !== undefined && afterHash !== beforeFile.sha256) {
         reasons.push(
-          `axis-only change altered source file ${beforeFile.path} (the output-format/minify axes must not touch rendered source)`,
+          `bundle-only change altered source file ${beforeFile.path} (output-format/minify/entriesAware chunking must not touch rendered source)`,
         );
       }
     }
@@ -644,11 +690,10 @@ function main(argv: readonly string[]): number {
       return 2;
     }
     // PROVE the labeled golden delta CAUSALLY: regenerate against an OLD golden and require every
-    // changed case's delta to be accounted for by the ALLOWED W14b transformations (package
-    // path/specifier/package.json additions, identified new-operation files, an appended package
-    // chunk group) — not merely to CARRY packages. A buildAxes drift, a non-package codeSplitting
-    // move, a root file that changed for no package/new-op reason, or a render failure fails the
-    // proof; so does any removed/added case. See `unexplainedChangeReasons`.
+    // changed case's delta to be accounted for by the allowed source enrichments, last-drawn scalar
+    // axes, or the entries-aware exact-manual factor — not merely to CARRY a feature. A buildAxes
+    // drift, an unrecognized codeSplitting move, a root file that changed for no source reason, or a
+    // render failure fails the proof; so does any removed/added case. See `unexplainedChangeReasons`.
     if (errors.length > 0) {
       process.stderr.write(
         `explain-delta: FAIL — ${errors.length} case(s) failed to render; a delta with render errors is not proven\n`,
@@ -666,6 +711,7 @@ function main(argv: readonly string[]): number {
     let changedWithPackages = 0;
     let changedNewOpOnly = 0;
     let changedAxisOnly = 0;
+    let changedEntriesAwareOnly = 0;
     const unexplained: string[] = [];
     for (const [key, before] of baselineByKey) {
       const after = currentByKey.get(key);
@@ -689,7 +735,12 @@ function main(argv: readonly string[]): number {
       const rolledAxisChanged =
         before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat ||
         before.buildAxes?.minify !== after.buildAxes?.minify;
-      if ((after.packages?.length ?? 0) > 0) {
+      const entriesAwareFactorChanged =
+        isEntriesAwareChunkCycleConfig(after.codeSplitting) &&
+        !isEntriesAwareChunkCycleConfig(before.codeSplitting);
+      if (entriesAwareFactorChanged) {
+        changedEntriesAwareOnly += 1;
+      } else if ((after.packages?.length ?? 0) > 0) {
         changedWithPackages += 1;
       } else if (rolledAxisChanged && !(program !== undefined && carriesNewOperation(program))) {
         changedAxisOnly += 1;
@@ -705,13 +756,14 @@ function main(argv: readonly string[]): number {
     // "package-free" = the cases carrying NO packages: the byte-identical ones plus the new-op-only
     // changes. (The old wording called the byte-identical count "the package-free corpus", which
     // under-counts by the new-op-only cases.)
-    const packageFree = unchanged + changedNewOpOnly + changedAxisOnly;
+    const packageFree = manifest.filter((entry) => (entry.packages?.length ?? 0) === 0).length;
     process.stdout.write(
       `explain-delta: ${baselineByKey.size} baseline cases — ${unchanged} byte-identical, ` +
         `${changedWithPackages} changed with packages, ${changedNewOpOnly} changed by a new operation only, ` +
         `${changedAxisOnly} changed by an output-format/minify axis roll only, ` +
+        `${changedEntriesAwareOnly} changed by the entriesAware chunking factor only, ` +
         `${unexplained.length} unexplained ` +
-        `(${packageFree} package-free = ${unchanged} unchanged + ${changedNewOpOnly} new-op + ${changedAxisOnly} axis-only)\n`,
+        `(${packageFree} package-free cases)\n`,
     );
     for (const line of unexplained.slice(0, 40)) {
       process.stderr.write(`UNEXPLAINED: ${line}\n`);

@@ -456,6 +456,12 @@ export type ScheduleOperation =
 export interface ManualChunkGroup {
   readonly name: string;
   readonly moduleIds: readonly string[];
+  /// Split this exact module-id group into per-entry-reachability subgroups before optional merging.
+  /// This is the stable-path form of the entries-aware init-cycle random factor: the adapter
+  /// reconstructs an exact-path predicate from `moduleIds`, so dropping/renumbering an earlier root
+  /// module during shrink cannot make the selector drift to a different module.
+  readonly entriesAware?: boolean;
+  readonly entriesAwareMergeThreshold?: number;
 }
 
 /// A size/share-driven code-splitting group whose composition ROLLDOWN decides — the organic
@@ -480,14 +486,13 @@ export interface OrganicChunkGroupConfig {
   readonly priority?: number;
   readonly includeDependenciesRecursively?: boolean;
   /// `CodeSplittingGroup.entriesAware` (W14c) — split the group's modules into per-entry-reachability
-  /// subgroups instead of one shared chunk. Paired with `entriesAwareMergeThreshold` it is the exact
-  /// #9998 config: at `strictExecutionOrder:false` the merged subgroup co-locates modules of DISJOINT
-  /// entry reachability into one eager chunk, so loading one entry runs another's top-level (the
-  /// cross-entry leak the reachability-isolation oracle catches). Bundle-side only.
+  /// subgroups instead of one shared chunk. At `strictExecutionOrder:false`, the cross-entry config can
+  /// co-locate modules of disjoint entry reachability and leak another entry's top level. Bundle-side only;
+  /// the strict init-cycle factor uses the exact-manual form above.
   readonly entriesAware?: boolean;
   /// `CodeSplittingGroup.entriesAwareMergeThreshold` — the byte size below which `entriesAware`
   /// subgroups merge back into one chunk (only meaningful with `entriesAware:true`). A large threshold
-  /// forces the merge that manufactures the #9998 cross-entry co-location.
+  /// forces the merge used by cross-entry co-location shapes.
   readonly entriesAwareMergeThreshold?: number;
 }
 

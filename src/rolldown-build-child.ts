@@ -41,6 +41,10 @@ export interface BuildChildHooks {
 export interface BuildChildManualChunkGroup {
   readonly name: string;
   readonly modulePaths: readonly string[];
+  /// Optional entries-aware splitting controls for an exact-path group. Any true value also enables
+  /// `experimental.chunkOptimization` in the input options.
+  readonly entriesAware?: boolean;
+  readonly entriesAwareMergeThreshold?: number;
 }
 
 /// The serializable form of a `ProgramModel.OrganicChunkGroupConfig`, mapped to a rolldown
@@ -55,9 +59,8 @@ export interface BuildChildOrganicChunkGroup {
   readonly minShareCount?: number;
   readonly priority?: number;
   readonly includeDependenciesRecursively?: boolean;
-  /// `CodeSplittingGroup.entriesAware` / `entriesAwareMergeThreshold` (W14c) — the #9998 cross-entry
-  /// config. When any group sets `entriesAware`, the child also enables `experimental.chunkOptimization`
-  /// (the pairing the issue's verified repro uses).
+  /// `CodeSplittingGroup.entriesAware` / `entriesAwareMergeThreshold` (W14c). When any group sets
+  /// `entriesAware`, the child also enables `experimental.chunkOptimization`.
   readonly entriesAware?: boolean;
   readonly entriesAwareMergeThreshold?: number;
 }
@@ -163,6 +166,19 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
           `build manualChunkGroups[${index}].modulePaths`,
         ).map((path, pathIndex) =>
           requireAbsolutePath(path, `build manualChunkGroups[${index}].modulePaths[${pathIndex}]`),
+        ),
+        ...(group.entriesAware === undefined
+          ? {}
+          : {
+              entriesAware: requireBoolean(
+                group.entriesAware,
+                `build manualChunkGroups[${index}].entriesAware`,
+              ),
+            }),
+        ...optionalNonNegativeNumber(
+          group.entriesAwareMergeThreshold,
+          `build manualChunkGroups[${index}].entriesAwareMergeThreshold`,
+          "entriesAwareMergeThreshold",
         ),
       };
     },
@@ -343,8 +359,8 @@ export async function runBuildChild(
       experimental: {
         onDemandWrapping: request.onDemandWrapping,
         lazyBarrel: request.lazyBarrel,
-        // The #9998 cross-entry-leak repro pairs entriesAware groups with chunkOptimization; enabled
-        // only when a group asks for it, so every other case's build is unchanged.
+        // Entries-aware groups pair with chunkOptimization; enable it only when a group asks for it,
+        // so every other case's build is unchanged.
         ...(usesChunkOptimization(request) ? { chunkOptimization: true } : {}),
       },
     };
@@ -459,11 +475,14 @@ function organicCodeSplitting(request: BuildChildRequest): { groups: CodeSplitti
   return { groups };
 }
 
-/// Whether any organic group requests `entriesAware`, which pairs with `experimental.chunkOptimization`
-/// (the verified #9998 repro enables both). Only turned on when a group asks for it, so no other case's
-/// build changes.
+/// Whether any exact-manual or organic group requests `entriesAware`, which pairs with
+/// `experimental.chunkOptimization`. Only turned on when a group asks for it, so no other case's build
+/// changes.
 function usesChunkOptimization(request: BuildChildRequest): boolean {
-  return request.organicChunkGroups.some((group) => group.entriesAware === true);
+  return (
+    request.manualChunkGroups.some((group) => group.entriesAware === true) ||
+    request.organicChunkGroups.some((group) => group.entriesAware === true)
+  );
 }
 
 function manualCodeSplitting(request: BuildChildRequest): true | { groups: CodeSplittingGroup[] } {
@@ -476,6 +495,10 @@ function manualCodeSplitting(request: BuildChildRequest): true | { groups: CodeS
     return {
       name: group.name,
       test: (moduleId) => paths.has(resolve(moduleId)),
+      ...(group.entriesAware === undefined ? {} : { entriesAware: group.entriesAware }),
+      ...(group.entriesAwareMergeThreshold === undefined
+        ? {}
+        : { entriesAwareMergeThreshold: group.entriesAwareMergeThreshold }),
     };
   });
   return groups.length === 0 ? true : { groups };
