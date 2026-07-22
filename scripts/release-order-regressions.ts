@@ -78,6 +78,8 @@ const GLOBAL_READ_DESCRIPTIONS = {
   "class-computed-accessor-key": "class computed accessor key",
   "class-nested-static-field": "nested class in a static field",
   "class-static-block": "class static block",
+  "class-instance-field-immediate-construction":
+    "immediately constructed class-expression instance field",
   "direct-arrow-iife": "direct arrow IIFE",
   "direct-arrow-block-iife": "direct block-bodied arrow IIFE",
   "arrow-argument-iife": "arrow IIFE with an argument",
@@ -126,6 +128,7 @@ const GLOBAL_READ_DESCRIPTIONS = {
   "manual-pure-class-instance-field": "manual-pure class instance field initializer",
   "manual-pure-class-default-parameter": "manual-pure class constructor default parameter",
   "manual-pure-returned-class": "manual-pure returned class construction",
+  "manual-pure-tagged-template": "manual-pure tagged-template invocation",
   "manual-pure-computed-key-effect": "manual-pure result computed-key side effect",
   "manual-pure-call-argument-effect": "manual-pure call-argument side effect",
   "manual-pure-new-callee-computed-key-effect":

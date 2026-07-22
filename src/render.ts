@@ -449,6 +449,14 @@ function renderGlobalReadExport(
     return bindingName;
   };
 
+  if (read.form === "manual-pure-tagged-template") {
+    if (usedBindings.has("tag")) {
+      throw new Error("manual-pure-tagged-template requires the module-local helper binding tag");
+    }
+    usedBindings.add("tag");
+    return [`function tag() { return ${observed}; }`, ...exportValue("tag``")];
+  }
+
   if (isManualPureSideEffectForm(read.form)) {
     if (
       read.read.kind !== "global-property" ||
@@ -806,6 +814,8 @@ function renderGlobalReadExport(
         `class ${className} { static value = ${read.fallbackValue}; static { this.value = ${observed}; } }`,
         ...exportClass(),
       ];
+    case "class-instance-field-immediate-construction":
+      return [`const ${className} = new (class { value = ${observed}; })();`, ...exportClass()];
     case "returned-class-iife":
       return [
         `const ${className} = (() => class { static value = ${observed}; })();`,

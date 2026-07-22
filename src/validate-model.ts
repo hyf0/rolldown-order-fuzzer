@@ -37,6 +37,7 @@ import {
   GLOBAL_READ_FORMS as GLOBAL_READ_FORM_VALUES,
   globalReadCarrierMemberPath,
   globalReadFixedHelperName,
+  globalReadManualPureFunction,
   isManualPureSideEffectForm,
   MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL,
   metadataPureModuleIds,
@@ -179,6 +180,7 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
     errors,
   );
   validateFixtureFunctionObservations(program, errors);
+  validateManualPureGlobalReadOptions(program, errors);
   validateArrayLengthCallEffectObservations(program, errors);
   validateManualPureSideEffectObservations(program, errors);
   validateOptimizerEffectObservations(program, errors);
@@ -1084,6 +1086,29 @@ function validateFixtureFunctionObservations(program: ProgramModel, errors: stri
     if (patch.fixtureFunctionAssignment.value !== readerModule.globalReadExport.expectedValue) {
       errors.push(
         `${path}.expectedValue: expected ${String(patch.fixtureFunctionAssignment.value)} from fixtureFunctionAssignment, received ${String(readerModule.globalReadExport.expectedValue)}`,
+      );
+    }
+  }
+}
+
+/// A manual-pure syntax form is only that form when its exact helper is present in the build option.
+/// Keep the three child-effect forms on their stricter topology validator below; this shared check
+/// covers the value-producing analyzer forms, including the tagged-template call whose purity is load-bearing.
+function validateManualPureGlobalReadOptions(program: ProgramModel, errors: string[]): void {
+  const manualPureFunctions = buildConfigOf(program).treeshake.manualPureFunctions;
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.format !== "esm" || module.globalReadExport === undefined) {
+      continue;
+    }
+    const form = module.globalReadExport.form;
+    const helper = globalReadManualPureFunction(form);
+    if (
+      helper !== undefined &&
+      !isManualPureSideEffectForm(form) &&
+      !manualPureFunctions.includes(helper)
+    ) {
+      errors.push(
+        `modules[${String(moduleIndex)}].globalReadExport.form: ${form} requires build.treeshake.manualPureFunctions to include ${quote(helper)}`,
       );
     }
   }

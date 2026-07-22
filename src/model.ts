@@ -384,6 +384,7 @@ export const GLOBAL_READ_FORMS = [
   "class-computed-accessor-key",
   "class-nested-static-field",
   "class-static-block",
+  "class-instance-field-immediate-construction",
   "direct-arrow-iife",
   "direct-arrow-block-iife",
   "arrow-argument-iife",
@@ -432,6 +433,7 @@ export const GLOBAL_READ_FORMS = [
   "manual-pure-class-instance-field",
   "manual-pure-class-default-parameter",
   "manual-pure-returned-class",
+  "manual-pure-tagged-template",
   ...MANUAL_PURE_SIDE_EFFECT_FORMS,
 ] as const;
 
@@ -466,7 +468,12 @@ export function globalReadCarrierMemberPath(form: GlobalReadForm): readonly stri
 
 /// A manual-pure global-read form's exact author-visible callee. The same name drives the persisted
 /// Rolldown option, the rendered helper, and collision validation.
-export function globalReadManualPureFunction(form: GlobalReadForm): "make" | "Box" | undefined {
+export function globalReadManualPureFunction(
+  form: GlobalReadForm,
+): "make" | "Box" | "tag" | undefined {
+  if (form === "manual-pure-tagged-template") {
+    return "tag";
+  }
   if (
     form === "manual-pure-new" ||
     form === "manual-pure-class-instance-field" ||
@@ -477,7 +484,9 @@ export function globalReadManualPureFunction(form: GlobalReadForm): "make" | "Bo
   return form.startsWith("manual-pure-") ? "make" : undefined;
 }
 
-export function globalReadFixedHelperName(form: GlobalReadForm): "make" | "Box" | undefined {
+export function globalReadFixedHelperName(
+  form: GlobalReadForm,
+): "make" | "Box" | "tag" | undefined {
   return form === "annotated-pure-member" ? "make" : globalReadManualPureFunction(form);
 }
 
@@ -506,7 +515,7 @@ export interface EsmModuleModel extends ModuleModelBase {
   /// One fixture-owned global function installed by an event-free patch module. The paired reader uses
   /// an annotated optional call (`globalThis.__orderRead?.()`) so the function call itself is declared
   /// pure without assuming that any standard built-in can be monkey-patched. This is the analyzer
-  /// witness used by the 54 ordinary analyzer forms. The array-length and manual-pure effect probes
+  /// witness used by the 59 ordinary analyzer forms. The array-length and manual-pure effect probes
   /// deliberately do not use this field: observing a call side effect after declaring it pure would be
   /// contradictory, while manual-pure probes instead observe effects in the call's children.
   readonly fixtureFunctionAssignment?: {
@@ -532,9 +541,9 @@ export interface EsmModuleModel extends ModuleModelBase {
     readonly kind: GlobalReadOptimizerExpressionKind;
   }[];
   /// One event-free export whose initializer reads a fixture-private global through a selected syntax
-  /// form. Class forms export the class itself so the downstream observer reads `.value`; reading the
-  /// field inside this module would add an ordinary top-level read and mask the class-definition analyzer
-  /// path. Direct/IIFE/array forms export the numeric value. A downstream module emits the event so the
+  /// form. Class forms export the class or constructed instance as a carrier so the downstream observer
+  /// reads `.value`; reading the field inside this module would add an ordinary top-level read and mask
+  /// the class-definition analyzer path. Direct/IIFE/array forms export the numeric value. A downstream module emits the event so the
   /// reader never becomes order-sensitive merely because the witness itself logs an effect.
   readonly globalReadExport?: {
     readonly form: GlobalReadForm;

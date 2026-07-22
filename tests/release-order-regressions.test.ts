@@ -83,6 +83,8 @@ const EXPECTED_GLOBAL_READ_SYNTAX = {
   "class-computed-accessor-key": "static get [Math.hypot(3, 4) ===",
   "class-nested-static-field": "static Inner = class { static value = Math.hypot(3, 4); };",
   "class-static-block": "static { this.value = Math.hypot(3, 4); }",
+  "class-instance-field-immediate-construction":
+    "const __OrderGlobalReadClass0 = new (class { value = Math.hypot(3, 4); })();",
   "direct-arrow-iife": "const __orderGlobalReadValue0 = (() => Math.hypot(3, 4))();",
   "direct-arrow-block-iife":
     "const __orderGlobalReadValue0 = (() => { return Math.hypot(3, 4); })();",
@@ -149,6 +151,7 @@ const EXPECTED_GLOBAL_READ_SYNTAX = {
   "manual-pure-class-default-parameter":
     "class Box { constructor(value = Math.hypot(3, 4)) { this.value = value; } }",
   "manual-pure-returned-class": "function make() { return class { value = Math.hypot(3, 4); }; }",
+  "manual-pure-tagged-template": "function tag() { return Math.hypot(3, 4); }",
   "manual-pure-computed-key-effect": "make()[__orderManualPureEffect0()];",
   "manual-pure-call-argument-effect": "make(__orderManualPureEffect0()).value;",
   "manual-pure-new-callee-computed-key-effect": "new (make()[__orderManualPureEffect0()].Box)();",
@@ -249,9 +252,9 @@ describe("release order regression surface", () => {
     );
     expect(
       RELEASE_REGRESSION_CASES.filter((entry) => entry.issue === "adjacent/analyzer"),
-    ).toHaveLength(49);
+    ).toHaveLength(51);
     expect(RELEASE_REGRESSION_CASES.filter((entry) => entry.policy === "required")).toHaveLength(
-      69,
+      71,
     );
     expect(
       RELEASE_REGRESSION_CASES.filter((entry) => entry.policy === "assumption-probe"),
@@ -409,6 +412,11 @@ describe("release order regression surface", () => {
         expect(patch.builtinAssignments).toBeUndefined();
         expect(reader.globalReadExport?.read).toEqual({ kind: "fixture-function-call" });
         expect(expectedValue).toBe(assignment.value);
+        if (form === "manual-pure-tagged-template") {
+          expect(readerSource).toContain(" = tag``;");
+          expect(readerSource).not.toContain("tag`${");
+          expect(buildConfigOf(generated.program).treeshake.manualPureFunctions).toEqual(["tag"]);
+        }
       }
       await withRenderedProgram(rendered, async (manifestPath) => {
         const outcome = await executeManifest(manifestPath);
@@ -869,6 +877,20 @@ describe("release order regression surface", () => {
     ).manualPureFunctions = [];
     expect(validateProgramModel(analyzeProgram(withoutManualPure))).toContain(
       'manual-pure side-effect witness requires build.treeshake.manualPureFunctions to include "make"',
+    );
+
+    const taggedTemplate = generateGlobalReadOrderCase(19, "manual-pure-tagged-template");
+    const taggedTemplateWithoutManualPure = structuredClone(taggedTemplate.program) as ProgramModel;
+    if (taggedTemplateWithoutManualPure.build === undefined) {
+      throw new Error("missing tagged-template build config");
+    }
+    (
+      taggedTemplateWithoutManualPure.build.treeshake as unknown as {
+        manualPureFunctions: string[];
+      }
+    ).manualPureFunctions = [];
+    expect(validateProgramModel(analyzeProgram(taggedTemplateWithoutManualPure))).toContain(
+      'modules[2].globalReadExport.form: manual-pure-tagged-template requires build.treeshake.manualPureFunctions to include "tag"',
     );
 
     const wrongManualPureCounter = structuredClone(manualPureEffect.program) as ProgramModel;
