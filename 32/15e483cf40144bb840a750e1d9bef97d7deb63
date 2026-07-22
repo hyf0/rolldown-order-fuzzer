@@ -1,0 +1,25 @@
+.agents/docs/release-gap-audit-10320-10322-10336.md
+  s_1524eb9f9fabad::t_820d6ee0db49bd 27-28,37,41,45,81-89,91,93-95,115-116
+corpus-manifest.golden.json
+  s_1524eb9f9fabad::t_e03b7877867425 36239,36253,37973,37987
+src/render.ts
+  s_1524eb9f9fabad::t_d566a779d58606 452-459,817-818
+tests/release-order-regressions.test.ts
+  s_1524eb9f9fabad::t_405507d8544089 86-87,154,255,257,415-419,882-895
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "3215e483cf40144bb840a750e1d9bef97d7deb63",
+  "prompts": {},
+  "sessions": {
+    "s_1524eb9f9fabad": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8761-7347-7b70-b3f1-24c54174fc35",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Yunfei He <i.heyunfei@gmail.com>"
+    }
+  }
+}
