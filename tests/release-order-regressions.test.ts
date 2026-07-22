@@ -117,6 +117,7 @@ const EXPECTED_GLOBAL_READ_SYNTAX = {
   "spread-array-member": "const __orderGlobalReadValue0 = [...[Math.hypot(3, 4)]][0];",
   "array-length-call-effect": "const __orderGlobalReadValue0 = [Math.hypot(3, 4)].length;",
   "object-member": "const __orderGlobalReadValue0 = ({ value: Math.hypot(3, 4) }).value;",
+  "object-computed-key": "const __orderGlobalReadValue0 = ({ [Math.hypot(3, 4)]:",
   "nested-object-member":
     "const __orderGlobalReadValue0 = ({ inner: { value: Math.hypot(3, 4) } }).inner.value;",
   "computed-string-object-member":
@@ -252,9 +253,9 @@ describe("release order regression surface", () => {
     );
     expect(
       RELEASE_REGRESSION_CASES.filter((entry) => entry.issue === "adjacent/analyzer"),
-    ).toHaveLength(51);
+    ).toHaveLength(52);
     expect(RELEASE_REGRESSION_CASES.filter((entry) => entry.policy === "required")).toHaveLength(
-      71,
+      72,
     );
     expect(
       RELEASE_REGRESSION_CASES.filter((entry) => entry.policy === "assumption-probe"),

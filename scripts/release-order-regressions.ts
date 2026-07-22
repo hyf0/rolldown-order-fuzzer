@@ -103,6 +103,7 @@ const GLOBAL_READ_DESCRIPTIONS = {
   "spread-array-member": "spread array member",
   "array-length-call-effect": "array length with an observable element-call effect",
   "object-member": "object member wrapper",
+  "object-computed-key": "object computed data-property key",
   "nested-object-member": "nested object member wrapper",
   "computed-string-object-member": "computed string object member",
   "computed-number-object-member": "computed numeric-key object member",

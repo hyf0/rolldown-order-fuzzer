@@ -567,6 +567,11 @@ function renderGlobalReadExport(
   if (read.form === "object-member") {
     return exportValue(`({ value: ${observed} }).value`);
   }
+  if (read.form === "object-computed-key") {
+    return exportValue(
+      `({ [${observed}]: ${read.expectedValue} })[${read.expectedValue}] ?? ${read.fallbackValue}`,
+    );
+  }
   if (read.form === "nested-object-member") {
     return exportValue(`({ inner: { value: ${observed} } }).inner.value`);
   }

@@ -988,6 +988,7 @@ function treeshakeConfigForGlobalReadForm(form: GlobalReadForm): BuildConfig["tr
   }
   switch (form) {
     case "object-member":
+    case "object-computed-key":
     case "nested-object-member":
     case "computed-string-object-member":
     case "computed-number-object-member":

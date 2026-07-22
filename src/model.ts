@@ -408,6 +408,7 @@ export const GLOBAL_READ_FORMS = [
   "spread-array-member",
   "array-length-call-effect",
   "object-member",
+  "object-computed-key",
   "nested-object-member",
   "computed-string-object-member",
   "computed-number-object-member",
@@ -515,7 +516,7 @@ export interface EsmModuleModel extends ModuleModelBase {
   /// One fixture-owned global function installed by an event-free patch module. The paired reader uses
   /// an annotated optional call (`globalThis.__orderRead?.()`) so the function call itself is declared
   /// pure without assuming that any standard built-in can be monkey-patched. This is the analyzer
-  /// witness used by the 59 ordinary analyzer forms. The array-length and manual-pure effect probes
+  /// witness used by the 60 ordinary analyzer forms. The array-length and manual-pure effect probes
   /// deliberately do not use this field: observing a call side effect after declaring it pure would be
   /// contradictory, while manual-pure probes instead observe effects in the call's children.
   readonly fixtureFunctionAssignment?: {
