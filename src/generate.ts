@@ -7,6 +7,10 @@ import type {
   EsmDependencyOperation,
   EsmModuleModel,
   EventRecord,
+  GlobalReadBuiltinKind,
+  GlobalReadForm,
+  GlobalReadInstanceofKind,
+  GlobalReadOptimizerExpressionKind,
   ManualChunkGroup,
   ModuleFormat,
   ModuleModel,
@@ -18,10 +22,20 @@ import type {
   ValueRead,
 } from "./model.ts";
 import { analyzeProgram, type AnalyzedProgram, type ExportDemandPlan } from "./analyzed-program.ts";
+import { globalReadBuiltinSpec } from "./global-read-builtins.ts";
+import { globalReadInstanceofSpec } from "./global-read-instanceof.ts";
+import { globalReadOptimizerExpressionSpec } from "./global-read-optimizer-expressions.ts";
 import {
   buildConfigOf,
   DEFAULT_BUILD_CONFIG,
+  DEFAULT_TREESHAKE_CONFIG,
+  GLOBAL_READ_FORMS,
+  globalReadCarrierMemberPath,
+  globalReadManualPureFunction,
+  isManualPureSideEffectForm,
   legacySideEffectFreePackage,
+  MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL,
+  type ManualPureSideEffectForm,
   metadataPureModuleIds,
   moduleProfile,
   packageMemberFileName,
@@ -32,6 +46,16 @@ import {
 } from "./model.ts";
 import { ProgramFacts, type ExportSupply } from "./program-facts.ts";
 import { SeededRng } from "./rng.ts";
+
+export { GLOBAL_READ_FORMS };
+
+/// The ordinary analyzer lane excludes effect-preservation cells. The array-length cell is an optimizer
+/// assumption probe, while the manual-pure cells are separate required tree-shaking regressions; none
+/// should dilute the syntax-order lane.
+export const ANALYZER_GLOBAL_READ_FORMS = GLOBAL_READ_FORMS.filter(
+  (form): form is Exclude<GlobalReadForm, "array-length-call-effect" | ManualPureSideEffectForm> =>
+    form !== "array-length-call-effect" && !isManualPureSideEffectForm(form),
+);
 
 export const FIXED_TEMPLATE_NAMES = [
   "esm-imports-cjs",
@@ -54,6 +78,9 @@ export interface GeneratedCase {
   readonly size: number;
   readonly template: MixedTemplateName;
   readonly coverageTags: readonly string[];
+  /// A directed case may require one wrapping mode for its mechanism. Ordinary cases omit this and
+  /// inherit the campaign's CLI mode; the campaign runner records the effective mode in its result.
+  readonly onDemandWrapping?: boolean;
   readonly program: ProgramModel;
   /// The ONE AnalyzedProgram for this case (graph facts + the canonical export-demand plan), carried
   /// IN MEMORY only — the persisted artifact still records just `program`. Validation, rendering, tags,
@@ -84,6 +111,28 @@ const CJS_OUTPUT_DENOMINATOR = 5;
 /// self-rebinding wrapper under the CJS render arm. Meaningful coverage of the whole mangling pass
 /// (identifier renames, whitespace/sequencing) without letting minified cases dominate the corpus.
 const MINIFY_DENOMINATOR = 4;
+
+/// Readable runtime-helper names exercise a distinct authored-name collision family (`__esm` /
+/// `__commonJS` instead of `__esmMin` / `__commonJSMin`). Bundle-side only, rolled after every
+/// source-affecting choice.
+const PROFILER_NAMES_DENOMINATOR = 8;
+
+export const AUTHORED_COLLISION_BINDING_NAMES = [
+  "__esmMin",
+  "__esm",
+  "__commonJSMin",
+  "__commonJS",
+  "__getOwnPropNames",
+  "init_module_0002",
+] as const;
+export const CJS_AUTHORED_COLLISION_BINDING_NAMES = [
+  "__esmMin",
+  "__esm",
+  "__getOwnPropNames",
+] as const;
+const AUTHORED_COLLISION_BINDING_NAME_SET: ReadonlySet<string> = new Set(
+  AUTHORED_COLLISION_BINDING_NAMES,
+);
 
 /// Every eligible random-mixed case gains the #10259-inspired manual code-splitting group. Eligibility
 /// is deliberately structural: at least two effectful ESM entries each own an effectful ESM "app"
@@ -130,12 +179,41 @@ export function generateCase(
     throw new Error(`size must be an integer from 1 through ${MAX_CASE_SIZE}`);
   }
 
+  // Reserve deterministic lanes in the ordinary mixed campaign for recently escaped analyzer syntax
+  // and authored-name deconfliction. Optimizer-assumption probes remain available through the directed
+  // gate but do not consume ordinary random seeds. Forced-format and seo:false campaigns keep their
+  // promised random-only regime.
+  const usesRandomOptions =
+    options.strictExecutionOrder === false || options.crossEntryGroupBias === true;
+  if (forcedRegime === undefined && !usesRandomOptions) {
+    const lane = Math.abs(seed) % 32;
+    const cycle = Math.floor(Math.abs(seed) / 32);
+    if (lane === 0) {
+      const form = ANALYZER_GLOBAL_READ_FORMS[cycle % ANALYZER_GLOBAL_READ_FORMS.length];
+      if (form !== undefined) {
+        return generateGlobalReadOrderCase(seed, form);
+      }
+    }
+    if (lane === 1) {
+      const authoredName =
+        AUTHORED_COLLISION_BINDING_NAMES[cycle % AUTHORED_COLLISION_BINDING_NAMES.length];
+      if (authoredName !== undefined) {
+        return generateAuthoredNameCollisionCase(seed, authoredName);
+      }
+    }
+    if (lane === 6) {
+      const authoredName =
+        CJS_AUTHORED_COLLISION_BINDING_NAMES[cycle % CJS_AUTHORED_COLLISION_BINDING_NAMES.length];
+      if (authoredName !== undefined) {
+        return generateAuthoredNameCollisionCase(seed, authoredName, "cjs");
+      }
+    }
+  }
+
   // Half the campaign explores random graphs; the other half keeps the audited fixed shapes.
   // A forced regime pins every case to the random generator: the fixed templates carry their
   // own inherent formats and would dilute a pure-format campaign. A seo:false / cross-entry cell also
   // pins the random generator (the fixed templates are seo:true audited shapes).
-  const usesRandomOptions =
-    options.strictExecutionOrder === false || options.crossEntryGroupBias === true;
   const template =
     forcedRegime !== undefined || usesRandomOptions
       ? "random-mixed"
@@ -876,6 +954,8 @@ export function buildCrossChunkInitCycle(rng: SeededRng): {
       strictExecutionOrder: true,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -893,6 +973,447 @@ export function generateCrossChunkInitCycleCase(seed: number): GeneratedCase {
     size: program.modules.length,
     template: "random-mixed",
     coverageTags,
+    program,
+    analyzed,
+  };
+}
+
+function treeshakeConfigForGlobalReadForm(form: GlobalReadForm): BuildConfig["treeshake"] {
+  const manualPureFunction = globalReadManualPureFunction(form);
+  if (manualPureFunction !== undefined) {
+    return {
+      ...DEFAULT_TREESHAKE_CONFIG,
+      manualPureFunctions: [manualPureFunction],
+    };
+  }
+  switch (form) {
+    case "object-member":
+    case "nested-object-member":
+    case "computed-string-object-member":
+    case "computed-number-object-member":
+    case "local-computed-object-member":
+    case "optional-object-member":
+    case "optional-computed-object-member":
+    case "nested-optional-object-member":
+    case "object-binding-default":
+    case "object-binding-computed-key":
+    case "nested-object-binding-default":
+    case "nested-object-binding-computed-key":
+    case "annotated-pure-member":
+      return {
+        ...DEFAULT_TREESHAKE_CONFIG,
+        propertyReadSideEffects: false,
+      };
+    case "member-assignment-value":
+      return {
+        ...DEFAULT_TREESHAKE_CONFIG,
+        propertyWriteSideEffects: false,
+      };
+    default:
+      return DEFAULT_TREESHAKE_CONFIG;
+  }
+}
+
+interface GlobalReadOrderWitness {
+  readonly read: NonNullable<EsmModuleModel["globalReadExport"]>["read"];
+  readonly patch: Pick<
+    EsmModuleModel,
+    | "fixtureFunctionAssignment"
+    | "builtinAssignments"
+    | "instanceofAssignments"
+    | "optimizerExpressionAssignments"
+  >;
+  readonly expectedValue: number;
+  readonly fallbackValue: number;
+  readonly effectObservation?: {
+    readonly counterGlobal: string;
+    readonly expectedCount: number;
+  };
+  readonly disableCodeSplitting: boolean;
+  readonly minify?: boolean;
+}
+
+/// Shared typed construction for patch-before-read witnesses. Analyzer syntax probes force the reader
+/// into its own chunk; constant-evaluator probes use the exact wrap-all/no-splitting production shape.
+/// Native ESM always evaluates the patch first. The event lives downstream so it cannot make the reader
+/// order-sensitive by itself.
+function buildGlobalReadOrderWitnessCase(
+  rng: SeededRng,
+  form: GlobalReadForm,
+  witness: GlobalReadOrderWitness,
+): { readonly program: ProgramModel; readonly analyzed: AnalyzedProgram } {
+  const { expectedValue, fallbackValue, effectObservation } = witness;
+  const eventBase = 1 + rng.integer(900_000);
+  const exportedName =
+    form === "class-static-field-default-export" ? "default" : "observedGlobalRead";
+  const carrierMemberPath = globalReadCarrierMemberPath(form);
+  const modules: readonly ModuleModel[] = [
+    {
+      id: "gr-observer",
+      format: "esm",
+      dependencies: [
+        { kind: "esm-side-effect-import", target: "gr-patch" },
+        {
+          kind: "esm-value-import",
+          target: "gr-reader",
+          importedName: exportedName,
+          localName: "observed",
+          ...(carrierMemberPath === undefined ? {} : { readMemberPath: carrierMemberPath }),
+        },
+        ...(effectObservation === undefined
+          ? []
+          : [
+              {
+                kind: "esm-value-import" as const,
+                target: "gr-call-count",
+                importedName: "observedCallCount",
+                localName: "callCount",
+              },
+            ]),
+      ],
+      events: [
+        {
+          module: "gr-observer",
+          phase: "evaluate",
+          value: eventBase,
+          reads: [
+            {
+              binding: "observed",
+              ...(carrierMemberPath === undefined ? {} : { memberPath: carrierMemberPath }),
+            },
+            ...(effectObservation === undefined ? [] : [{ binding: "callCount" }]),
+          ],
+        },
+      ],
+    },
+    {
+      id: "gr-patch",
+      format: "esm",
+      dependencies: [],
+      events: [],
+      ...witness.patch,
+    },
+    {
+      id: "gr-reader",
+      format: "esm",
+      dependencies: [],
+      events: [],
+      globalReadExport: {
+        form,
+        exportedName,
+        read: witness.read,
+        expectedValue,
+        fallbackValue,
+      },
+    },
+    ...(effectObservation === undefined
+      ? []
+      : [
+          {
+            id: "gr-call-count",
+            format: "esm" as const,
+            dependencies: [],
+            events: [],
+            globalReadExport: {
+              form: "direct" as const,
+              exportedName: "observedCallCount",
+              read: {
+                kind: "global-property" as const,
+                name: effectObservation.counterGlobal,
+              },
+              expectedValue: effectObservation.expectedCount,
+              fallbackValue: 0,
+            },
+          },
+        ]),
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [{ name: "entry-gr-observer", moduleId: "gr-observer" }],
+    schedule: [{ kind: "import-entry", entry: "entry-gr-observer" }],
+    build: {
+      chunking: witness.disableCodeSplitting
+        ? { kind: "disabled" }
+        : {
+            kind: "manual",
+            groups: [{ name: "global-reader", moduleIds: ["gr-reader"] }],
+          },
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+      outputFormat: "esm",
+      minify: witness.minify ?? false,
+      profilerNames: false,
+      treeshake: treeshakeConfigForGlobalReadForm(form),
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+const MATH_HYPOT_CALL_COUNTER = "__orderFuzzerMathHypotCallCount";
+
+/// A patch-before-read witness. With no explicit built-in kind, every syntax form reads a fixture-owned
+/// global through an annotated optional call; this is the analyzer surface and does not modify standard
+/// built-ins. Passing a built-in kind selects the separate optimizer-assumption surface. The
+/// array-length form always selects the Math.hypot assumption probe: its only witness is a call side
+/// effect, which cannot soundly be combined with the fixture function's pure-call annotation.
+export function buildGlobalReadOrderCase(
+  rng: SeededRng,
+  form: GlobalReadForm,
+  readKind?: GlobalReadBuiltinKind,
+): { readonly program: ProgramModel; readonly analyzed: AnalyzedProgram } {
+  if (isManualPureSideEffectForm(form)) {
+    if (readKind !== undefined) {
+      throw new Error(`${form} does not accept a built-in global read`);
+    }
+    return buildGlobalReadOrderWitnessCase(rng, form, {
+      read: { kind: "global-property", name: MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL },
+      patch: {},
+      expectedValue: 1,
+      fallbackValue: 0,
+      disableCodeSplitting: true,
+    });
+  }
+  const tracksCallEffect = form === "array-length-call-effect";
+  if (readKind === undefined && !tracksCallEffect) {
+    const functionValue = 10_000 + rng.integer(900_000);
+    return buildGlobalReadOrderWitnessCase(rng, form, {
+      read: { kind: "fixture-function-call" },
+      patch: {
+        fixtureFunctionAssignment: { value: functionValue },
+      },
+      expectedValue: functionValue,
+      fallbackValue: 5,
+      disableCodeSplitting: false,
+    });
+  }
+  readKind ??= "math-hypot";
+  if (tracksCallEffect && readKind !== "math-hypot") {
+    throw new Error("array-length-call-effect requires the math-hypot global read");
+  }
+  const builtinSpec = globalReadBuiltinSpec(readKind);
+  const patchedCallValue =
+    readKind === "math-hypot" ? 10_000 + rng.integer(900_000) : builtinSpec.patchedValue;
+  return buildGlobalReadOrderWitnessCase(rng, form, {
+    read: { kind: readKind },
+    patch: {
+      builtinAssignments: [
+        {
+          kind: readKind,
+          value: patchedCallValue,
+          ...(tracksCallEffect ? { counterGlobal: MATH_HYPOT_CALL_COUNTER } : {}),
+        },
+      ],
+    },
+    expectedValue: tracksCallEffect ? 1 : patchedCallValue,
+    fallbackValue: tracksCallEffect ? 1 : builtinSpec.fallbackValue,
+    ...(tracksCallEffect
+      ? {
+          effectObservation: {
+            counterGlobal: MATH_HYPOT_CALL_COUNTER,
+            expectedCount: 1,
+          },
+        }
+      : {}),
+    disableCodeSplitting: tracksCallEffect || readKind !== "math-hypot",
+  });
+}
+
+export function generateGlobalReadOrderCase(
+  seed: number,
+  form: GlobalReadForm = "class-static-field-declaration",
+  readKind?: GlobalReadBuiltinKind,
+): GeneratedCase {
+  const { program, analyzed } = buildGlobalReadOrderCase(new SeededRng(seed), form, readKind);
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags: deriveCoverageTags(analyzed),
+    program,
+    analyzed,
+  };
+}
+
+export function buildGlobalReadInstanceofOrderCase(
+  rng: SeededRng,
+  expressionKind: GlobalReadInstanceofKind,
+): { readonly program: ProgramModel; readonly analyzed: AnalyzedProgram } {
+  const spec = globalReadInstanceofSpec(expressionKind);
+  return buildGlobalReadOrderWitnessCase(rng, "direct", {
+    read: { kind: "instanceof", expression: expressionKind },
+    patch: { instanceofAssignments: [{ kind: expressionKind }] },
+    expectedValue: spec.patchedValue,
+    fallbackValue: spec.fallbackValue,
+    disableCodeSplitting: true,
+  });
+}
+
+export function generateGlobalReadInstanceofOrderCase(
+  seed: number,
+  expressionKind: GlobalReadInstanceofKind,
+): GeneratedCase {
+  const { program, analyzed } = buildGlobalReadInstanceofOrderCase(
+    new SeededRng(seed),
+    expressionKind,
+  );
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags: deriveCoverageTags(analyzed),
+    program,
+    analyzed,
+  };
+}
+
+export function buildGlobalReadOptimizerExpressionOrderCase(
+  rng: SeededRng,
+  expressionKind: GlobalReadOptimizerExpressionKind,
+): { readonly program: ProgramModel; readonly analyzed: AnalyzedProgram } {
+  const spec = globalReadOptimizerExpressionSpec(expressionKind);
+  return buildGlobalReadOrderWitnessCase(rng, "direct", {
+    read: { kind: "optimizer-expression", expression: expressionKind },
+    patch: { optimizerExpressionAssignments: [{ kind: expressionKind }] },
+    expectedValue: spec.patchedValue,
+    fallbackValue: spec.fallbackValue,
+    ...(spec.family === "effect-preservation"
+      ? {
+          effectObservation: {
+            counterGlobal: spec.counterGlobal,
+            expectedCount: spec.expectedCount,
+          },
+        }
+      : {}),
+    disableCodeSplitting: true,
+    minify: spec.requiresMinify === true,
+  });
+}
+
+export function generateGlobalReadOptimizerExpressionOrderCase(
+  seed: number,
+  expressionKind: GlobalReadOptimizerExpressionKind,
+): GeneratedCase {
+  const { program, analyzed } = buildGlobalReadOptimizerExpressionOrderCase(
+    new SeededRng(seed),
+    expressionKind,
+  );
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags: deriveCoverageTags(analyzed),
+    program,
+    analyzed,
+  };
+}
+
+/// Strict wrap-all + one output chunk puts Rolldown's runtime module and user bindings in the same root
+/// scope. This typed case lets the caller choose the exact authored local name; the default reproduces
+/// #10336 (`__esmMin`). The direct global read is important: it keeps the non-function binding
+/// materialized and makes its module order-sensitive, selecting the lazy wrapper form whose runtime
+/// helper is force-included rather than retained by ordinary tree-shaking. A later wrapped module then
+/// supplies the helper call that fails when deconfliction misses that forced runtime statement.
+export function buildAuthoredNameCollisionCase(
+  rng: SeededRng,
+  authoredName: string,
+  outputFormat: OutputFormat = "esm",
+): { readonly program: ProgramModel; readonly analyzed: AnalyzedProgram } {
+  const usesCommonJsHelper = authoredName === "__commonJS" || authoredName === "__commonJSMin";
+  const profilerNames =
+    authoredName === "__esm" ||
+    authoredName === "__commonJS" ||
+    authoredName === "__getOwnPropNames";
+  const lateId = usesCommonJsHelper ? "nc-late-cjs" : "nc-late-esm";
+  const late: ModuleModel = usesCommonJsHelper
+    ? {
+        id: lateId,
+        format: "cjs",
+        dependencies: [],
+        events: [{ module: lateId, phase: "evaluate", value: 1 + rng.integer(900_000) }],
+      }
+    : {
+        id: lateId,
+        format: "esm",
+        dependencies: [],
+        events: [{ module: lateId, phase: "evaluate", value: 1 + rng.integer(900_000) }],
+      };
+  const modules: readonly ModuleModel[] = [
+    {
+      id: "nc-entry",
+      format: "esm",
+      dependencies: [
+        {
+          kind: "esm-value-import",
+          target: "nc-user-binding",
+          importedName: authoredName,
+          localName: "collisionValue",
+        },
+        { kind: "esm-side-effect-import", target: lateId },
+      ],
+      events: [
+        {
+          module: "nc-entry",
+          phase: "evaluate",
+          value: 1 + rng.integer(900_000),
+          reads: [{ binding: "collisionValue" }],
+        },
+      ],
+    },
+    {
+      id: "nc-user-binding",
+      format: "esm",
+      dependencies: [],
+      events: [],
+      authoredExportBindings: [{ exportedName: authoredName, localName: authoredName }],
+      globalReadExport: {
+        form: "direct",
+        exportedName: authoredName,
+        read: { kind: "global-property", name: "__orderFuzzerCollisionValue" },
+        expectedValue: 10_000 + rng.integer(900_000),
+        fallbackValue: -10_000 - rng.integer(900_000),
+      },
+    },
+    late,
+  ];
+  const program: ProgramModel = {
+    modules,
+    entries: [{ name: "entry-nc", moduleId: "nc-entry" }],
+    schedule: [{ kind: "import-entry", entry: "entry-nc" }],
+    build: {
+      chunking: { kind: "disabled" },
+      includeDependenciesRecursively: true,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+      outputFormat,
+      minify: false,
+      profilerNames,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+export function generateAuthoredNameCollisionCase(
+  seed: number,
+  authoredName: string = "__esmMin",
+  outputFormat: OutputFormat = "esm",
+): GeneratedCase {
+  const { program, analyzed } = buildAuthoredNameCollisionCase(
+    new SeededRng(seed),
+    authoredName,
+    outputFormat,
+  );
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags: deriveCoverageTags(analyzed),
+    onDemandWrapping: false,
     program,
     analyzed,
   };
@@ -996,6 +1517,8 @@ export function buildEntriesAwareChunkCycle(rng: SeededRng): {
       strictExecutionOrder: true,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -1135,6 +1658,8 @@ export function buildFamilyBEagerBarrel(
       strictExecutionOrder: true,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -1229,6 +1754,8 @@ export function buildCrossEntryLeakCase(rng: SeededRng): {
       strictExecutionOrder: false,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -1332,6 +1859,8 @@ export function buildStaticCrossEntryLeak(rng: SeededRng): {
       strictExecutionOrder: false,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -1474,6 +2003,8 @@ export function buildOptimizerCycle(
       strictExecutionOrder: true,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -1527,6 +2058,8 @@ export function buildCjsOutputWitness(
     strictExecutionOrder: true,
     outputFormat: "cjs",
     minify: false,
+    profilerNames: false,
+    treeshake: DEFAULT_TREESHAKE_CONFIG,
   };
 
   if (variant === "object-identity") {
@@ -1771,6 +2304,8 @@ export function buildTranspiledCjsInterop(rng: SeededRng): {
       strictExecutionOrder: true,
       outputFormat: "cjs",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -1884,6 +2419,8 @@ export function buildDynamicWrapKindMerge(
         strictExecutionOrder: true,
         outputFormat: "esm",
         minify: false,
+        profilerNames: false,
+        treeshake: DEFAULT_TREESHAKE_CONFIG,
       },
     };
     deepFreeze(program);
@@ -1954,6 +2491,8 @@ export function buildDynamicWrapKindMerge(
         strictExecutionOrder: true,
         outputFormat: "esm",
         minify: false,
+        profilerNames: false,
+        treeshake: DEFAULT_TREESHAKE_CONFIG,
       },
     };
     deepFreeze(program);
@@ -2005,6 +2544,8 @@ export function buildDynamicWrapKindMerge(
       strictExecutionOrder: true,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -2115,6 +2656,8 @@ export function buildExoticImportReads(rng: SeededRng): {
       strictExecutionOrder: true,
       outputFormat: "esm",
       minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
     },
   };
   deepFreeze(program);
@@ -2366,6 +2909,7 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
   // every axis, TLA included), so a minify×cjs case exercises the self-rebinding wrapper under the CJS
   // render arm continuously.
   const minify = rng.integer(MINIFY_DENOMINATOR) === 0;
+  const profilerNames = rng.integer(PROFILER_NAMES_DENOMINATOR) === 0;
   // The #10259-inspired entriesAware manual-code-splitting factor runs LAST. It can only change
   // the bundle-side chunking config: source modules, packages, schedule, and every older build axis have
   // already been fixed. The helper declines unless the final graph contains the exact useful ingredients
@@ -2404,6 +2948,8 @@ function finalizeProgram(context: GenerationContext, rng: SeededRng): AnalyzedPr
     strictExecutionOrder,
     outputFormat,
     minify,
+    profilerNames,
+    treeshake: DEFAULT_TREESHAKE_CONFIG,
   };
 
   const program: ProgramModel = {
@@ -4524,7 +5070,8 @@ function buildRandomManualGroups(
 /// tagged whatever its provenance (the directed builder or a random cross-entry cell).
 function hasCrossEntryColocatingGroup(analyzed: AnalyzedProgram): boolean {
   const { program, facts } = analyzed;
-  if (programChunking(program).kind === "automatic") {
+  const chunking = programChunking(program);
+  if (chunking.kind === "automatic" || chunking.kind === "disabled") {
     return false;
   }
   const entryModuleIds = program.entries.map((entry) => entry.moduleId);
@@ -4605,7 +5152,7 @@ function hasOptimizerRuntimePlacementRecipe(analyzed: AnalyzedProgram): boolean 
 function hasDynamicEntryColocationRecipe(analyzed: AnalyzedProgram): boolean {
   const { program } = analyzed;
   const chunking = programChunking(program);
-  if (chunking.kind === "automatic") {
+  if (chunking.kind === "automatic" || chunking.kind === "disabled") {
     return false;
   }
   const dynamicTargets = new Set(
@@ -4624,7 +5171,9 @@ function hasDynamicEntryColocationRecipe(analyzed: AnalyzedProgram): boolean {
         group.moduleIds.length >= 2 && group.moduleIds.some((id) => dynamicTargets.has(id)),
     );
   }
-  return chunking.groups.some((group) => group.entriesAware === true);
+  return chunking.kind === "organic"
+    ? chunking.groups.some((group) => group.entriesAware === true)
+    : false;
 }
 
 /// The strict-wrapper init-cycle RECIPE exercised by the entries-aware manual-splitting factor: an
@@ -4675,6 +5224,35 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   }
 
   for (const module of program.modules) {
+    if (module.format === "esm" && module.globalReadExport !== undefined) {
+      const form = module.globalReadExport.form;
+      tags.add(
+        form.startsWith("class-")
+          ? "mechanism:class-definition-global-read"
+          : form === "direct"
+            ? "mechanism:direct-global-read"
+            : "mechanism:hidden-global-read-expression",
+      );
+      tags.add(`variation:global-read-form:${form}`);
+      tags.add(`variation:global-read-kind:${module.globalReadExport.read.kind}`);
+      if (module.globalReadExport.read.kind === "instanceof") {
+        tags.add(`variation:global-read-instanceof:${module.globalReadExport.read.expression}`);
+      }
+      if (module.globalReadExport.read.kind === "optimizer-expression") {
+        const expression = module.globalReadExport.read.expression;
+        const spec = globalReadOptimizerExpressionSpec(expression);
+        tags.add(`variation:global-read-optimizer-expression:${expression}`);
+        tags.add(`variation:global-read-optimizer-family:${spec.family}`);
+      }
+    }
+    if (module.format === "esm" && (module.authoredExportBindings?.length ?? 0) > 0) {
+      tags.add("mechanism:authored-binding-deconfliction");
+      for (const binding of module.authoredExportBindings ?? []) {
+        if (AUTHORED_COLLISION_BINDING_NAME_SET.has(binding.localName)) {
+          tags.add(`variation:generated-name-collision:${binding.localName}`);
+        }
+      }
+    }
     for (const dependency of module.dependencies) {
       const target = modulesById.get(dependency.target);
       if (module.format === "cjs" && dependency.kind === "esm-dynamic-import") {
@@ -4737,7 +5315,10 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
 
   // The per-case chunking-config axis (wave 6), driven by the single `programChunking` matcher.
   const chunking = programChunking(program);
-  if (chunking.kind === "manual") {
+  if (chunking.kind === "disabled") {
+    tags.add("chunking:disabled");
+    tags.add("mechanism:code-splitting-disabled");
+  } else if (chunking.kind === "manual") {
     tags.add("mechanism:manual-chunks");
     tags.add("chunking:explicit");
     if (chunking.groups.some((group) => group.entriesAware === true)) {
@@ -4771,6 +5352,16 @@ export function deriveCoverageTags(analyzed: AnalyzedProgram): readonly string[]
   // W12 minify axis: `true` mangles internal identifiers and drops whitespace (the prod-build default),
   // reaching the minify-only order-bug surface — a density scan sees both settings.
   tags.add(`axis:minify:${String(build.minify)}`);
+  tags.add(`axis:profiler-names:${String(build.profilerNames)}`);
+  tags.add(`axis:property-read-side-effects:${String(build.treeshake.propertyReadSideEffects)}`);
+  tags.add(`axis:property-write-side-effects:${String(build.treeshake.propertyWriteSideEffects)}`);
+  tags.add(
+    `axis:manual-pure-functions:${
+      build.treeshake.manualPureFunctions.length === 0
+        ? "none"
+        : [...build.treeshake.manualPureFunctions].sort().join(",")
+    }`,
+  );
   // The #9998 cross-entry-leak structural signature (W14c): a seo:false program with a codeSplitting
   // group whose reach spans DISJOINT entry-reachability sets — the config that runs one entry's
   // top-level when a disjoint entry loads, caught by the reachability-isolation oracle.

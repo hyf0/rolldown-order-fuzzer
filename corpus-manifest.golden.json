@@ -124,6 +124,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -546,6 +547,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -979,6 +981,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -1821,6 +1824,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -2067,6 +2071,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -2614,6 +2619,7 @@
       "lazyBarrel": false,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -3259,6 +3265,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -3885,6 +3892,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -5252,6 +5260,7 @@
       "lazyBarrel": false,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -5330,6 +5339,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -5565,6 +5575,7 @@
       "lazyBarrel": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -7862,6 +7873,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -9784,6 +9796,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -10839,6 +10852,7 @@
       "lazyBarrel": true,
       "minify": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -11108,6 +11122,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -13387,6 +13402,7 @@
       "lazyBarrel": true,
       "minify": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -14785,6 +14801,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": false,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -15012,6 +15029,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -16710,6 +16728,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -16969,6 +16988,7 @@
       "lazyBarrel": false,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -18164,6 +18184,7 @@
       "lazyBarrel": true,
       "minify": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -21222,6 +21243,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -21357,6 +21379,7 @@
       "minify": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -21861,6 +21884,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -22995,6 +23019,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -23419,6 +23444,7 @@
       "minify": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -25221,6 +25247,7 @@
       "includeDependenciesRecursively": false,
       "lazyBarrel": false,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -25769,6 +25796,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -25864,6 +25892,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -26010,6 +26039,7 @@
       "minify": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -26548,6 +26578,7 @@
       "lazyBarrel": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -26945,6 +26976,7 @@
       "lazyBarrel": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -27997,6 +28029,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -28037,6 +28070,7 @@
       "lazyBarrel": true,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -28956,6 +28990,7 @@
       "lazyBarrel": true,
       "minify": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -29109,6 +29144,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -29961,6 +29997,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": {
@@ -30806,45 +30843,6 @@
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "9f2971941ba31741fd3c54f7176b4fc838f327b05be8fac9a1976a6902cc44de"
-      },
-      {
-        "path": "module-0001.cjs",
-        "sha256": "a42a8c1e557dafd28c8467b7bd964da1a5e3c69231263c551d08d64787a5f65e"
-      },
-      {
-        "path": "module-0002.cjs",
-        "sha256": "af67f3ddf3077ad56731b5a46fcf6a12a66d297cf579883392cabf7c1bea4a55"
-      },
-      {
-        "path": "module-0003.cjs",
-        "sha256": "ac73b38be4a25cde9205c6bcc3d192f16bba1e94d6f32c02ab0970be681942d5"
-      },
-      {
-        "path": "module-0004.cjs",
-        "sha256": "21d82aee0828a408d67efa3184ef47645efa7dc61b36e3e839220c48dc43e097"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
-      }
-    ],
-    "group": "template:esm-imports-cjs",
-    "seed": 5000134,
-    "size": 34,
-    "template": "esm-imports-cjs"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": true,
-    "files": [
-      {
-        "path": "module-0000.mjs",
         "sha256": "b9ceb34be5e5042415e3bbdfdff4dabf315720a8711a8bc4fe14f6dccce1618d"
       },
       {
@@ -31118,6 +31116,45 @@
     "files": [
       {
         "path": "module-0000.mjs",
+        "sha256": "e116d043ef632ecf9c5cf2e4803f523375e7a9d014e72398d63405d2e9976805"
+      },
+      {
+        "path": "module-0001.cjs",
+        "sha256": "e44f121ef6b74b83b3031880b446fe801520be66a95f99f5e41051c2effdf4ae"
+      },
+      {
+        "path": "module-0002.cjs",
+        "sha256": "a63f81b44e0857a699be028100f23e656cda3fcfb201e700480660f42589bff6"
+      },
+      {
+        "path": "module-0003.cjs",
+        "sha256": "96afd9bf241a32c0c30fe51836faf5533e4bb83c76c0baaa4faeb8a952a7fb01"
+      },
+      {
+        "path": "module-0004.cjs",
+        "sha256": "bac72369e1bd650faf070cae30c2c37270d24ef49227225413d45ca0a3f88da1"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
+      }
+    ],
+    "group": "template:esm-imports-cjs",
+    "seed": 5000201,
+    "size": 17,
+    "template": "esm-imports-cjs"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": true,
+    "files": [
+      {
+        "path": "module-0000.mjs",
         "sha256": "6443c3bd77be874023eb29f72cbbe851404854d23dd804e368334519a50604b1"
       },
       {
@@ -31340,100 +31377,6 @@
     "group": "template:shared-cjs-carriers",
     "seed": 5000056,
     "size": 8,
-    "template": "shared-cjs-carriers"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": true,
-    "files": [
-      {
-        "path": "module-0000.mjs",
-        "sha256": "3108b711fe9d47c905c3db0dadbbc1dc0aa111b65a425b903106c53841e0d977"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "6e4580a5c86a3faf935bfc3be5e1907f5de4e2de412fb4131f863a7058675ac9"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "812d04e9f64060a6ceb7a3feff8e9017b2224eba4a187001f506b0c4fef542cc"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "5fbcad462e62321a4d956dc5ffbe9360304741446e5b1dc8dd0edc30e3a233d5"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "5d97900bd316355b68cce10db268caf5ec2f84355a72f0faa7d5c60416501c49"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "e708f277baa31625bd66cd346573cdc3fa3d946638cc3bc51a57e68a249abdb4"
-      },
-      {
-        "path": "module-0006.cjs",
-        "sha256": "c165c062b822cc95590b272267a09719b3860d4b96df772a50960cfa14dfb234"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
-      }
-    ],
-    "group": "template:shared-cjs-carriers",
-    "seed": 5000065,
-    "size": 17,
-    "template": "shared-cjs-carriers"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": true,
-    "files": [
-      {
-        "path": "module-0000.mjs",
-        "sha256": "58bafd7005a55b58c5f6c94b59a1e4896f0e45a92db25db7d3057a7a475154ca"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "095024d93d6646c30341925ba90a38701d1fd3a78ea43926f9b87188d090d816"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "e40bedbca49494593fb8edc7fc32e269f07a8c930f2e786c3a60335ab6ab55ed"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "328ae01ddca4cff5879f07f5c4f5ffa19a138ccfd4d21ce9358d48d28c5e8957"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "6ab3fe0fb5c4cfaa1c201ba0e32074907b0ced88393a2a5965cc12358a874de8"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "5fd8a878d8c322fe98cc54296c0e0264b9d4a29ac0311ea997b3757caba83e4d"
-      },
-      {
-        "path": "module-0006.cjs",
-        "sha256": "b66ea7fd83576bf768da19cd3ab6c4650def1cf8789c23d638ec4c925f5c6d89"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
-      }
-    ],
-    "group": "template:shared-cjs-carriers",
-    "seed": 5000070,
-    "size": 18,
     "template": "shared-cjs-carriers"
   },
   {
@@ -32246,31 +32189,31 @@
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "cff0bd6b020c44e64e1da91720a9c58fb4774a24ca7f8838ce3df49c967aa625"
+        "sha256": "25a4d66e2a795d68f4903a243f5ac4600448b2a03c2d85cb95d2c0ab8bf5e01e"
       },
       {
         "path": "module-0001.mjs",
-        "sha256": "b251351a55b2856cf0f2353ad7f78c497ebd9dd9a3f3a52bc7a92f9cc56e307c"
+        "sha256": "af539ebbb3275b664b924ca3e2756373b31f474c7cc3d1e1d14485905bc11dee"
       },
       {
         "path": "module-0002.mjs",
-        "sha256": "52d9ec04ab9d329d97ed95c78a1af4360ed4ff013dd8fe5f071017f1c5b0a46a"
+        "sha256": "003354ebcbea380bacc8c749d23b54ba987c526e28e673234b0455ea4638cd43"
       },
       {
         "path": "module-0003.mjs",
-        "sha256": "c0369988305b188fef328a5c5d0e694c27c6b6616c8538fe0a87b147af3a9793"
+        "sha256": "c188e1d325e9e15871082e0e8dd4da9239d4322d1ebcb2b3729e61ec4969ac38"
       },
       {
         "path": "module-0004.mjs",
-        "sha256": "e9cb6a9d79e05a1cc7f6c3b9792453a4f8d77c001f7cf56c5e13a6596f5e62ab"
+        "sha256": "f0e38ffd1f5a093101b86a04c28a939ea741e9935fb02e5f8a7bdd758607de06"
       },
       {
         "path": "module-0005.mjs",
-        "sha256": "730752724421164c3d8992e2cafe98ae0e4ee2743d4573a2af4d404238c7d31b"
+        "sha256": "7c05a8961e57c01241baced6845e859187a2fa8fe80095e6e9b8b02dc3c64013"
       },
       {
         "path": "module-0006.cjs",
-        "sha256": "8e29e258b3d5f1e44c50cd57a8274a7e1115881d16d984ccd801bad47f4b2fd4"
+        "sha256": "4624c50fc0f20e4ba63060a3a6494b711225d67826a1baefb603d05c1bf4eeda"
       },
       {
         "path": "schedule.json",
@@ -32278,7 +32221,101 @@
       }
     ],
     "group": "template:shared-cjs-carriers",
-    "seed": 5000224,
+    "seed": 5000226,
+    "size": 35,
+    "template": "shared-cjs-carriers"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": true,
+    "files": [
+      {
+        "path": "module-0000.mjs",
+        "sha256": "314199863ca976cb3899cfeb344ab5994263b16a9b2e02be537056035bb10ee0"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "45428da52dc374325582a97515add45b4e83e062fd767875d678edf67059a0b4"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "46f215e8df3c9749279a3beec06cb47eec1fd03810f579ca811256762396dfd9"
+      },
+      {
+        "path": "module-0003.mjs",
+        "sha256": "b04d517c843a765a45f431c8a0def8850656d148d42c7cf9ffbc1ea185db4565"
+      },
+      {
+        "path": "module-0004.mjs",
+        "sha256": "34347f323cfc549498fedaa00b0cf9d330094a28530422717bf5597c7a471f5c"
+      },
+      {
+        "path": "module-0005.mjs",
+        "sha256": "70cdae01c98867d2e06765db80acda1b9a54ac046b4e30b27a6af43f35774edd"
+      },
+      {
+        "path": "module-0006.cjs",
+        "sha256": "ea8d2c1f12423960b33a12ff879811e78b55ceebb01c63ecc960ea89b04f8048"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
+      }
+    ],
+    "group": "template:shared-cjs-carriers",
+    "seed": 5000247,
+    "size": 7,
+    "template": "shared-cjs-carriers"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": true,
+    "files": [
+      {
+        "path": "module-0000.mjs",
+        "sha256": "d40adfe62b2da90379396f6565312c38dcf10b4448250a6b8d67483c2419c131"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "99952d48dbd038de0bd897babc926f214e806bb17029e0ac32ad7b3428bcd86d"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "e6c75f1e11f8564bb837ee677cfba0d2c3859553b311964f108030bf47b3ade6"
+      },
+      {
+        "path": "module-0003.mjs",
+        "sha256": "921bfb51e4e1708fce74953a0f3c23aa3f84fd6ce6e857f613c389d50b304e4c"
+      },
+      {
+        "path": "module-0004.mjs",
+        "sha256": "cf4a20bec2a513e281973a70b6b2c136062e6467ea5526c59745797dcf592578"
+      },
+      {
+        "path": "module-0005.mjs",
+        "sha256": "8ca11336e08015d9e2f9ff36911b24a6af628317b1e78145d8678c700f80df45"
+      },
+      {
+        "path": "module-0006.cjs",
+        "sha256": "5fcebb4493a889555840f54a70fc1bbf8473942860f72e67540f167dda06e0b0"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
+      }
+    ],
+    "group": "template:shared-cjs-carriers",
+    "seed": 5000253,
     "size": 8,
     "template": "shared-cjs-carriers"
   },
@@ -32594,49 +32631,6 @@
     "files": [
       {
         "path": "module-0000.cjs",
-        "sha256": "b0fc4a000b21dd267e4d7a00c1779f120cb629594018cd53d674c2f874fb536f"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "705e1994836415e612ec6ba73e547abed0df00da841d84ac05c40b607bf72257"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "fc010ffd44529f9ae520c0ea570a5fdb77776230f45f4eaffb924f385e2fb5b5"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "85af9e7278c0b95387e630f49adadc032bec4925896c636c379151c360dffccf"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "f9d8ed50b18eccb8860878e7aeb24107c2d8fb97853cc0f7f7cbdc73ad805ae2"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "d619c389a9492163381dd868f4ffdbca72be0cef57ba54f3b2786da555f94dc4"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "4a37f0ab1cc7127de09c3dc2645c5ca37bafcd0425ba14820af44f88162e2b82"
-      }
-    ],
-    "group": "template:cjs-requires-esm",
-    "seed": 5000096,
-    "size": 9,
-    "template": "cjs-requires-esm"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": true,
-    "files": [
-      {
-        "path": "module-0000.cjs",
         "sha256": "04440f2c7762cf0f9970c0e71b272474d1eaf68122f8bb6fb131518c38ef1db4"
       },
       {
@@ -32796,49 +32790,6 @@
     "group": "template:cjs-requires-esm",
     "seed": 5000131,
     "size": 8,
-    "template": "cjs-requires-esm"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": true,
-    "files": [
-      {
-        "path": "module-0000.cjs",
-        "sha256": "dc24cc8013a7ac782f981ec63d1a3a92bc0a5eeaaf3de03297663583fe539a43"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "dde9593ee72ab810c0622cbc4635b93db452f11fef71a9ad85065afada39ed46"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "dc072f2b2d329b5786d9c156ae81d3a30000ba8b9f5ce31b4080d82f408c75f8"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "e131315e7080ac80c94726fc3ece73f95e5a8a79d7617a780a2974a427748a48"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "2da738c8050f5de33f2fef56811244b6d20522779b1dfe3faaf0b5eeb2a95757"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "01ceec7e9413819edf92491e949f3a997f613c63172ac15c67164ae2641b908c"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "4a37f0ab1cc7127de09c3dc2645c5ca37bafcd0425ba14820af44f88162e2b82"
-      }
-    ],
-    "group": "template:cjs-requires-esm",
-    "seed": 5000161,
-    "size": 9,
     "template": "cjs-requires-esm"
   },
   {
@@ -33054,49 +33005,6 @@
     "group": "template:cjs-requires-esm",
     "seed": 5000251,
     "size": 9,
-    "template": "cjs-requires-esm"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": true,
-    "files": [
-      {
-        "path": "module-0000.cjs",
-        "sha256": "ca32bb2ef93748774aef55c6e97efeb33172c485ad8d409e98d73b6011f198ea"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "5edd65ffcbf1dc24617a0cf7ee9bf81bde77bbb3608e5e8cc234922febcc67cc"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "4bfab53ac4d781227826d97db616e446180c19271a588fa7b32e2986a0ca33bc"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "de9ff0cc39a65f7b022be8b72e4c2a05b0532f18c23272110b5a722f4b9684e8"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "289f1942637a0607c82ab62116bb8f2b120e05c16c403f0d0ff41e09fd0fde28"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "ba9b3b944f0be09206283bb7a1e577e0f472a1418a43331b300dd71fe67f4099"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "4a37f0ab1cc7127de09c3dc2645c5ca37bafcd0425ba14820af44f88162e2b82"
-      }
-    ],
-    "group": "template:cjs-requires-esm",
-    "seed": 5000257,
-    "size": 20,
     "template": "cjs-requires-esm"
   },
   {
@@ -33355,6 +33263,135 @@
     "group": "template:cjs-requires-esm",
     "seed": 5000325,
     "size": 9,
+    "template": "cjs-requires-esm"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": true,
+    "files": [
+      {
+        "path": "module-0000.cjs",
+        "sha256": "8811597c01afa68b16e46f189f876f77f0070087a96bbe0d8714088caeea07f6"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "28486810e9c527d15af31b1d89fec41f7eedfcd4f4601a590fb8383458d252dc"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "3236ed48d1327024b5acd7ea7ef82a0faba21525dc9bcd18574dac3ec114d67d"
+      },
+      {
+        "path": "module-0003.mjs",
+        "sha256": "bce2ed648be9e76822f7e94b7e988da8591aa96eceda4108dd13e7bff63ebc05"
+      },
+      {
+        "path": "module-0004.mjs",
+        "sha256": "2ef71b477c49760ae22cfc386dbd0628f6a570c6dac4a2bcd00da23ca5ebbfd5"
+      },
+      {
+        "path": "module-0005.mjs",
+        "sha256": "ef286f988d2b6f65e99da63dafc1e7a9c2a6dd0f8cb6c6452aaf5d31c3a8b4ab"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "4a37f0ab1cc7127de09c3dc2645c5ca37bafcd0425ba14820af44f88162e2b82"
+      }
+    ],
+    "group": "template:cjs-requires-esm",
+    "seed": 5000328,
+    "size": 9,
+    "template": "cjs-requires-esm"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": true,
+    "files": [
+      {
+        "path": "module-0000.cjs",
+        "sha256": "fed2a345e98708447703f3dd420c23b2b397f29f0e72200550c8252ef5f9c54f"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "615b64a149c1f29ae8cbf263989f1c0a16d75656d7b55b8d7917fba2cba62d7a"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "4513e5690d18c0d06a0fd9e190d6d8d5b559d08ea2b7a6f569bf242bdeda6cd1"
+      },
+      {
+        "path": "module-0003.mjs",
+        "sha256": "454db186c04803a8f79c0f9395ea7bff44f0baaee5490020831821dfa23e38b7"
+      },
+      {
+        "path": "module-0004.mjs",
+        "sha256": "83975611c1f2c313e9eed199ea7621541354fe70125f906ca4e7352d68a79cc7"
+      },
+      {
+        "path": "module-0005.mjs",
+        "sha256": "0efa69b406dabb7acb7a48f137c39a3c8b1ef66ad6d62d076129ba733444d4ec"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "4a37f0ab1cc7127de09c3dc2645c5ca37bafcd0425ba14820af44f88162e2b82"
+      }
+    ],
+    "group": "template:cjs-requires-esm",
+    "seed": 5000340,
+    "size": 9,
+    "template": "cjs-requires-esm"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": true,
+    "files": [
+      {
+        "path": "module-0000.cjs",
+        "sha256": "6e4684952b41f5e531567b1a34b509fe23921c04a45d86047784e2e40687f370"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "7f2281787482edc470e995ad36385af57688a8227c5cb5bd278582ba60c55c00"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "1a6a764b1ee6190fa5df3173a66deece2ce9b964afbd97de0ef7b6d66854bdf8"
+      },
+      {
+        "path": "module-0003.mjs",
+        "sha256": "3407cc6f53300d5030b55c45495333c5d85d30b880e155fb2f3b76dc9a9bc5ea"
+      },
+      {
+        "path": "module-0004.mjs",
+        "sha256": "d2979e4d3384d699b7cd021ac4b03d27cc7cb7b97877e15d1ed846befe012a41"
+      },
+      {
+        "path": "module-0005.mjs",
+        "sha256": "5b80a3202ee0ed94fd095c3bde4fd235c2ee0d86fdf7775376b81f079adfbdf0"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "4a37f0ab1cc7127de09c3dc2645c5ca37bafcd0425ba14820af44f88162e2b82"
+      }
+    ],
+    "group": "template:cjs-requires-esm",
+    "seed": 5000342,
+    "size": 8,
     "template": "cjs-requires-esm"
   },
   {
@@ -34754,64 +34791,6 @@
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "442f978f1a7325f2e51914b7fa23e5f7ae6a84b4ee52a390e3c92711869c4cd5"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "79729a75ad2f04d0314e4443f5102f78c319d82541a88a86bf76050de5a79a96"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "535503562cdd87a994b9df4376ea10c99e3ac2e4277d05d5b6b007da08c7397e"
-      },
-      {
-        "path": "module-0003.cjs",
-        "sha256": "88ae96d29f870f646bfa950b8042d432f04f9a3cd3acf95487b0f23135c971d0"
-      },
-      {
-        "path": "module-0004.cjs",
-        "sha256": "292642f83e30c723c2dd402887d517233769827a5961ddfeee5bad8d5b1d4e3e"
-      },
-      {
-        "path": "module-0005.cjs",
-        "sha256": "a49b612b9667c8f6c95084f0ac4119422d3a2f301f8354ee43a1de680251a92e"
-      },
-      {
-        "path": "module-0006.cjs",
-        "sha256": "bd1c6df76dcc807a0365cb39f8de3c1ad1b4bdcc9462c8b0456185deab697408"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
-      }
-    ],
-    "group": "template:manual-chunk-separation",
-    "seed": 5000000,
-    "size": 23,
-    "template": "manual-chunk-separation"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": false,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": {
-      "groups": [
-        {
-          "moduleIds": ["carrier-0", "carrier-1"],
-          "name": "carriers"
-        },
-        {
-          "moduleIds": ["interop-0", "interop-1", "interop-2", "interop-3"],
-          "name": "interop"
-        }
-      ]
-    },
-    "files": [
-      {
-        "path": "module-0000.mjs",
         "sha256": "63157bcda95c7d78fb75fd210710a4c42f227f460dc01a54dc207236c2893781"
       },
       {
@@ -36088,64 +36067,6 @@
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "eb2a53ced19858df7d9e932a2c038830486a3de3028baab9c2a97630ae19e9e5"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "192805bd4b986d59a0376c4839d8f6f274b344bd92e81b499c04c5c63d0eef40"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "ab9b92c72ef580f9527fbdf70ae11ae9a14cbc3eb5afd2d3c3428eee9e2fd2ee"
-      },
-      {
-        "path": "module-0003.cjs",
-        "sha256": "ed42f6a2511841bc8535fbe1087f8ea0d28c8e978e0cfd3bbfb60de2e1b68ef0"
-      },
-      {
-        "path": "module-0004.cjs",
-        "sha256": "a8c7c8394229e7ad6a28843ec766523f485f5016f9a579e29c97a8d1694e6ea2"
-      },
-      {
-        "path": "module-0005.cjs",
-        "sha256": "7a28384ff9881663d9e52e0f9e06abad0902d92a79614e9c6091cd07d7affa81"
-      },
-      {
-        "path": "module-0006.cjs",
-        "sha256": "1e081d44071772de83afa7614eba8b92595214ae5cca6f2a0dc10d3c37b3bf71"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
-      }
-    ],
-    "group": "template:manual-chunk-separation",
-    "seed": 5000288,
-    "size": 12,
-    "template": "manual-chunk-separation"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": false,
-      "lazyBarrel": false,
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": {
-      "groups": [
-        {
-          "moduleIds": ["carrier-0", "carrier-1"],
-          "name": "carriers"
-        },
-        {
-          "moduleIds": ["interop-0", "interop-1", "interop-2", "interop-3"],
-          "name": "interop"
-        }
-      ]
-    },
-    "files": [
-      {
-        "path": "module-0000.mjs",
         "sha256": "c06b98bad7f647110df744efae2f9cb95e01eb5cec1704348db5f1473c57b525"
       },
       {
@@ -36189,107 +36110,187 @@
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
-    "codeSplitting": true,
+    "codeSplitting": {
+      "groups": [
+        {
+          "moduleIds": ["carrier-0", "carrier-1"],
+          "name": "carriers"
+        },
+        {
+          "moduleIds": ["interop-0", "interop-1", "interop-2", "interop-3"],
+          "name": "interop"
+        }
+      ]
+    },
     "files": [
       {
-        "path": "module-0000.cjs",
-        "sha256": "c7f2f3690a0bc42066e1c55d4fbc65fb50a02e6f2be7946c0fe2726f9073e46e"
+        "path": "module-0000.mjs",
+        "sha256": "0a573bb2afc76494be1be0586e04c8c549bd72e8048cfed3ec8e900d1f4916ba"
       },
       {
         "path": "module-0001.mjs",
-        "sha256": "4dfaa7b6bcce50c2a4d089c0bfaccfa88eb5858b2936b3fcc754083d27a966e3"
+        "sha256": "9dd044df5b2b7eddb3835eb9afd24cc3a31c2cc8d3fa3de53ec7f5e0b2417371"
       },
       {
         "path": "module-0002.mjs",
-        "sha256": "52896cbcc2f65cd04436aeec4f13c73af0bdc4aa7710b715d82b9e22c5c23b06"
+        "sha256": "2c831a9dc97acef080468bb993f69be3144b7ea772a33316ac079848b66c3cd7"
       },
       {
-        "path": "module-0003.mjs",
-        "sha256": "338d8dda6293a3c5065ac3bf2ce76260f45af350eec321774f1438588793e20c"
+        "path": "module-0003.cjs",
+        "sha256": "c897c9ab54d1bf2d89a920cc54e48aef9e8904abec21af29dbc295d367d6fa54"
       },
       {
-        "path": "module-0004.mjs",
-        "sha256": "4b8df1242dc363227a2e71025ceaf8476f54b8f18c23cdd3a5f927b03192146d"
+        "path": "module-0004.cjs",
+        "sha256": "22e2338ffed1f2d89ea202ba7c62205e444eefa5e1eeef5972522d903c12d74b"
       },
       {
         "path": "module-0005.cjs",
-        "sha256": "736bb45f11040d6d9ec0c4989cf600c775a6e8a2127ed4a1a217cece617f79eb"
+        "sha256": "e1d2645eb60526076366750062b4f1f7380132be41dcc5b4846c78e504c35c3d"
       },
       {
-        "path": "module-0006.mjs",
-        "sha256": "70d697d1bf2f0f5c53db95fec477e1863e35714b217963c109f2bf6c959a7f45"
-      },
-      {
-        "path": "module-0007.mjs",
-        "sha256": "95d5db60df2f6bb88e1a7892f6a21b365ddcc96f3031c6bc278b80a73d305f0a"
-      },
-      {
-        "path": "module-0008.mjs",
-        "sha256": "edae02cfdb11f78b936a689745d6bcadd17eb1a5d2c466949a67c9b3442584d9"
-      },
-      {
-        "path": "module-0009.cjs",
-        "sha256": "eadfce24d877cea94a17d9f8b0f6ea28e3f57e33afbb10f130660317580f35c2"
-      },
-      {
-        "path": "module-0010.mjs",
-        "sha256": "ea8bb6187fcd8cf598fed3fe5586528cb9a196823c7d31d1b5aeb89e28c2204c"
-      },
-      {
-        "path": "module-0011.cjs",
-        "sha256": "f240967aed96bc0bb9ae1c0cd39f2b9e08c668a580bd3cfdecbd51f1fd790521"
-      },
-      {
-        "path": "module-0012.mjs",
-        "sha256": "5b888f3b8f2339373eec96022809d1bb174d93f9f44957d00ceff7f5d7009e76"
-      },
-      {
-        "path": "module-0013.mjs",
-        "sha256": "ec8ff0d4cbf09192dc8c9fa4080b289efd42bc82538313a9ec1a2c2749e0f10c"
-      },
-      {
-        "path": "module-0014.mjs",
-        "sha256": "204f261ba03b5cddf95108e73eae1ed5c9aec0db3ae47ccb5bd11ea1c4961d35"
-      },
-      {
-        "path": "module-0015.mjs",
-        "sha256": "c7502bbda2b6c0266f31f39509a65f0a98238bb4987b443db9dc19643b1a6c5d"
-      },
-      {
-        "path": "module-0016.cjs",
-        "sha256": "859db4666130a0c7b69bd29716e0822b0eb4e82f974729d0de9fcdb23052005e"
-      },
-      {
-        "path": "module-0017.cjs",
-        "sha256": "08424302a00ed8bfc33a0af6c1cba5d0910a34e2e1120a8123d78de33df59a5d"
-      },
-      {
-        "path": "module-0018.cjs",
-        "sha256": "7b8ad093a49ab3a0c8788d614a4ed56b13f62639001107b4170edad45f90dd28"
-      },
-      {
-        "path": "module-0019.mjs",
-        "sha256": "789410470e205bf8f8ad2c1f10fcbbb829910b5c0e2c51d7c20d34d1680dc629"
-      },
-      {
-        "path": "module-0020.mjs",
-        "sha256": "f071daacf8c23a68519835cbae1b6e74546e7b2921823a7f44105933ceae5da4"
-      },
-      {
-        "path": "module-0021.cjs",
-        "sha256": "eb8c00903c24378eff467ad3548c39cab071220be5d30f28e6a689537f3d02ae"
-      },
-      {
-        "path": "module-0022.mjs",
-        "sha256": "e0004ee519c56ed9288c2e158a6e747bbd0d6bee09efa1c8266fdf6cd47906b2"
-      },
-      {
-        "path": "module-0023.mjs",
-        "sha256": "ea43da498c957e7a43387da51b848d78253555bf1fde4660e9a871a8e4f25f21"
+        "path": "module-0006.cjs",
+        "sha256": "80ecf272317f39277e3c4acdbd5857316a8e7cfbda56280fd0af15905beb2a4f"
       },
       {
         "path": "schedule.json",
-        "sha256": "6995ce181ce103ecd3364602a86e032194b5e93bdf765a4785c490900a0beab7"
+        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
+      }
+    ],
+    "group": "template:manual-chunk-separation",
+    "seed": 5000335,
+    "size": 11,
+    "template": "manual-chunk-separation"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": {
+      "groups": [
+        {
+          "moduleIds": ["carrier-0", "carrier-1"],
+          "name": "carriers"
+        },
+        {
+          "moduleIds": ["interop-0", "interop-1", "interop-2", "interop-3"],
+          "name": "interop"
+        }
+      ]
+    },
+    "files": [
+      {
+        "path": "module-0000.mjs",
+        "sha256": "f9ff4e38e592d836cf4ff23eac095ad9a05f08e3c5bfc7ba568404ec2a7c5567"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "b60f3b97ecb20710f61dce185400a295b6cb8a34c1c6a60d4365b107de8b30be"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "681082b0de335d607dc7840df04438639750c9d1b4eb15ea3ff7ba49136a3b5b"
+      },
+      {
+        "path": "module-0003.cjs",
+        "sha256": "9ef8a18f1628406ba2f998daa0ba3e4b923b6362f87f1dc4fd3f701594fcd6d5"
+      },
+      {
+        "path": "module-0004.cjs",
+        "sha256": "543d6b98ce0fd4b727b80a00be30e712f26a8d19d6a7ed68651e84f2577e8151"
+      },
+      {
+        "path": "module-0005.cjs",
+        "sha256": "f3848b9554b4277b82559df2fb6a6a12b34d70a3df625f8e60c5023d0f59f18f"
+      },
+      {
+        "path": "module-0006.cjs",
+        "sha256": "ecb6f3861510a13d2e98af5450ef503023fc9b9860f4d64cc8e19cf63a77f4e0"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "75653b9a4cd04d66a20f37163b532c54b7b8b9706d1a2226c2decd75918b984d"
+      }
+    ],
+    "group": "template:manual-chunk-separation",
+    "seed": 5000347,
+    "size": 23,
+    "template": "manual-chunk-separation"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": false,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": {
+      "groups": [
+        {
+          "moduleIds": ["gr-reader"],
+          "name": "global-reader"
+        }
+      ]
+    },
+    "directedReleaseGap": {
+      "kind": "global-read",
+      "modelSha256": "d468b96780ff5ad6c7462ff97d341e8b15f7afa84fc1199486f8451452544ba1",
+      "witness": "fixture-function-v1"
+    },
+    "files": [
+      {
+        "path": "module-0000.mjs",
+        "sha256": "9270775a06bb70720dce54de01e8b629f0dacf42adad66b2ed968db80011a44e"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "8030481fba7d09da5959d398e25c1cdd09b5777cb4edceccf1f1b422243f251c"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "55d6876a0a38e050fc5cd9e74cad0fc8380593fff9c4e53bb1c9f82d71634c9f"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "66408066c71a4c55b19b8ec2324fae6c8a5c0343d07155f40ad168330827f905"
+      }
+    ],
+    "group": "template:random-mixed",
+    "seed": 5000000,
+    "size": 23,
+    "template": "random-mixed"
+  },
+  {
+    "buildAxes": {
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
+      "strictExecutionOrder": true
+    },
+    "codeSplitting": false,
+    "directedReleaseGap": {
+      "kind": "authored-name",
+      "modelSha256": "d11e13738dc16b705b87917af7f0235a213121dbcd89a4ed42746f0961e74e3c"
+    },
+    "files": [
+      {
+        "path": "module-0000.mjs",
+        "sha256": "81c37cd2d5d5874f1f143150e5392148aa3fc02fc1ff61cba90ff2ad0919a6a7"
+      },
+      {
+        "path": "module-0001.mjs",
+        "sha256": "e8af3190fa2dac6bd149c5eef17b3e88ed0df81f178136605474c892f6d7d717"
+      },
+      {
+        "path": "module-0002.mjs",
+        "sha256": "e05c1200975599703dd5d55c793455d04bb94260649dd64ed3c62ba7856f663b"
+      },
+      {
+        "path": "schedule.json",
+        "sha256": "f1ae59b86af5084b74626533cb2df78ef1572b1a989edc31fe882a0384b4504f"
       }
     ],
     "group": "template:random-mixed",
@@ -36525,48 +36526,33 @@
   {
     "buildAxes": {
       "includeDependenciesRecursively": true,
-      "lazyBarrel": true,
+      "lazyBarrel": false,
       "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
-    "codeSplitting": true,
+    "codeSplitting": false,
+    "directedReleaseGap": {
+      "kind": "authored-name",
+      "modelSha256": "3565fac3b1034c49713476b1f7ee4faed99204d826867fe731097a227ee2f4e9"
+    },
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "d15ead9ddbe60eca6655868469f775ad9e71d4b2b6637b3d11c6cfd92cd2d491"
+        "sha256": "2287b5592dfb3283a381f7180c3a1b72083bb490642b0777fba2ead8d19a8fbb"
       },
       {
-        "path": "module-0001.cjs",
-        "sha256": "ccf6f30a5cb402f5402f2754d9663fced30bc1dcbd85f0f98493af6121c42a3e"
+        "path": "module-0001.mjs",
+        "sha256": "7f473ce71ec17d2db8a2d3fb9091c1b23aa3160c6f687829009b89ae8a4e8456"
       },
       {
-        "path": "module-0002.cjs",
-        "sha256": "156a87e8cd3f27da26ee2f33c76f8e2f99927b4d8f8621ab52d56cce82a89777"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "495ca413f9594a46cca6ec319aeb8d4bb8bd6f2d5db421d342fb4873f5da6a34"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "5e58ca3f910a6d2766b5246174cc3b48ece562b9cf333fe7409e35aa1b553534"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "27a1920e9aac1704f6be42ccb7f82144e4f44fded860894f50a015949edc986b"
-      },
-      {
-        "path": "module-0006.mjs",
-        "sha256": "8a918e6f88e1e587c59f4ccd34f55e2a0233aa47982701425a74d77df3bdf5a8"
-      },
-      {
-        "path": "module-0007.mjs",
-        "sha256": "22290135222c99e981827ca6128d4b8903dcb2c702e739089b21660a782ff854"
+        "path": "module-0002.mjs",
+        "sha256": "cc8a9da64944c5d1742fd0a14d093f56c3147012594591acbe199aa857e497f7"
       },
       {
         "path": "schedule.json",
-        "sha256": "8087e9e4568ba1f30c5e1031fc860a0e662b0426827709fa7e4933500abe2264"
+        "sha256": "f1ae59b86af5084b74626533cb2df78ef1572b1a989edc31fe882a0384b4504f"
       }
     ],
     "group": "template:random-mixed",
@@ -37349,6 +37335,7 @@
       "includeDependenciesRecursively": true,
       "lazyBarrel": true,
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
     "codeSplitting": true,
@@ -37974,54 +37961,34 @@
       "strictExecutionOrder": true
     },
     "codeSplitting": {
-      "organicGroups": [
+      "groups": [
         {
-          "includeDependenciesRecursively": false,
-          "minShareCount": 1,
-          "name": "organic-vendor"
+          "moduleIds": ["gr-reader"],
+          "name": "global-reader"
         }
       ]
+    },
+    "directedReleaseGap": {
+      "kind": "global-read",
+      "modelSha256": "5893360c3e3ea1fe3fdd6203efc2dccd314a466d2423a220f7f838c85b64db5e",
+      "witness": "fixture-function-v1"
     },
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "6fe9123130881a04937a8fa571277a8acbe68f9bd83fa9689529910f6cb2a79a"
+        "sha256": "d49c04f1060c319dd1bcb72dab08a712a114bc34dfd704723722ded7c76a1367"
       },
       {
         "path": "module-0001.mjs",
-        "sha256": "2407100da7d05dee0595386d028cd81cc3ec21a791304ce0659823eb7c163d2b"
+        "sha256": "35ff75bcb001ed6da21b18f873fb86c05771b8d79b96e71b7991c5d95d4d0bf9"
       },
       {
         "path": "module-0002.mjs",
-        "sha256": "f837f3af6ab2184f08fd4c2f7cdbbc88311c225b17e47d85da6358091ef763e8"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "19763e24d7b6f21cf55c867a69b5947f5632f12e84f683924b286238418d23b4"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "9e31ce2e09b78415b90095bd07afc5a3259ce8bc19809482eef984295aa2bd2a"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "d85db684e1addc0c6966404173fc8b3a37d9ca3baaa1b20776ad04838335e66c"
-      },
-      {
-        "path": "module-0006.mjs",
-        "sha256": "b1f2e2cca8e8c1accba63857a04517ff8ef9e7c8056a4a52f790461df6666a61"
-      },
-      {
-        "path": "module-0007.mjs",
-        "sha256": "5750c0df7a2bb27d98b82d27a756afdeadb865e2bc06eb7e3bb98a06340a2c8b"
-      },
-      {
-        "path": "module-0008.cjs",
-        "sha256": "18f42c7e9189102381c45c7302aed90bad8ac6fe62c69607c0f74f386c327d85"
+        "sha256": "03e0ff9158ac3cc09346807d186578f3907e62ecb31ede044cda8ee945e2df1f"
       },
       {
         "path": "schedule.json",
-        "sha256": "3f4847628647aee2dc1560a6f48af9510ab3326fe45815302a6bc48c1eea7dfd"
+        "sha256": "66408066c71a4c55b19b8ec2324fae6c8a5c0343d07155f40ad168330827f905"
       }
     ],
     "group": "template:random-mixed",
@@ -38031,151 +37998,35 @@
   },
   {
     "buildAxes": {
-      "includeDependenciesRecursively": false,
-      "lazyBarrel": true,
-      "outputFormat": "cjs",
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
       "preserveEntrySignatures": "allow-extension",
       "strictExecutionOrder": true
     },
-    "codeSplitting": {
-      "groups": [
-        {
-          "moduleIds": ["fbdef18", "fbsib18"],
-          "name": "fb-pref18"
-        }
-      ]
+    "codeSplitting": false,
+    "directedReleaseGap": {
+      "kind": "authored-name",
+      "modelSha256": "17fb0823a0988f4050d6bca8a49ef3b50eadbf19a901266708d7efe630fab406"
     },
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "cf51a7d6b47575a8dea2b79c7009e3490f4d67ff2c275ee9c419e049d08538e3"
+        "sha256": "b4c4f303bf37b51d49fe75e533bdf8cc2a494aa77d72911be1bd400002f32f5a"
       },
       {
         "path": "module-0001.mjs",
-        "sha256": "0bec6112583a22c49547877333fc423aea9b0ecb4791e833193011018170fb03"
+        "sha256": "ee11aef9e99b990e46ebbdbd791e450b6dc0beb64a9c53a10ea49ffd8def885a"
       },
       {
         "path": "module-0002.mjs",
-        "sha256": "3e71ff6435f9176eed09d88dcaaf7c4cb820e3b2b1a2b903ec1e240b3275c7f5"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "944a382c8c26ac180e604801aaaad2fc783af1025fca23b507c5ae7d3dc38c7a"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "dc5c2ca1247efcdb0019f1a4c1534b766075786f681bd8b4507499cd13e0a52e"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "aba552a3084696564aafea463edcf88080f933c46842328dcc4af36d10cdb446"
-      },
-      {
-        "path": "module-0006.mjs",
-        "sha256": "978933dd739a908852743092f7ec8886a0c0a78e2b6cbe33517647f67cb79b9b"
-      },
-      {
-        "path": "module-0007.mjs",
-        "sha256": "c13d09b2ef7a3d8bccc9b63a2843364d5543aef188121be9c7017e04d14ba2ae"
-      },
-      {
-        "path": "module-0009.mjs",
-        "sha256": "ab404767fd78a9088a32e11e6d3ff60e41101265af8ca14e98af59ae2a3760d6"
-      },
-      {
-        "path": "module-0010.mjs",
-        "sha256": "c01141d44eceea681b2f8a87d4e5905c533408c64581305238289f48d7ea8912"
-      },
-      {
-        "path": "module-0011.mjs",
-        "sha256": "c19194dab46fc647280470f6bf7fe2a74d3789e7d80a0552b260606ed3a22288"
-      },
-      {
-        "path": "module-0012.mjs",
-        "sha256": "154c93f11cf39c1806c0cb048851f176d16b350ec27b97edbf87a88027d84fb7"
-      },
-      {
-        "path": "module-0013.mjs",
-        "sha256": "1a31774f5f7e352907d7442f2c393adfb304722324f7e30411d9f78d9350d2de"
-      },
-      {
-        "path": "module-0014.mjs",
-        "sha256": "dc6326a12081952085e0cfad9a8cdbee0dfd7b36225701623e3c5d651d002b07"
-      },
-      {
-        "path": "module-0015.mjs",
-        "sha256": "24ebfe9354b38aeeaff748ff76fe9d93bb0c95e30d5db419f7d09deae6474543"
-      },
-      {
-        "path": "module-0016.mjs",
-        "sha256": "828a4e7460b85381c2dcdae3f0c98d57389058aee1d754ebd833b7d6ceb99d8a"
-      },
-      {
-        "path": "module-0017.mjs",
-        "sha256": "264dc5d173eb1051e42d8f8c223587872270f5b4c46e8d0a90dddbfe1c5b7290"
-      },
-      {
-        "path": "module-0018.mjs",
-        "sha256": "3cc8296e9c3a65bd364523316f042e0893d3f4245bcc03b763acb7edfc31fd81"
-      },
-      {
-        "path": "module-0022.mjs",
-        "sha256": "737c2cb45352bd3091dbc4de3fc4dc19cd7763d8055d61c9deedac3d7cc8fce0"
-      },
-      {
-        "path": "module-0023.mjs",
-        "sha256": "6beca464259bf099bd45ce13d91a237849ea222e746bab4198659e553e6b0fa7"
-      },
-      {
-        "path": "module-0024.mjs",
-        "sha256": "cd966156b4762695f554596901c2f774e0c5309518f2ef0fe0a503245ca1621a"
-      },
-      {
-        "path": "module-0025.mjs",
-        "sha256": "3f93702b173fc23f02da74fa2892d2fcb78c561d545a5b0f57493a5f0c93df9b"
-      },
-      {
-        "path": "node_modules/fbpkg18/fbbar18.mjs",
-        "sha256": "a9f035e656c0639fb54dcfca416bb68a3da81e94f69631e787ebeac180ea1560"
-      },
-      {
-        "path": "node_modules/fbpkg18/fbdef18.mjs",
-        "sha256": "f4b7752e4eb0d269c9ec4b1fe5e887ab35cf8cf568729270ae26383cae8fd9a1"
-      },
-      {
-        "path": "node_modules/fbpkg18/fbsib18.mjs",
-        "sha256": "7cf8a65b5eea2ed566ed1942056cc497c3adb07dcb1b188a387f31d0bdb3a9d9"
-      },
-      {
-        "path": "node_modules/fbpkg18/package.json",
-        "sha256": "28390bc7514893e0ffa89cef82a94f04a1feda783e7792c753e8335311d6dac7"
-      },
-      {
-        "path": "node_modules/sef-m8/m8.mjs",
-        "sha256": "02391e103588f6029f99bf5829a0ae85584c5337db6d250ea36aacd51edf3c9a"
-      },
-      {
-        "path": "node_modules/sef-m8/package.json",
-        "sha256": "f2fdbfd69c9731256bdcd5192f0a8175cdda35c435c2df1a65ae07739ad50dc3"
+        "sha256": "07173133cd0514710256d5eb8f9f95c4bc4fe1f466b392c0d6376d435a7b860a"
       },
       {
         "path": "schedule.json",
-        "sha256": "51fb3ca4985a5e328878e5149c40bd56ef1f1006fac5a810f94c5ad287de7c06"
+        "sha256": "f1ae59b86af5084b74626533cb2df78ef1572b1a989edc31fe882a0384b4504f"
       }
     ],
     "group": "template:random-mixed",
-    "packages": [
-      {
-        "moduleIds": ["m8"],
-        "name": "sef-m8",
-        "sideEffects": false
-      },
-      {
-        "moduleIds": ["fbbar18", "fbdef18", "fbsib18"],
-        "name": "fbpkg18",
-        "sideEffects": ["./fbsib18.mjs"]
-      }
-    ],
     "seed": 5000033,
     "size": 33,
     "template": "random-mixed"
@@ -38256,161 +38107,37 @@
   },
   {
     "buildAxes": {
-      "includeDependenciesRecursively": false,
-      "lazyBarrel": true,
+      "includeDependenciesRecursively": true,
+      "lazyBarrel": false,
+      "outputFormat": "cjs",
       "preserveEntrySignatures": "allow-extension",
+      "profilerNames": true,
       "strictExecutionOrder": true
     },
-    "codeSplitting": {
-      "groups": [
-        {
-          "moduleIds": ["m7", "m6", "psib20"],
-          "name": "group-0"
-        },
-        {
-          "moduleIds": ["m12", "m15", "m18"],
-          "name": "group-1"
-        }
-      ]
+    "codeSplitting": false,
+    "directedReleaseGap": {
+      "kind": "authored-name",
+      "modelSha256": "9bcdf61a4417cc606335db5cdb39167475d062d021f3a96b1227981f81ca5a3b"
     },
     "files": [
       {
         "path": "module-0000.mjs",
-        "sha256": "fe12bdfe3ff29f32487ac21ddb5df59c0b96bf3100d7ec47d5f11a1cc84909bd"
+        "sha256": "2f1e35573894b5181b1ffe480339a1102088d962670226b36c47f6db2a9c4f55"
       },
       {
         "path": "module-0001.mjs",
-        "sha256": "22b61df64a0e25808a2e3c083358222720454d37b6cfc1c913977cc154e489af"
+        "sha256": "b894852bf44e13efcb47bb03e2abc4c2cd9ebe59b0eb69717bd5fd5a2765e82a"
       },
       {
-        "path": "module-0002.cjs",
-        "sha256": "98ee8c59a6c723183760bda7bf119eff63dd34a162b389c863a1ed11cfe6678b"
-      },
-      {
-        "path": "module-0003.mjs",
-        "sha256": "22695ac940fb8ed5179045177956529a426d32801cc727f087a317f84285f068"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "224c519f4f50f9b67adf4ec58cb1e1d5876aff70e2da28781e7dfe19bbd4d2a5"
-      },
-      {
-        "path": "module-0005.mjs",
-        "sha256": "3ca36cb97a4c2ea5d194c5b7c1b19791fe3efcb3198cee58419d36a9c4b91078"
-      },
-      {
-        "path": "module-0006.cjs",
-        "sha256": "7c5dff9ef5c96b083f4ff52910f965ad367c9e3c441b741f7f79dcaa9a9a8803"
-      },
-      {
-        "path": "module-0007.cjs",
-        "sha256": "0bc7dc40fdc08212bb1d20beb24928e7d73f6337d2e52edbe37a7a4d683c57b9"
-      },
-      {
-        "path": "module-0008.mjs",
-        "sha256": "a951db6e343bc6296ca1df042a177c9da3f28cf055a70854a6a19eec8cae9b11"
-      },
-      {
-        "path": "module-0009.mjs",
-        "sha256": "4fe41d2cee8d4a03a19e30e1f3bae0d34fe9bba645e5d7f152eab232b6d74700"
-      },
-      {
-        "path": "module-0010.cjs",
-        "sha256": "b0744f7f0e9374bd148f109223e5af297f35934beb29d1ce3ba70c652272af19"
-      },
-      {
-        "path": "module-0011.mjs",
-        "sha256": "d73c5a23e1956bb44e8c86e123af649fcaa727cec5ec59399161207e25e8ef77"
-      },
-      {
-        "path": "module-0012.cjs",
-        "sha256": "7e470d289f7be8127fec1a3e681adfcf75bec531e63e04169a0e06f04a323c2e"
-      },
-      {
-        "path": "module-0013.cjs",
-        "sha256": "235203c31c3ba6001c3c594227eed8a21ac880a883a30308ac180a393526613f"
-      },
-      {
-        "path": "module-0014.mjs",
-        "sha256": "a57496b47c77bf24cca853691584f5de5e7180bb8b6dded982fa8b33d37dcb91"
-      },
-      {
-        "path": "module-0015.mjs",
-        "sha256": "1dde0cc1aad3dd6fd0847436ba61dce2315560bb9ea57651f952c21bc509ed6c"
-      },
-      {
-        "path": "module-0016.mjs",
-        "sha256": "81d82c4f787429ae6c8d3cfcc6f453f79f66834e86ff183b926dca90bf2f25ba"
-      },
-      {
-        "path": "module-0017.cjs",
-        "sha256": "a31887039f02408b6a1b10cc9b598d26a39bb0e6bf3da70bfc62cb5e930e6838"
-      },
-      {
-        "path": "module-0018.cjs",
-        "sha256": "6a0415fd3dfed9e380a4d7d600db173575bd7761e4419a9d62ecabdb4f10d987"
-      },
-      {
-        "path": "module-0019.mjs",
-        "sha256": "8b85b7e8e3023f70b0560c24c4508bfb4655e60e8c911541efad80ca7861b355"
-      },
-      {
-        "path": "module-0024.mjs",
-        "sha256": "0017f9d5df484e66fa2b90a413b81bbb78f49aa3cd52b4e1f5ac6640e82a1aae"
-      },
-      {
-        "path": "module-0025.mjs",
-        "sha256": "fc20663246b8b5a0a013abad5f6d45d01358b9132a1b6e6b4778c57c4689de00"
-      },
-      {
-        "path": "module-0026.mjs",
-        "sha256": "b9f3506c9f3f246509f1a9efe2560f1075e1c248e9536f9886fce7ab1f9185d0"
-      },
-      {
-        "path": "module-0027.mjs",
-        "sha256": "fc076914602c9fa529fe1dcfae8e4fc15e5323cd2d7a302d2aa15b5a72a29a9e"
-      },
-      {
-        "path": "module-0028.mjs",
-        "sha256": "6b8fdc10ae5690eab05fb33a99c41d6b6d9ef01abd643446cf421fe4fdf18938"
-      },
-      {
-        "path": "module-0029.mjs",
-        "sha256": "25ce68fed44d2efc22192f0e001ccb3ea1eae07c132f799299868b0372dfb98e"
-      },
-      {
-        "path": "node_modules/fa-pdef20/package.json",
-        "sha256": "ee5a736abbee2459d3616ee1f936c1b838ee253d9af4d0e08f1cf6ff6d777cbf"
-      },
-      {
-        "path": "node_modules/fa-pdef20/pbar20.mjs",
-        "sha256": "64563491aa645dc18b72b8d8663598fb0b2b0566355ad62c281690b267f496f0"
-      },
-      {
-        "path": "node_modules/fa-pdef20/pbarin20.mjs",
-        "sha256": "4dce5d49a4b7edbed03c9ac9e4ce23878a00f09c9053852a5d1c7594f1742c32"
-      },
-      {
-        "path": "node_modules/fa-pdef20/pdef20.mjs",
-        "sha256": "1dbf276a4dff3e897c2f52c5f3ef93d78ff8807a60d6ddd4b3c0f552b6858f89"
-      },
-      {
-        "path": "node_modules/fa-pdef20/psib20.mjs",
-        "sha256": "b4d5f1785427a56941b3bccc0ecc5c27a6ea472b33f62c695d11152e36e5ed59"
+        "path": "module-0002.mjs",
+        "sha256": "9cea9672e2c351a335ecd1cf052aa2624d258b0887f2a2a09e5e9a218eacd555"
       },
       {
         "path": "schedule.json",
-        "sha256": "0583a009622a9bb2334990aee943d1b4a2e151ef5df4a73ac6ff9a20a3889d4a"
+        "sha256": "f1ae59b86af5084b74626533cb2df78ef1572b1a989edc31fe882a0384b4504f"
       }
     ],
     "group": "template:random-mixed",
-    "packages": [
-      {
-        "moduleIds": ["pbar20", "pbarin20", "psib20", "pdef20"],
-        "name": "fa-pdef20",
-        "sideEffects": ["./psib20.mjs"]
-      }
-    ],
     "seed": 5000038,
     "size": 20,
     "template": "random-mixed"
@@ -38480,96 +38207,6 @@
     "group": "template:random-mixed",
     "seed": 5000039,
     "size": 11,
-    "template": "random-mixed"
-  },
-  {
-    "buildAxes": {
-      "includeDependenciesRecursively": true,
-      "lazyBarrel": false,
-      "outputFormat": "cjs",
-      "preserveEntrySignatures": "allow-extension",
-      "strictExecutionOrder": true
-    },
-    "codeSplitting": {
-      "groups": [
-        {
-          "moduleIds": ["m6", "m4", "pconsB7", "m5"],
-          "name": "group-0"
-        }
-      ]
-    },
-    "files": [
-      {
-        "path": "module-0000.mjs",
-        "sha256": "97f3ca346da40124d3fc9887ea0de964206deef25a6d75598664b49f2515ffed"
-      },
-      {
-        "path": "module-0001.mjs",
-        "sha256": "b6c284e3e4e1201d02bf41c947895484fd343e91a396d18b5890a1bcc330f550"
-      },
-      {
-        "path": "module-0002.mjs",
-        "sha256": "7bd3e90461629efc71095902ae5c1a28a49761e429cdc0865d78f3beb7dab129"
-      },
-      {
-        "path": "module-0003.cjs",
-        "sha256": "f4fac190c25a84fdc9392112a66dbf3ca0acb9f39f336e86ec74280e278256f3"
-      },
-      {
-        "path": "module-0004.mjs",
-        "sha256": "540328e5869691766eee6b0a4359b481cb408f0edec74b5dfc8829a6586fca52"
-      },
-      {
-        "path": "module-0006.cjs",
-        "sha256": "d5b095d6efce2fb274602e696641006b558f32d5a6a1febb287d872236bcf001"
-      },
-      {
-        "path": "module-0007.mjs",
-        "sha256": "e36f117e9c846e77bfc86055b61661b7c7332749f61ddad344b57bee3e8251ff"
-      },
-      {
-        "path": "module-0008.mjs",
-        "sha256": "873eeb232e114ba48bc087b826f0a5b7c28f416b379c4759b3852b420a7d6a05"
-      },
-      {
-        "path": "module-0009.mjs",
-        "sha256": "60a688111be2aa27cae696dbe5fd8a0baa0c2d6213588557f40ffc00bac44d49"
-      },
-      {
-        "path": "module-0010.mjs",
-        "sha256": "9c848e179e6627c00b76d0c19e7f2cefce891bc76d91c30c48b86ae1c769b7c4"
-      },
-      {
-        "path": "module-0011.mjs",
-        "sha256": "2795336ae644238839ea8543bb05834a83eecb2341e803f78cfd8c5ea051a637"
-      },
-      {
-        "path": "module-0012.mjs",
-        "sha256": "7de53db91c83fe943fc10b6f7349f73826df31f67aae6bc05ce4ddbbf8e3a60c"
-      },
-      {
-        "path": "node_modules/sef-m5/m5.mjs",
-        "sha256": "2a8056de65b884cae22456c5f8766dd13a85deb045e3508c12de29eaadec7f3b"
-      },
-      {
-        "path": "node_modules/sef-m5/package.json",
-        "sha256": "fd40aa54051875ca0c75a6d4b6b425630e62e675637f3ae7598a04d3e1074cb0"
-      },
-      {
-        "path": "schedule.json",
-        "sha256": "4b177c463a3d0679991cf9a8b9f2935bdab5a55485e53b9de5884addd6804bf1"
-      }
-    ],
-    "group": "template:random-mixed",
-    "packages": [
-      {
-        "moduleIds": ["m5"],
-        "name": "sef-m5",
-        "sideEffects": false
-      }
-    ],
-    "seed": 5000042,
-    "size": 12,
     "template": "random-mixed"
   },
   {

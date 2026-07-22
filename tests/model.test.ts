@@ -3,7 +3,12 @@ import { describe, expect, test } from "vite-plus/test";
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { BuildConfig, ProgramModel } from "../src/model.ts";
 import type { ModuleModel } from "../src/model.ts";
-import { buildConfigOf, DEFAULT_BUILD_CONFIG, programChunking } from "../src/model.ts";
+import {
+  buildConfigOf,
+  DEFAULT_BUILD_CONFIG,
+  DEFAULT_TREESHAKE_CONFIG,
+  programChunking,
+} from "../src/model.ts";
 import { renderProgram } from "../src/render.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import { sideEffectFreeTransitiveProgram } from "./fixtures.ts";
@@ -1404,6 +1409,46 @@ describe("validateProgramModel", () => {
     expect(validateProgramModel(analyzeProgram(foldingFunctionSource))).toEqual([
       'modules[0].events[0].reads[0].call: read of "a_fb" must be a call (call: true) to match its binding\'s capability',
     ]);
+
+    // A call import renders the demanded export as a function. Combining it with a member path would
+    // render `fn.value()` even though the generated function has no such member.
+    const callingAFunctionMember = {
+      modules: [
+        {
+          id: "a",
+          format: "esm",
+          dependencies: [
+            {
+              kind: "esm-value-import",
+              target: "b",
+              importedName: "fb",
+              localName: "a_fb",
+              call: true,
+              readMemberPath: ["value"],
+            },
+          ],
+          events: [
+            {
+              module: "a",
+              phase: "evaluate",
+              value: 1,
+              reads: [{ binding: "a_fb", memberPath: ["value"], call: true }],
+            },
+          ],
+        },
+        {
+          id: "b",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "b", phase: "evaluate", value: 2 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "a" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+    } satisfies ProgramModel;
+    expect(validateProgramModel(analyzeProgram(callingAFunctionMember))).toContain(
+      "modules[0].dependencies[0]: a call import cannot also carry a numeric readMemberPath",
+    );
   });
 
   test("rejects a callable-own-state export consumed as a plain fold through a barrel", () => {
@@ -2126,6 +2171,8 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     strictExecutionOrder: true,
     outputFormat: "esm",
     minify: false,
+    profilerNames: false,
+    treeshake: DEFAULT_TREESHAKE_CONFIG,
   };
 
   test("buildConfigOf returns the persisted build when present", () => {
@@ -2156,6 +2203,7 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     const resolved = buildConfigOf(program);
     expect(resolved.minify).toBe(false);
     expect(resolved.outputFormat).toBe("esm");
+    expect(resolved.treeshake).toEqual(DEFAULT_TREESHAKE_CONFIG);
   });
 
   test("buildConfigOf derives a v16 program's config: legacy manual resolves IDR to false (W14a.1)", () => {
@@ -2277,6 +2325,42 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
     );
   });
 
+  test("validates the persisted treeshake analysis axes", () => {
+    const valid: ProgramModel = {
+      ...baseModules(),
+      build: {
+        ...build,
+        treeshake: {
+          propertyReadSideEffects: false,
+          propertyWriteSideEffects: false,
+          manualPureFunctions: ["make", "Box"],
+        },
+      },
+    };
+    expect(validateProgramModel(analyzeProgram(valid))).toEqual([]);
+
+    const invalid = structuredClone(valid) as ProgramModel;
+    if (invalid.build === undefined) {
+      throw new Error("expected persisted build config");
+    }
+    const invalidTreeshake = invalid.build.treeshake as {
+      propertyReadSideEffects: unknown;
+      propertyWriteSideEffects: unknown;
+      manualPureFunctions: unknown[];
+    };
+    invalidTreeshake.propertyReadSideEffects = true;
+    invalidTreeshake.propertyWriteSideEffects = "sometimes";
+    invalidTreeshake.manualPureFunctions.push("make", "");
+    expect(validateProgramModel(analyzeProgram(invalid))).toEqual(
+      expect.arrayContaining([
+        'build.treeshake.propertyReadSideEffects: must be false or "always"',
+        'build.treeshake.propertyWriteSideEffects: must be false or "always"',
+        'build.treeshake.manualPureFunctions[2]: duplicate name "make"',
+        "build.treeshake.manualPureFunctions[3]: must be a non-empty string",
+      ]),
+    );
+  });
+
   test("rejects an unknown chunking kind discriminant", () => {
     // A `{ kind: "bogus" }` chunking otherwise falls through `programChunking` / the adapter switch to
     // AUTOMATIC silently — a crafted or shrunk model would build a different chunking than it names. The
@@ -2287,7 +2371,7 @@ describe("persisted BuildConfig (W14a, schema 17)", () => {
       build: { ...build, chunking: { kind: "bogus" } as any },
     };
     expect(validateProgramModel(analyzeProgram(program))).toContain(
-      'build.chunking: unknown chunking kind "bogus" (expected automatic, manual, or organic)',
+      'build.chunking: unknown chunking kind "bogus" (expected disabled, automatic, manual, or organic)',
     );
   });
 });

@@ -19,8 +19,12 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, test } from "vite-plus/test";
 
-import { generateCase, type GeneratedCase } from "../src/generate.ts";
-import { packagesOf } from "../src/model.ts";
+import {
+  generateAuthoredNameCollisionCase,
+  generateCase,
+  type GeneratedCase,
+} from "../src/generate.ts";
+import { buildConfigOf, packagesOf } from "../src/model.ts";
 import {
   classifyCampaignVerdict,
   DEFAULT_CASE_SIZE,
@@ -44,8 +48,8 @@ import {
 import type { Verdict } from "../src/verdict.ts";
 
 describe("parseCliArgs", () => {
-  test("uses artifact schema version 20", () => {
-    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(20);
+  test("uses artifact schema version 25", () => {
+    expect(FAILURE_ARTIFACT_SCHEMA_VERSION).toBe(25);
   });
 
   test("parses and validates --format-regime", () => {
@@ -390,6 +394,33 @@ describe("runCampaign", () => {
       reason: "source-timeout",
       signature: "invalid-source:source-timeout",
     });
+  });
+
+  test("case-owned wrapping overrides the campaign mode and is persisted", async () => {
+    const generated = generateAuthoredNameCollisionCase(1, "__esmMin");
+    const options = campaignOptions({ onDemandWrapping: true });
+    let builtWithOnDemand: boolean | undefined;
+
+    const result = await executeGeneratedCase(generated, options, {
+      executeSource: async () => ok([]),
+      buildBundle: async (_program, rendered, executionOptions) => {
+        builtWithOnDemand = executionOptions.onDemandWrapping;
+        return {
+          status: "ok",
+          value: {
+            bundleOutcome: ok([]),
+            bundleManifest: rendered.schedule,
+            bundleFiles: [],
+            runtimeIdentity: testRuntimeIdentity(),
+          },
+        };
+      },
+    });
+
+    expect(generated.onDemandWrapping).toBe(false);
+    expect(options.onDemandWrapping).toBe(true);
+    expect(builtWithOnDemand).toBe(false);
+    expect(result.options.onDemandWrapping).toBe(false);
   });
 
   test("does not invoke Rolldown for a source timeout or harness error", async () => {
@@ -1093,6 +1124,7 @@ describe("writeFailureArtifacts", () => {
           }[];
           readonly sourceManifest: { readonly sha256: string; readonly value: unknown };
           readonly bundleManifest: { readonly sha256: string; readonly value: unknown };
+          readonly buildOptions: { readonly treeshake: unknown };
         };
       };
       const expectedRenderedSourcePaths = result.rendered.files.map((file) => file.path).sort();
@@ -1101,6 +1133,9 @@ describe("writeFailureArtifacts", () => {
       expect(artifactHash).toMatch(/^[a-f0-9]{64}$/);
       expect(identity.inputs.renderedSourceFiles.map((file) => file.path)).toEqual(
         expectedRenderedSourcePaths,
+      );
+      expect(identity.inputs.buildOptions.treeshake).toEqual(
+        buildConfigOf(generated.program).treeshake,
       );
       expect(expectedRenderedSourcePaths).not.toContain("runtime.cjs");
       // One rendered file per module plus schedule.json, and one generated package.json per
@@ -1146,6 +1181,9 @@ describe("writeFailureArtifacts", () => {
           },
           rolldownPackage: options.rolldownPackage,
           runtimeIdentity: result.runtimeIdentity,
+          buildOptions: {
+            treeshake: buildConfigOf(generated.program).treeshake,
+          },
           renderedSourceFiles: identity.inputs.renderedSourceFiles,
           sourceManifest: {
             sha256: identity.inputs.sourceManifest.sha256,

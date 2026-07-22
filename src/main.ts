@@ -46,6 +46,14 @@ export {
 
 const UINT32_RANGE = 0x1_0000_0000;
 
+// 25: analyzer global-read cases use a typed fixture-owned function assignment plus annotated optional
+// calls, separating them from persisted built-in/prototype optimizer-assumption probes.
+// 24: nine equal-value effect-preservation optimizer expressions add a typed fixed counter observer;
+// artifacts preserve the exact closed expression key and four-module observation topology.
+// 23: 64 additional closed optimizer-expression keys (computed callees, local constant receivers,
+// coercions, and Number infinity type shortcuts) with typed patch/read persistence.
+// 22: typed constant-evaluator call kinds plus the separate `instanceofAssignments` / `instanceof`
+// expression family. Artifacts now preserve which mutable global/prototype rule produced the failure.
 // 20: exact-manual chunk groups gain the optional `entriesAware` / `entriesAwareMergeThreshold` fields,
 // allowing the strict random corpus to persist a stable manual-splitting + entries-aware chunk-cycle
 // recipe. Backward compatible: both fields are optional, so every v19 model keeps its old behavior.
@@ -70,7 +78,9 @@ const UINT32_RANGE = 0x1_0000_0000;
 // per-campaign size mix, and denser/nested dynamic imports.
 // 14: wave 5 — schedule-phase marker events in execution outcomes, and multiple dependency kinds
 // per (importer, target) pair in the model.
-export const FAILURE_ARTIFACT_SCHEMA_VERSION = 20 as const;
+// 21: release-gap coverage — disabled splitting, profiler helper names, authored/global-read syntax,
+// and persisted treeshake assumptions in the model, adapter, replay identity, and shrinker.
+export const FAILURE_ARTIFACT_SCHEMA_VERSION = 25 as const;
 
 export interface CampaignSummary {
   readonly casesRun: number;
@@ -418,7 +428,10 @@ interface FailureArtifactIdentity {
       // W12: the minify axis, so a minified case dedups distinctly from its un-minified twin (identical
       // source, different bundle bytes → a distinct failure artifact).
       readonly minify: BuildConfig["minify"];
+      readonly profilerNames: BuildConfig["profilerNames"];
+      readonly treeshake: BuildConfig["treeshake"];
       readonly codeSplitting:
+        | false
         | true
         | { readonly groups: NonNullable<GeneratedCase["program"]["manualChunkGroups"]> }
         | {
@@ -479,6 +492,8 @@ function createFailureArtifactIdentity(
       lazyBarrel: buildConfig.lazyBarrel,
       outputFormat: buildConfig.outputFormat,
       minify: buildConfig.minify,
+      profilerNames: buildConfig.profilerNames,
+      treeshake: buildConfig.treeshake,
       codeSplitting: effectiveCodeSplitting(result.generated.program),
     },
     sourceOutcome: result.sourceOutcome,
@@ -516,6 +531,8 @@ function effectiveCodeSplitting(
 ): FailureArtifactIdentity["inputs"]["buildOptions"]["codeSplitting"] {
   const chunking = programChunking(program);
   switch (chunking.kind) {
+    case "disabled":
+      return false;
     case "organic":
       return { organicGroups: chunking.groups };
     case "manual":

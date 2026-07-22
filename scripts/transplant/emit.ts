@@ -23,6 +23,7 @@ import type {
   ProgramModel,
   ScheduleOperation,
 } from "../../src/model.ts";
+import { DEFAULT_TREESHAKE_CONFIG } from "../../src/model.ts";
 import type { ReducedGraph, ReducedModule } from "./reduce.ts";
 
 export interface EmitConfig {
@@ -207,6 +208,8 @@ export function emitModel(
     strictExecutionOrder: config.strictExecutionOrder,
     outputFormat: config.outputFormat,
     minify: config.minify,
+    profilerNames: false,
+    treeshake: DEFAULT_TREESHAKE_CONFIG,
   };
 
   const program: ProgramModel = {

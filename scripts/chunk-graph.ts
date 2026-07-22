@@ -11,7 +11,8 @@
 /// `createOutputOptions` shapes it (manual groups become an exact-path `test` function; organic groups a
 /// `RegExp` test + thresholds; the global `includeDependenciesRecursively` fallback), and the input
 /// `experimental` options (`onDemandWrapping` mirroring the run's wrap mode, `lazyBarrel`,
-/// `chunkOptimization` when a group is `entriesAware`). It is a faithful reconstruction, not the child
+/// `chunkOptimization` when a group is `entriesAware`) plus the persisted `treeshake` assumptions. It is
+/// a faithful reconstruction, not the child
 /// process itself — if the child ever gains a new build-affecting option, mirror it here too, or the
 /// inspected graph drifts from the graph that reds.
 
@@ -54,6 +55,9 @@ function codeSplittingFor(
   const build = buildConfigOf(program);
   const chunking = programChunking(program);
   const abs = (moduleId: string): string => resolve(join(baseDir, modulePaths.get(moduleId) ?? ""));
+  if (chunking.kind === "disabled") {
+    return { codeSplitting: false, chunkOptimization: false };
+  }
   if (chunking.kind === "manual") {
     const groups = chunking.groups.map((group) => {
       const paths = new Set(group.moduleIds.map((id) => abs(id)));
@@ -183,6 +187,7 @@ export async function inspectChunkGraph(
     const bundle = await rolldown({
       input,
       preserveEntrySignatures: build.preserveEntrySignatures,
+      treeshake: build.treeshake,
       // The INPUT `experimental` options, mirroring the build child (`rolldown-build-child.ts`):
       // `onDemandWrapping` (the wrap mode of the run being verified), `lazyBarrel`, and
       // `chunkOptimization` when an entriesAware group asks for it.
@@ -193,11 +198,12 @@ export async function inspectChunkGraph(
       },
     });
     const generated = await bundle.generate({
-      format: "es",
+      format: build.outputFormat,
       dir: join(dir, "dist"),
       strictExecutionOrder: build.strictExecutionOrder,
       codeSplitting,
       minify: build.minify,
+      generatedCode: { profilerNames: build.profilerNames },
     });
     await bundle.close?.();
     const chunks: ChunkNode[] = [];

@@ -39,6 +39,7 @@ import {
 import { renderProgram } from "../src/render.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 import {
+  createInputOptions,
   createOutputOptions,
   looksLikePanic,
   parseBuildChildRequest,
@@ -369,6 +370,7 @@ describe("withRolldownBuild", () => {
         `      fs.writeFileSync(${JSON.stringify(capturePath)}, JSON.stringify({`,
         "        experimental: inputOptions.experimental,",
         "        preserveEntrySignatures: inputOptions.preserveEntrySignatures,",
+        "        treeshake: inputOptions.treeshake,",
         "        codeSplitting: outputOptions.codeSplitting,",
         "        strictExecutionOrder: outputOptions.strictExecutionOrder,",
         "      }));",
@@ -405,6 +407,12 @@ describe("withRolldownBuild", () => {
         strictExecutionOrder: true,
         outputFormat: "esm",
         minify: false,
+        profilerNames: false,
+        treeshake: {
+          propertyReadSideEffects: false,
+          propertyWriteSideEffects: false,
+          manualPureFunctions: ["make", "Box"],
+        },
       },
     };
     try {
@@ -423,6 +431,11 @@ describe("withRolldownBuild", () => {
         chunkOptimization: true,
       });
       expect(captured.preserveEntrySignatures).toBe("allow-extension");
+      expect(captured.treeshake).toEqual({
+        propertyReadSideEffects: false,
+        propertyWriteSideEffects: false,
+        manualPureFunctions: ["make", "Box"],
+      });
       expect(captured.strictExecutionOrder).toBe(true);
       // The global includeDependenciesRecursively:false rides on the codeSplitting object.
       expect(captured.codeSplitting.includeDependenciesRecursively).toBe(false);
@@ -1698,12 +1711,13 @@ describe("withRolldownBuild", () => {
 
   test("validates build child requests before loading Rolldown", async () => {
     const valid = validBuildChildRequest();
+    const invalidProtocolVersion = BUILD_CHILD_PROTOCOL_VERSION + 1;
     expect(parseBuildChildRequest(valid)).toEqual(valid);
 
     const invalid = [
       null,
       {},
-      { ...valid, version: 2 },
+      { ...valid, version: invalidProtocolVersion },
       { ...valid, packageSpecifier: "" },
       { ...valid, input: [] },
       { ...valid, input: { main: 1 } },
@@ -1736,6 +1750,23 @@ describe("withRolldownBuild", () => {
       { ...valid, preserveEntrySignatures: "bogus" },
       { ...valid, includeDependenciesRecursively: "yes" },
       { ...valid, lazyBarrel: 1 },
+      { ...valid, treeshake: undefined },
+      {
+        ...valid,
+        treeshake: { ...valid.treeshake, propertyReadSideEffects: true },
+      },
+      {
+        ...valid,
+        treeshake: { ...valid.treeshake, propertyWriteSideEffects: "sometimes" },
+      },
+      {
+        ...valid,
+        treeshake: { ...valid.treeshake, manualPureFunctions: ["make", 1] },
+      },
+      {
+        ...valid,
+        treeshake: { ...valid.treeshake, manualPureFunctions: [""] },
+      },
     ];
     for (const value of invalid) {
       expect(() => parseBuildChildRequest(value)).toThrow(TypeError);
@@ -1754,12 +1785,29 @@ describe("withRolldownBuild", () => {
       parseBuildChildRequest({ ...valid, output: { ...valid.output, format: "cjs" } }),
     ).not.toThrow();
 
-    await expect(runBuildChildFromUnknown({ ...valid, version: 2 })).resolves.toMatchObject({
+    await expect(
+      runBuildChildFromUnknown({ ...valid, version: invalidProtocolVersion }),
+    ).resolves.toMatchObject({
       status: "failure",
       failureStatus: "harness-error",
       stage: "build",
       error: { name: "TypeError" },
     });
+  });
+
+  test("maps validated treeshake fields onto Rolldown input options", () => {
+    const request: BuildChildRequest = {
+      ...validBuildChildRequest(),
+      treeshake: {
+        propertyReadSideEffects: false,
+        propertyWriteSideEffects: false,
+        manualPureFunctions: ["factory.make", "Box"],
+      },
+    };
+
+    const parsed = parseBuildChildRequest(request);
+    expect(parsed).toEqual(request);
+    expect(createInputOptions(parsed).treeshake).toEqual(request.treeshake);
   });
 
   test("validates build child responses before parent manifest mapping", () => {
@@ -2317,7 +2365,13 @@ function validBuildChildRequest(): BuildChildRequest {
     preserveEntrySignatures: "allow-extension",
     includeDependenciesRecursively: true,
     lazyBarrel: false,
+    treeshake: {
+      propertyReadSideEffects: "always",
+      propertyWriteSideEffects: "always",
+      manualPureFunctions: [],
+    },
     onDemandWrapping: true,
+    disableCodeSplitting: false,
     bundleDirectory: "/tmp/bundle",
     manualChunkGroups: [{ name: "shared", modulePaths: ["/tmp/source/shared.mjs"] }],
     organicChunkGroups: [],
@@ -2329,6 +2383,7 @@ function validBuildChildRequest(): BuildChildRequest {
       assetFileNames: "assets/[name][extname]",
       cleanDir: false,
       minify: false,
+      profilerNames: false,
     },
   };
 }

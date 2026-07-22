@@ -1,5 +1,5 @@
 import type { DependencyOperation, ModuleExportShape, ModuleModel, ProgramModel } from "./model.ts";
-import { moduleProfile } from "./model.ts";
+import { globalReadCarrierMemberPath, moduleProfile } from "./model.ts";
 import type { ExportOrigin, ExportSupply } from "./program-facts.ts";
 import { ProgramFacts, providedExportNames, starShadowedNames } from "./program-facts.ts";
 
@@ -22,7 +22,7 @@ export interface AnalyzedProgram {
 ///   read. Folding a function's source text instead is a rename-sensitive false positive.
 /// - `reference` — captured by identity only (`objectRef`), never folded. Folding or calling an object
 ///   is a type error.
-export type ConsumptionShape = "numeric" | "callable" | "reference";
+export type ConsumptionShape = "numeric" | "numeric-member" | "callable" | "reference";
 
 /// WHY a name is demanded on a target — the purpose dimension the validator uses to decide what soundness
 /// to enforce:
@@ -79,6 +79,8 @@ export interface ConsumptionRecord {
 /// - `fresh-object` — a fresh object literal per export (an `objectExport` definer).
 export type RenderedExportForm =
   | "numeric-value"
+  | "global-read-value"
+  | "global-read-carrier"
   | "callable-constant"
   | "inferred-pure"
   | "callable-own-state"
@@ -130,8 +132,11 @@ export function resolvedExportKey(origin: ExportOrigin): string {
 export function formConsumptionShape(form: RenderedExportForm): ConsumptionShape {
   switch (form) {
     case "numeric-value":
+    case "global-read-value":
     case "inferred-pure":
       return "numeric";
+    case "global-read-carrier":
+      return "numeric-member";
     case "callable-constant":
     case "callable-own-state":
       return "callable";
@@ -143,11 +148,16 @@ export function formConsumptionShape(form: RenderedExportForm): ConsumptionShape
 /// The coarse value/function/object NOUN a rendered form reads as in a diagnostic — the display
 /// vocabulary the crafted-violation messages use, so a mismatch reads "the definer renders a value"
 /// regardless of WHICH value-category form (a numeric fold or an inferred-pure `const`) it actually is.
-export function renderedFormNoun(form: RenderedExportForm): "value" | "function" | "object" {
+export function renderedFormNoun(
+  form: RenderedExportForm,
+): "value" | "carrier" | "function" | "object" {
   switch (form) {
     case "numeric-value":
+    case "global-read-value":
     case "inferred-pure":
       return "value";
+    case "global-read-carrier":
+      return "carrier";
     case "callable-constant":
     case "callable-own-state":
       return "function";
@@ -212,7 +222,9 @@ function directDemandOf(
           ? "reference"
           : dependency.call === true
             ? "callable"
-            : "numeric",
+            : dependency.readMemberPath === undefined
+              ? "numeric"
+              : "numeric-member",
     };
   }
   if (dependency.kind === "esm-local-reexport") {
@@ -421,6 +433,14 @@ export function renderedFormOf(
   }
   if (definer.format !== "esm") {
     return "numeric-value";
+  }
+  if (
+    definer.globalReadExport !== undefined &&
+    definer.globalReadExport.exportedName === exportName
+  ) {
+    return globalReadCarrierMemberPath(definer.globalReadExport.form) !== undefined
+      ? "global-read-carrier"
+      : "global-read-value";
   }
   const profile = moduleProfile(definer);
   if (profile.exportShape.kind === "fresh-object") {

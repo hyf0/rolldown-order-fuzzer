@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 
 import { analyzeProgram } from "./analyzed-program.ts";
 import { failureSignatureOf } from "./case-evaluator.ts";
+import { globalReadOptimizerExpressionSpec } from "./global-read-optimizer-expressions.ts";
 import type {
   Chunking,
   DependencyOperation,
@@ -14,6 +15,7 @@ import type {
 } from "./model.ts";
 import {
   buildConfigOf,
+  DEFAULT_TREESHAKE_CONFIG,
   legacySideEffectFreePackage,
   normalizeLegacyReads,
   programChunking,
@@ -176,6 +178,108 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
       } as typeof module);
     }
   }
+  // Global/prototype patches are atomic typed operations. Drop one when a fixture carries multiple
+  // patches, and independently drop an optional call counter; the paired reader kind/expression is
+  // otherwise preserved verbatim so shrinking cannot silently change which optimizer rule failed.
+  for (const [moduleIndex, module] of program.modules.entries()) {
+    if (module.format !== "esm") {
+      continue;
+    }
+    const fixtureFunctionAssignment = module.fixtureFunctionAssignment;
+    const builtinAssignments = module.builtinAssignments ?? [];
+    const instanceofAssignments = module.instanceofAssignments ?? [];
+    const optimizerExpressionAssignments = module.optimizerExpressionAssignments ?? [];
+    const assignmentCount =
+      (fixtureFunctionAssignment === undefined ? 0 : 1) +
+      builtinAssignments.length +
+      instanceofAssignments.length +
+      optimizerExpressionAssignments.length;
+    if (assignmentCount > 1) {
+      if (fixtureFunctionAssignment !== undefined) {
+        const withoutFixtureFunction = { ...module };
+        delete (withoutFixtureFunction as { fixtureFunctionAssignment?: unknown })
+          .fixtureFunctionAssignment;
+        yield editModule(program, moduleIndex, withoutFixtureFunction);
+      }
+      for (const [assignmentIndex] of builtinAssignments.entries()) {
+        yield editModule(program, moduleIndex, {
+          ...module,
+          builtinAssignments: builtinAssignments.filter((_, index) => index !== assignmentIndex),
+        });
+      }
+      for (const [assignmentIndex] of instanceofAssignments.entries()) {
+        yield editModule(program, moduleIndex, {
+          ...module,
+          instanceofAssignments: instanceofAssignments.filter(
+            (_, index) => index !== assignmentIndex,
+          ),
+        });
+      }
+      for (const [assignmentIndex] of optimizerExpressionAssignments.entries()) {
+        yield editModule(program, moduleIndex, {
+          ...module,
+          optimizerExpressionAssignments: optimizerExpressionAssignments.filter(
+            (_, index) => index !== assignmentIndex,
+          ),
+        });
+      }
+    }
+    for (const [assignmentIndex, assignment] of builtinAssignments.entries()) {
+      if (assignment.counterGlobal === undefined) {
+        continue;
+      }
+      const withoutCounter = { ...assignment };
+      delete (withoutCounter as { counterGlobal?: string }).counterGlobal;
+      yield editModule(program, moduleIndex, {
+        ...module,
+        builtinAssignments: builtinAssignments.map((candidate, index) =>
+          index === assignmentIndex ? withoutCounter : candidate,
+        ),
+      });
+    }
+  }
+  // Any built-in-backed optimizer expression can shrink to the existing direct semantic built-in
+  // call. Rewrite the typed patch and every matching typed reader together; coercion,
+  // infinity-shortcut, and effect-preservation families have no equivalent direct call and remain
+  // atomic. In particular, an effect spec must retain its closed patch/counter pair even when its
+  // underlying operation happens to call a known built-in.
+  for (const [patchIndex, patchModule] of program.modules.entries()) {
+    if (patchModule.format !== "esm") {
+      continue;
+    }
+    const assignment = patchModule.optimizerExpressionAssignments?.[0];
+    if (assignment === undefined || patchModule.optimizerExpressionAssignments?.length !== 1) {
+      continue;
+    }
+    const spec = globalReadOptimizerExpressionSpec(assignment.kind);
+    if (spec.family === "effect-preservation" || !("builtinKind" in spec)) {
+      continue;
+    }
+    const nextPatch = { ...patchModule };
+    delete (nextPatch as { optimizerExpressionAssignments?: unknown })
+      .optimizerExpressionAssignments;
+    nextPatch.builtinAssignments = [{ kind: spec.builtinKind, value: spec.patchedValue }];
+    const modules = program.modules.map((module, moduleIndex): ModuleModel => {
+      if (moduleIndex === patchIndex) {
+        return nextPatch;
+      }
+      if (
+        module.format !== "esm" ||
+        module.globalReadExport?.read.kind !== "optimizer-expression" ||
+        module.globalReadExport.read.expression !== assignment.kind
+      ) {
+        return module;
+      }
+      return {
+        ...module,
+        globalReadExport: {
+          ...module.globalReadExport,
+          read: { kind: spec.builtinKind },
+        },
+      };
+    });
+    yield { ...program, modules };
+  }
   // Drop one kind from a MIXED pair — a (importer, target) joined by more than one dependency, the
   // wave-5 multi-edge shape (static + lazy, side-effect + value, require + dynamic). Collapsing the
   // pair toward a single kind also drops any event read bound to the removed edge, so the candidate
@@ -220,6 +324,11 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
   // candidate re-canonicalizes onto `build.chunking`; the greedy pass keeps it only if the failure kind
   // is preserved, which also reveals whether the chunking is load-bearing.
   const chunking = programChunking(program);
+  if (chunking.kind === "disabled") {
+    // Try the normal automatic-splitting path. If the failure depends on the no-splitting branch (for
+    // example runtime co-hosting), this candidate goes green and the disabled mode is retained.
+    yield withChunking(program, { kind: "automatic" });
+  }
   if (chunking.kind === "manual") {
     for (const [index, group] of chunking.groups.entries()) {
       const groups = chunking.groups.filter((_, i) => i !== index);
@@ -283,6 +392,46 @@ export function* candidates(program: ProgramModel): Generator<ProgramModel> {
   // rides along every candidate via `buildConfigOf`, so a preserved minify replays through the adapter.)
   if (build.minify !== false) {
     yield { ...program, build: { ...build, minify: false } };
+  }
+  if (build.profilerNames !== false) {
+    yield { ...program, build: { ...build, profilerNames: false } };
+  }
+  const treeshake = build.treeshake;
+  if (treeshake.propertyReadSideEffects !== DEFAULT_TREESHAKE_CONFIG.propertyReadSideEffects) {
+    yield {
+      ...program,
+      build: {
+        ...build,
+        treeshake: {
+          ...treeshake,
+          propertyReadSideEffects: DEFAULT_TREESHAKE_CONFIG.propertyReadSideEffects,
+        },
+      },
+    };
+  }
+  if (treeshake.propertyWriteSideEffects !== DEFAULT_TREESHAKE_CONFIG.propertyWriteSideEffects) {
+    yield {
+      ...program,
+      build: {
+        ...build,
+        treeshake: {
+          ...treeshake,
+          propertyWriteSideEffects: DEFAULT_TREESHAKE_CONFIG.propertyWriteSideEffects,
+        },
+      },
+    };
+  }
+  if (treeshake.manualPureFunctions.length > 0) {
+    yield {
+      ...program,
+      build: {
+        ...build,
+        treeshake: {
+          ...treeshake,
+          manualPureFunctions: DEFAULT_TREESHAKE_CONFIG.manualPureFunctions,
+        },
+      },
+    };
   }
   // Remove ANY single event (not just the last), including a module's SOLE event — an irrelevant event
   // on an otherwise load-bearing module could not be dropped before, so the case never minimized past it.

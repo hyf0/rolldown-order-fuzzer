@@ -232,6 +232,38 @@ describe("executeManifest", () => {
     });
   });
 
+  test("keeps error messages distinct after fixture code replaces String.prototype.replaceAll", async () => {
+    const source = await executeModule(
+      'String.prototype.replaceAll = () => "<poisoned>"; throw new TypeError("source-distinct-message");\n',
+    );
+    const bundle = await executeModule(
+      'String.prototype.replaceAll = () => "<poisoned>"; throw new TypeError("bundle-distinct-message");\n',
+    );
+
+    expect(source).toMatchObject({
+      status: "error",
+      error: { name: "TypeError", message: "source-distinct-message" },
+    });
+    expect(bundle).toMatchObject({
+      status: "error",
+      error: { name: "TypeError", message: "bundle-distinct-message" },
+    });
+    expect(classifyVerdict(source, bundle)).toMatchObject({
+      kind: "mismatch",
+      reason: "error-mismatch",
+    });
+  });
+
+  test("collects events after fixture code replaces global constructors", async () => {
+    const outcome = await executeModule(
+      'globalThis.String = () => "poisoned"; globalThis.Number = () => 0; globalThis.Boolean = () => false; globalThis.Array = () => []; globalThis.Object = () => ({}); globalThis.__orderEvent({ module: "entry", phase: "evaluate", value: 7 });\n',
+    );
+    expect(outcome).toMatchObject({
+      status: "ok",
+      events: [{ version: 1, module: "entry", phase: "evaluate", value: 7 }, entryMarker(0)],
+    });
+  });
+
   test("rejects unsupported manifest protocol versions in the child", async () => {
     await withFiles(
       [

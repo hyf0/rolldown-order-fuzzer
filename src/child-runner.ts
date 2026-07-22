@@ -25,6 +25,19 @@ interface OrderRuntimeGlobal {
 }
 
 const harnessExecutionErrors = new WeakSet<object>();
+// Fixture code deliberately mutates built-ins. Capture every mutable String intrinsic used after a
+// fixture executes so error normalization cannot be poisoned by the program under test (notably the
+// optimizer registry's String.prototype.replaceAll assignment).
+const intrinsicReflectApply = Reflect.apply;
+const intrinsicStringReplaceAll: (
+  this: string,
+  search: string | RegExp,
+  replacement: string,
+) => string = Reflect.get(String.prototype, "replaceAll") as typeof String.prototype.replaceAll;
+
+function replaceAllIntrinsic(value: string, search: string, replacement: string): string {
+  return intrinsicReflectApply(intrinsicStringReplaceAll, value, [search, replacement]);
+}
 
 export async function runExecutionManifest(manifestPath: string): Promise<ExecutionOutcome> {
   const events: ExecutionEvent[] = [];
@@ -175,13 +188,14 @@ async function normalizeError(error: unknown, rootDirectory: string): Promise<No
 
   const normalizedRoots = [...roots].sort((left, right) => right.length - left.length);
   const normalizeMessage = (message: string) => {
-    let normalized = message.replaceAll("\r\n", "\n");
+    let normalized = replaceAllIntrinsic(message, "\r\n", "\n");
     for (const root of normalizedRoots) {
       if (normalized === root || normalized === pathToFileURL(root).href) {
         return "<root>";
       }
       const rootUrl = pathToFileURL(root).href;
-      normalized = normalized.replaceAll(
+      normalized = replaceAllIntrinsic(
+        normalized,
         rootUrl.endsWith("/") ? rootUrl : `${rootUrl}/`,
         "<root>/",
       );
@@ -189,9 +203,8 @@ async function normalizeError(error: unknown, rootDirectory: string): Promise<No
         if (normalized === rootPath) {
           return "<root>";
         }
-        normalized = normalized
-          .replaceAll(`${rootPath}/`, "<root>/")
-          .replaceAll(`${rootPath}\\`, "<root>/");
+        normalized = replaceAllIntrinsic(normalized, `${rootPath}/`, "<root>/");
+        normalized = replaceAllIntrinsic(normalized, `${rootPath}\\`, "<root>/");
       }
     }
     return normalized;
@@ -211,7 +224,9 @@ async function normalizeError(error: unknown, rootDirectory: string): Promise<No
 }
 
 function pathForms(path: string): readonly string[] {
-  return [...new Set([path, path.replaceAll("\\", "/"), path.replaceAll("/", "\\")])];
+  return [
+    ...new Set([path, replaceAllIntrinsic(path, "\\", "/"), replaceAllIntrinsic(path, "/", "\\")]),
+  ];
 }
 
 function isErrorInstance(value: unknown): value is Error {

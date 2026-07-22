@@ -1,3 +1,38 @@
+import type { GlobalReadBuiltinKind } from "./global-read-builtins.ts";
+import type { GlobalReadInstanceofKind } from "./global-read-instanceof.ts";
+import type { GlobalReadOptimizerExpressionKind } from "./global-read-optimizer-expressions.ts";
+
+export {
+  GLOBAL_READ_BUILTIN_KINDS,
+  GLOBAL_READ_BUILTIN_SPECS,
+  OPTIMIZER_GLOBAL_READ_BUILTIN_KINDS,
+} from "./global-read-builtins.ts";
+export type {
+  GlobalReadBuiltinKind,
+  GlobalReadBuiltinProjection,
+  GlobalReadBuiltinSpec,
+} from "./global-read-builtins.ts";
+export {
+  GLOBAL_READ_INSTANCEOF_KINDS,
+  GLOBAL_READ_INSTANCEOF_SPECS,
+} from "./global-read-instanceof.ts";
+export type {
+  GlobalReadInstanceofKind,
+  GlobalReadInstanceofSpec,
+} from "./global-read-instanceof.ts";
+export {
+  EFFECT_PRESERVATION_OPTIMIZER_EXPRESSION_KINDS,
+  GLOBAL_READ_OPTIMIZER_EFFECT_COUNTER,
+  GLOBAL_READ_OPTIMIZER_EXPRESSION_KINDS,
+  GLOBAL_READ_OPTIMIZER_EXPRESSION_SPECS,
+} from "./global-read-optimizer-expressions.ts";
+export type {
+  EffectPreservationOptimizerExpressionSpec,
+  GlobalReadOptimizerExpressionFamily,
+  GlobalReadOptimizerExpressionKind,
+  GlobalReadOptimizerExpressionSpec,
+} from "./global-read-optimizer-expressions.ts";
+
 export type ModuleFormat = "esm" | "cjs";
 
 export type EventValue = string | number | boolean | null;
@@ -54,8 +89,8 @@ export interface ValueRead {
   /// reads a member) — see `validate-model.ts`. The observed value is identical to the plain member read.
   readonly computedHopIndex?: number;
   /// When `true` (FW-B deliverable 3), the read routes through a module-level LOCAL ALIAS of its
-  /// `binding` rather than the binding directly: the renderer emits `const <binding>_alias = <binding>;`
-  /// once per aliased binding in the module and every aliased read renders `<binding>_alias.member…`.
+  /// `binding` rather than the binding directly: the renderer emits a fresh local based on
+  /// `<binding>_alias` once per aliased binding in the module and every aliased read uses that local.
   /// This is the `const x = ns; x.foo` exotic form the rebuilt #10180 detector must trace back to the
   /// namespace import `ns` (a local binding aliasing an imported namespace — a read through the alias is
   /// still a top-level read of the import). Rendering-only: the demand routing and observed value are
@@ -112,6 +147,13 @@ export interface EsmValueImportOperation {
   readonly target: string;
   readonly importedName: string;
   readonly localName: string;
+  /// Optional property path read from the imported value (`localName.p0.p1...`) instead of reading
+  /// the binding itself. Keeping it on the typed import makes validation and event folds agree on the
+  /// exact read shape. A downstream observer can inspect an exported class without adding a second
+  /// top-level read in its defining module, which would mask definition-time analyzer gaps (#10322).
+  /// Mutually exclusive with `objectRef` and `call`: those import an object identity or a callable
+  /// export rather than a numeric carrier whose member can be folded.
+  readonly readMemberPath?: readonly string[];
   /// When `true`, the import binds a hoisted FUNCTION export and every read of `localName` is a call
   /// (`localName()`); the target synthesizes `export function importedName() { return <base> }`
   /// instead of a `const`. Because a function declaration is callable before module-body order, this
@@ -318,6 +360,127 @@ interface ModuleModelBase {
   readonly objectExport?: true;
 }
 
+/// The canonical global-read syntax surface. Generation, validation, the release gate, and tests all
+/// consume this one list so adding an AST form cannot silently reach only some of those layers.
+export const MANUAL_PURE_SIDE_EFFECT_FORMS = [
+  "manual-pure-computed-key-effect",
+  "manual-pure-call-argument-effect",
+  "manual-pure-new-callee-computed-key-effect",
+] as const;
+
+export type ManualPureSideEffectForm = (typeof MANUAL_PURE_SIDE_EFFECT_FORMS)[number];
+
+export const MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL =
+  "__orderFuzzerManualPureSideEffectCount" as const;
+
+export const GLOBAL_READ_FORMS = [
+  "direct",
+  "class-static-field-declaration",
+  "class-static-field-expression",
+  "class-static-field-default-export",
+  "class-static-field-iife",
+  "class-heritage",
+  "class-computed-key",
+  "class-computed-accessor-key",
+  "class-nested-static-field",
+  "class-static-block",
+  "direct-arrow-iife",
+  "direct-arrow-block-iife",
+  "arrow-argument-iife",
+  "direct-function-iife",
+  "sequence-callee-iife",
+  "optional-call-iife",
+  "rest-parameter-iife",
+  "named-function-iife",
+  "local-const-iife",
+  "if-body-iife",
+  "try-finally-iife",
+  "switch-body-iife",
+  "returned-class-iife",
+  "conditional-callee-iife",
+  "logical-callee-iife",
+  "array-member",
+  "array-member-bigint-index",
+  "optional-array-member",
+  "sequence-array-member",
+  "conditional-array-member",
+  "spread-array-member",
+  "array-length-call-effect",
+  "object-member",
+  "nested-object-member",
+  "computed-string-object-member",
+  "computed-number-object-member",
+  "local-computed-object-member",
+  "optional-object-member",
+  "optional-computed-object-member",
+  "nested-optional-object-member",
+  "object-binding-default",
+  "object-binding-computed-key",
+  "nested-object-binding-default",
+  "nested-object-binding-computed-key",
+  "member-assignment-value",
+  "annotated-pure-member",
+  "manual-pure-member",
+  "manual-pure-computed-member",
+  "manual-pure-string-member",
+  "manual-pure-numeric-member",
+  "manual-pure-nested-member",
+  "manual-pure-optional-member",
+  "manual-pure-optional-computed-member",
+  "manual-pure-member-call",
+  "manual-pure-new",
+  "manual-pure-class-instance-field",
+  "manual-pure-class-default-parameter",
+  "manual-pure-returned-class",
+  ...MANUAL_PURE_SIDE_EFFECT_FORMS,
+] as const;
+
+export type GlobalReadForm = (typeof GLOBAL_READ_FORMS)[number];
+
+const MANUAL_PURE_SIDE_EFFECT_FORM_SET: ReadonlySet<string> = new Set(
+  MANUAL_PURE_SIDE_EFFECT_FORMS,
+);
+
+export function isManualPureSideEffectForm(form: GlobalReadForm): form is ManualPureSideEffectForm {
+  return MANUAL_PURE_SIDE_EFFECT_FORM_SET.has(form);
+}
+
+const GLOBAL_READ_CARRIER_MEMBER_PATH = Object.freeze(["value"] as const);
+const GLOBAL_READ_NESTED_CLASS_CARRIER_MEMBER_PATH = Object.freeze(["Inner", "value"] as const);
+
+/// The property path a downstream observer must read when a global-read form exports a carrier rather
+/// than the numeric value directly. Keeping this projection next to the form union prevents generation,
+/// demand analysis, rendering, and validation from independently guessing which forms carry `.value`.
+export function globalReadCarrierMemberPath(form: GlobalReadForm): readonly string[] | undefined {
+  if (form === "class-nested-static-field") {
+    return GLOBAL_READ_NESTED_CLASS_CARRIER_MEMBER_PATH;
+  }
+  return form.startsWith("class-") ||
+    form === "returned-class-iife" ||
+    form === "manual-pure-new" ||
+    form.startsWith("manual-pure-class-") ||
+    form === "manual-pure-returned-class"
+    ? GLOBAL_READ_CARRIER_MEMBER_PATH
+    : undefined;
+}
+
+/// A manual-pure global-read form's exact author-visible callee. The same name drives the persisted
+/// Rolldown option, the rendered helper, and collision validation.
+export function globalReadManualPureFunction(form: GlobalReadForm): "make" | "Box" | undefined {
+  if (
+    form === "manual-pure-new" ||
+    form === "manual-pure-class-instance-field" ||
+    form === "manual-pure-class-default-parameter"
+  ) {
+    return "Box";
+  }
+  return form.startsWith("manual-pure-") ? "make" : undefined;
+}
+
+export function globalReadFixedHelperName(form: GlobalReadForm): "make" | "Box" | undefined {
+  return form === "annotated-pure-member" ? "make" : globalReadManualPureFunction(form);
+}
+
 export interface EsmModuleModel extends ModuleModelBase {
   readonly format: "esm";
   readonly dependencies: readonly EsmDependencyOperation[];
@@ -331,6 +494,66 @@ export interface EsmModuleModel extends ModuleModelBase {
   /// forwards through the star), rendered by the same synthesized-export templates as any local
   /// export. Optional and additive: models without it behave exactly as before.
   readonly localExports?: readonly string[];
+  /// Author-chosen local bindings for demand-synthesized exports. The export-demand model still owns
+  /// which exported names exist; this only replaces the renderer's collision-avoiding generated local
+  /// (`__orderExportN`, `__objectExportN`, …) with the exact source binding an author wrote. This makes
+  /// deconfliction bugs reachable without accepting arbitrary source text — notably collisions with
+  /// runtime helpers (`__esmMin` / `__esm`) and generated wrapper/chunk-root names.
+  readonly authoredExportBindings?: readonly {
+    readonly exportedName: string;
+    readonly localName: string;
+  }[];
+  /// One fixture-owned global function installed by an event-free patch module. The paired reader uses
+  /// an annotated optional call (`globalThis.__orderRead?.()`) so the function call itself is declared
+  /// pure without assuming that any standard built-in can be monkey-patched. This is the analyzer
+  /// witness used by the 54 ordinary analyzer forms. The array-length and manual-pure effect probes
+  /// deliberately do not use this field: observing a call side effect after declaring it pure would be
+  /// contradictory, while manual-pure probes instead observe effects in the call's children.
+  readonly fixtureFunctionAssignment?: {
+    readonly value: number;
+  };
+  readonly builtinAssignments?: readonly {
+    readonly kind: GlobalReadBuiltinKind;
+    readonly value: number;
+    /// Fixture-private global counter incremented whenever the replacement function runs. This makes
+    /// calls whose return value is intentionally discarded observable (`[call()].length`).
+    readonly counterGlobal?: string;
+  }[];
+  /// Typed `instanceof` monkey-patches are separate from built-in call assignments. The renderer
+  /// replaces the selected global constructor with a forwarding wrapper carrying its own
+  /// `Symbol.hasInstance`, leaving the original constructor descriptor untouched.
+  readonly instanceofAssignments?: readonly {
+    readonly kind: GlobalReadInstanceofKind;
+  }[];
+  /// A closed optimizer-expression patch. Only the stable registry key is persisted; executable
+  /// patch/prelude/expression text and any typed effect counter remain internal to the versioned
+  /// renderer registry.
+  readonly optimizerExpressionAssignments?: readonly {
+    readonly kind: GlobalReadOptimizerExpressionKind;
+  }[];
+  /// One event-free export whose initializer reads a fixture-private global through a selected syntax
+  /// form. Class forms export the class itself so the downstream observer reads `.value`; reading the
+  /// field inside this module would add an ordinary top-level read and mask the class-definition analyzer
+  /// path. Direct/IIFE/array forms export the numeric value. A downstream module emits the event so the
+  /// reader never becomes order-sensitive merely because the witness itself logs an effect.
+  readonly globalReadExport?: {
+    readonly form: GlobalReadForm;
+    readonly exportedName: string;
+    readonly read:
+      | { readonly kind: GlobalReadBuiltinKind }
+      | { readonly kind: "instanceof"; readonly expression: GlobalReadInstanceofKind }
+      | {
+          readonly kind: "optimizer-expression";
+          readonly expression: GlobalReadOptimizerExpressionKind;
+        }
+      | { readonly kind: "fixture-function-call" }
+      | { readonly kind: "global-property"; readonly name: string };
+    /// Effect-preservation optimizer specs and the array-length call form may intentionally use the
+    /// same expected/fallback value; their separate typed counter observer is the semantic witness.
+    /// Every other read keeps distinct values so reordering remains visible directly.
+    readonly expectedValue: number;
+    readonly fallbackValue: number;
+  };
 }
 
 /// CJS modules require synchronously and may also register dynamic imports — `import()` is
@@ -520,11 +743,12 @@ export interface ProgramModel {
   readonly organicChunkGroups?: readonly OrganicChunkGroupConfig[];
 }
 
-/// The three mutually-exclusive chunking modes as ONE discriminated union, so tags, artifact identity,
+/// The four mutually-exclusive chunking modes as ONE discriminated union, so tags, artifact identity,
 /// adapter options, and shrinking share a single matcher instead of each re-deriving the mode from two
 /// optional arrays (where an EMPTY array leaks as a fourth, ambiguous state). `build.chunking` carries it
 /// directly on a schema-17 program; `programChunking` normalizes it (an empty groups array is automatic).
 export type Chunking =
+  | { readonly kind: "disabled" }
   | { readonly kind: "automatic" }
   | { readonly kind: "manual"; readonly groups: readonly ManualChunkGroup[] }
   | { readonly kind: "organic"; readonly groups: readonly OrganicChunkGroupConfig[] };
@@ -543,11 +767,25 @@ export type PreserveEntrySignatures = false | "strict" | "allow-extension" | "ex
 /// structurally unreachable. See `.agents/docs/fw-a-output-format-axis.md`.
 export type OutputFormat = "esm" | "cjs";
 
+export interface TreeshakeConfig {
+  readonly propertyReadSideEffects: false | "always";
+  readonly propertyWriteSideEffects: false | "always";
+  readonly manualPureFunctions: readonly string[];
+}
+
+export const DEFAULT_TREESHAKE_CONFIG: TreeshakeConfig = Object.freeze({
+  propertyReadSideEffects: "always",
+  propertyWriteSideEffects: "always",
+  manualPureFunctions: Object.freeze([]),
+});
+
 /// The ONE persisted bundle-side build configuration a case builds with — consumed by the adapter/build
 /// child, the evaluator, replay/shrink, the artifact identity, the corpus manifest, and the coverage
 /// tags. All of these bundle-side; NONE changes the source run, so the differential oracle stays valid.
 ///
-/// - `chunking` — the code-splitting mode (moved in from the top-level arrays).
+/// - `chunking` — the code-splitting mode (moved in from the top-level arrays). `disabled` maps to
+///   Rolldown's real `codeSplitting: false`; it is not equivalent to one manual group containing every
+///   module because the disabled path also controls runtime-module co-hosting and order-wrapper lowering.
 /// - `includeDependenciesRecursively` — the GLOBAL `codeSplitting.includeDependenciesRecursively`
 ///   fallback (rolldown default `true`); the W14a axis the generator rolls. `false` is a necessary
 ///   ingredient of the #9887 cross-chunk init-cycle catch.
@@ -570,6 +808,9 @@ export type OutputFormat = "esm" | "cjs";
 ///   function`), so the oracle normalizes identifier tokens in known error templates before comparing a
 ///   minified bundle's error to the source's (`verdict.ts`). No gate (unlike `cjs`, minify composes with
 ///   TLA and every other axis). See `.agents/docs/w12-minify-axis.md`.
+/// - `profilerNames` — `OutputOptions.generatedCode.profilerNames` (default `false`). It selects the
+///   readable runtime helper family (`__esm` / `__commonJS`) instead of the compact family
+///   (`__esmMin` / `__commonJSMin`), so authored-name collision coverage must exercise both paths.
 export interface BuildConfig {
   readonly chunking: Chunking;
   readonly includeDependenciesRecursively: boolean;
@@ -578,6 +819,8 @@ export interface BuildConfig {
   readonly strictExecutionOrder: boolean;
   readonly outputFormat: OutputFormat;
   readonly minify: boolean;
+  readonly profilerNames: boolean;
+  readonly treeshake: TreeshakeConfig;
 }
 
 /// The build config a program with no persisted `build` (a legacy v16 artifact) resolves to, minus its
@@ -590,6 +833,8 @@ export const DEFAULT_BUILD_CONFIG: BuildConfig = Object.freeze({
   strictExecutionOrder: true,
   outputFormat: "esm",
   minify: false,
+  profilerNames: false,
+  treeshake: DEFAULT_TREESHAKE_CONFIG,
 });
 
 /// The resolved `BuildConfig` of a program: its persisted `build` if present (schema 17), else derived
@@ -614,11 +859,15 @@ export function buildConfigOf(program: ProgramModel): BuildConfig {
     const persisted = program.build as BuildConfig & {
       readonly outputFormat?: OutputFormat;
       readonly minify?: boolean;
+      readonly profilerNames?: boolean;
+      readonly treeshake?: TreeshakeConfig;
     };
     return {
       ...persisted,
       outputFormat: persisted.outputFormat ?? "esm",
       minify: persisted.minify ?? false,
+      profilerNames: persisted.profilerNames ?? false,
+      treeshake: persisted.treeshake ?? DEFAULT_TREESHAKE_CONFIG,
     };
   }
   const chunking = legacyChunking(program);
@@ -768,7 +1017,7 @@ export function metadataPureModuleIds(program: ProgramModel): ReadonlySet<string
 }
 
 /// The forward-only dependency values a module can read in its own scope, in dependency order: an
-/// ESM value-import contributes its `localName`; an ESM namespace-import contributes one read per
+/// ESM value-import contributes its `localName` plus its optional value-member path; an ESM namespace-import contributes one read per
 /// `readMembers` PATH (`localName.p0.p1…`, W14c); a CJS readable require contributes its
 /// `resultBinding` plus the `readName` member read (a length-1 `memberPath`) off the required module's
 /// exports; an ESM LOCAL re-export contributes its `localName` (the binding is genuinely imported into
@@ -789,12 +1038,15 @@ export function readableBindingsOf(
       if (dependency.objectRef === true) {
         continue;
       }
-      // A call import binds a hoisted function; every read of it is a call (`localName()`).
-      reads.push(
-        dependency.call === true
-          ? { binding: dependency.localName, call: true }
-          : { binding: dependency.localName },
-      );
+      // A call import binds a hoisted function; every read of it is a direct call (`localName()`). A
+      // value-member path instead observes a property of an imported numeric class/object carrier.
+      reads.push({
+        binding: dependency.localName,
+        ...(dependency.readMemberPath === undefined
+          ? {}
+          : { memberPath: dependency.readMemberPath }),
+        ...(dependency.call === true ? { call: true as const } : {}),
+      });
     } else if (dependency.kind === "esm-namespace-import") {
       // A member in `callMembers` reads a callable export's RETURN value (`localName.member()`); the
       // rest read the member directly. `readMembers` entries are member PATHS (W14c): a length-1 path

@@ -38,7 +38,7 @@ import {
 } from "./verdict.ts";
 
 const ROLLDOWN_TEMPORARY_ROOT_PATTERN =
-  /(?:file:\/\/\/|(?:[A-Za-z]:)?[\\/])(?:[^\s"'`]*[\\/])?rolldown-order-fuzzer-[A-Za-z0-9]{6}/g;
+  /(?:file:\/\/\/|(?:[A-Za-z]:)?[\\/])(?:[^\s"'`]*[\\/])?rolldown-order-fuzzer-[A-Za-z0-9]{6}(?=[\\/]|$)/g;
 const FUZZER_ROOT = fileURLToPath(new URL("../", import.meta.url)).replace(/[\\/]$/, "");
 
 export const DEFAULT_CASE_SIZE = 4;
@@ -262,13 +262,21 @@ export async function executeGeneratedCase(
   options: CampaignOptions,
   overrides: Partial<ProgramExecutionDependencies> = {},
 ): Promise<CampaignCaseResult> {
+  const effectiveOptions =
+    generated.onDemandWrapping === undefined ||
+    generated.onDemandWrapping === options.onDemandWrapping
+      ? options
+      : { ...options, onDemandWrapping: generated.onDemandWrapping };
   const run = await executeProgram(
     generated.program,
-    { rolldownPackage: options.rolldownPackage, onDemandWrapping: options.onDemandWrapping },
+    {
+      rolldownPackage: effectiveOptions.rolldownPackage,
+      onDemandWrapping: effectiveOptions.onDemandWrapping,
+    },
     overrides,
     generated.analyzed,
   );
-  return { generated, options, ...run };
+  return { generated, options: effectiveOptions, ...run };
 }
 
 /// Classify a campaign verdict. `compareEventsFn` is the ORDER ORACLE — omitted (full-order) for a

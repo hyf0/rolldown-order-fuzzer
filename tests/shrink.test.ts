@@ -2,7 +2,7 @@ import { describe, expect, test } from "vite-plus/test";
 
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ProgramModel } from "../src/model.ts";
-import { programChunking } from "../src/model.ts";
+import { buildConfigOf, DEFAULT_BUILD_CONFIG, programChunking } from "../src/model.ts";
 import { candidates, parseArgs, sameFailure } from "../src/shrink.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
 
@@ -183,6 +183,60 @@ describe("shrink candidate engine (findings 4 and 9)", () => {
       (candidate) => candidate.modules[1]?.events.length === 0,
     );
     expect(dropped).toBeDefined();
+  });
+
+  test("shrinks each treeshake axis back to its default independently", () => {
+    const program = {
+      modules: [
+        {
+          id: "entry",
+          format: "esm",
+          dependencies: [],
+          events: [{ module: "entry", phase: "evaluate", value: 1 }],
+        },
+      ],
+      entries: [{ name: "main", moduleId: "entry" }],
+      schedule: [{ kind: "import-entry", entry: "main" }],
+      build: {
+        ...DEFAULT_BUILD_CONFIG,
+        treeshake: {
+          propertyReadSideEffects: false,
+          propertyWriteSideEffects: false,
+          manualPureFunctions: ["make"],
+        },
+      },
+    } satisfies ProgramModel;
+    expect(validateProgramModel(analyzeProgram(program))).toEqual([]);
+
+    const readDefaulted = findValidCandidate(program, (candidate) => {
+      const treeshake = buildConfigOf(candidate).treeshake;
+      return (
+        treeshake.propertyReadSideEffects === "always" &&
+        treeshake.propertyWriteSideEffects === false &&
+        treeshake.manualPureFunctions.length === 1
+      );
+    });
+    expect(readDefaulted).toBeDefined();
+
+    const writeDefaulted = findValidCandidate(program, (candidate) => {
+      const treeshake = buildConfigOf(candidate).treeshake;
+      return (
+        treeshake.propertyReadSideEffects === false &&
+        treeshake.propertyWriteSideEffects === "always" &&
+        treeshake.manualPureFunctions.length === 1
+      );
+    });
+    expect(writeDefaulted).toBeDefined();
+
+    const manualPureDefaulted = findValidCandidate(program, (candidate) => {
+      const treeshake = buildConfigOf(candidate).treeshake;
+      return (
+        treeshake.propertyReadSideEffects === false &&
+        treeshake.propertyWriteSideEffects === false &&
+        treeshake.manualPureFunctions.length === 0
+      );
+    });
+    expect(manualPureDefaulted).toBeDefined();
   });
 
   test("shrinks an organic chunk config field by field", () => {

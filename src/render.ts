@@ -8,6 +8,17 @@ import {
   type AnalyzedProgram,
   type RenderedExportForm,
 } from "./analyzed-program.ts";
+import {
+  globalReadBuiltinSpec,
+  projectGlobalReadBuiltinCall,
+  renderGlobalReadBuiltinReplacement,
+} from "./global-read-builtins.ts";
+import {
+  globalReadInstanceofSpec,
+  renderGlobalReadInstanceofAssignment,
+  renderGlobalReadInstanceofExpression,
+} from "./global-read-instanceof.ts";
+import { globalReadOptimizerExpressionSpec } from "./global-read-optimizer-expressions.ts";
 import type {
   EntryModel,
   EsmDynamicImportOperation,
@@ -18,6 +29,9 @@ import type {
   ValueRead,
 } from "./model.ts";
 import {
+  globalReadCarrierMemberPath,
+  isManualPureSideEffectForm,
+  MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL,
   moduleProfile,
   packageMemberFileName,
   packageMembershipOf,
@@ -197,6 +211,7 @@ function renderModule(
 
   if (module.format === "cjs") {
     const dependencyLines: string[] = [];
+    const usedBindings = new Set<string>();
     for (const dependency of module.dependencies) {
       const specifier = specifierTo(dependency.target);
       if (dependency.kind === "esm-dynamic-import") {
@@ -204,6 +219,7 @@ function renderModule(
         dependencyLines.push(dynamicRegistration(dependency, specifier));
       } else if (dependency.resultBinding !== undefined) {
         // Bind the require result so the target's exports can be read into events and exports.
+        usedBindings.add(dependency.resultBinding);
         dependencyLines.push(`const ${dependency.resultBinding} = require("${specifier}");`);
       } else {
         dependencyLines.push(`require("${specifier}");`);
@@ -215,7 +231,7 @@ function renderModule(
       sections.push(dependencyLines);
     }
     if (module.events.length > 0) {
-      sections.push(renderEvents(module));
+      sections.push(renderEvents(module, usedBindings, new Map()));
     }
     if (requestedExports.length > 0) {
       sections.push(renderCjsExports(module, requestedExports, readable));
@@ -271,6 +287,12 @@ function renderModule(
       dependencyLines.push(dynamicRegistration(dependency, specifier));
     }
   }
+  // Reserve every author-selected local before minting renderer internals. The authored export path
+  // deliberately consumes its reserved name later; generated helpers/state/other exports must avoid it.
+  for (const binding of module.authoredExportBindings ?? []) {
+    usedBindings.add(binding.localName);
+  }
+  const aliasBindings = allocateAliasBindings(module, usedBindings);
 
   const localExports = localExportsFor(module, requestedExports);
   const sections: string[][] = [];
@@ -280,19 +302,61 @@ function renderModule(
   if (module.hasTopLevelAwait === true) {
     sections.push(["await 0;"]);
   }
+  if (module.fixtureFunctionAssignment !== undefined) {
+    const assignment = module.fixtureFunctionAssignment;
+    sections.push([`globalThis.__orderRead = () => ${assignment.value};`]);
+  }
+  if ((module.builtinAssignments?.length ?? 0) > 0) {
+    sections.push(
+      (module.builtinAssignments ?? []).map((assignment) => {
+        const spec = globalReadBuiltinSpec(assignment.kind);
+        const replacement = renderGlobalReadBuiltinReplacement(spec, assignment.value);
+        const counter =
+          assignment.counterGlobal === undefined
+            ? undefined
+            : `globalThis[${serializeJavaScriptValue(assignment.counterGlobal)}]`;
+        const initializeCounter = counter === undefined ? "" : `${counter} = 0;\n`;
+        return counter === undefined
+          ? `${spec.assignmentTarget} = () => ${replacement};`
+          : `${initializeCounter}${spec.assignmentTarget} = () => { ${counter} += 1; return ${replacement}; };`;
+      }),
+    );
+  }
+  if ((module.instanceofAssignments?.length ?? 0) > 0) {
+    sections.push(
+      (module.instanceofAssignments ?? []).map((assignment) =>
+        renderGlobalReadInstanceofAssignment(globalReadInstanceofSpec(assignment.kind)),
+      ),
+    );
+  }
+  if ((module.optimizerExpressionAssignments?.length ?? 0) > 0) {
+    sections.push(
+      (module.optimizerExpressionAssignments ?? []).map(
+        (assignment) => globalReadOptimizerExpressionSpec(assignment.kind).patchStatement,
+      ),
+    );
+  }
   // Alias declarations (`const x = ns;`) for any aliased event reads, emitted BEFORE the events so the
   // alias binds the imported namespace before an event reads through it (FW-B deliverable 3).
-  const aliasDeclarations = renderAliasDeclarations(module);
+  const aliasDeclarations = renderAliasDeclarations(aliasBindings);
   if (aliasDeclarations.length > 0) {
     sections.push(aliasDeclarations);
   }
   if (module.events.length > 0) {
-    sections.push(renderEvents(module));
+    sections.push(renderEvents(module, usedBindings, aliasBindings));
   }
+  const specialExportName = localExports.find((name) => isGlobalReadExportForm(formOf(name)));
+  const ordinaryLocalExports =
+    specialExportName === undefined
+      ? localExports
+      : localExports.filter((name) => name !== specialExportName);
   const exportLines = [
     ...localReexportLines,
-    ...(localExports.length > 0
-      ? renderEsmExports(module, localExports, usedBindings, readable, formOf)
+    ...(specialExportName === undefined
+      ? []
+      : renderGlobalReadExport(module, usedBindings, formOf(specialExportName))),
+    ...(ordinaryLocalExports.length > 0
+      ? renderEsmExports(module, ordinaryLocalExports, usedBindings, readable, formOf)
       : []),
   ];
   if (exportLines.length > 0) {
@@ -300,6 +364,456 @@ function renderModule(
   }
 
   return renderSections(sections);
+}
+
+function isGlobalReadExportForm(form: RenderedExportForm): boolean {
+  return form === "global-read-value" || form === "global-read-carrier";
+}
+
+function renderGlobalReadExport(
+  module: ModuleModel,
+  usedBindings: Set<string>,
+  renderedForm: RenderedExportForm,
+): string[] {
+  if (module.format !== "esm" || module.globalReadExport === undefined) {
+    return [];
+  }
+  const read = module.globalReadExport;
+  const expectedForm =
+    globalReadCarrierMemberPath(read.form) !== undefined
+      ? "global-read-carrier"
+      : "global-read-value";
+  if (renderedForm !== expectedForm) {
+    throw new Error(
+      `Global-read export ${JSON.stringify(read.exportedName)} classified as ${renderedForm}, expected ${expectedForm}`,
+    );
+  }
+  let globalRead: string;
+  let optimizerReaderPrelude: string | undefined;
+  if (read.read.kind === "fixture-function-call") {
+    globalRead = "/* @__PURE__ */ globalThis.__orderRead?.()";
+  } else if (read.read.kind === "global-property") {
+    globalRead = `globalThis[${serializeJavaScriptValue(read.read.name)}]`;
+  } else if (read.read.kind === "instanceof") {
+    globalRead = renderGlobalReadInstanceofExpression(
+      globalReadInstanceofSpec(read.read.expression),
+    );
+  } else if (read.read.kind === "optimizer-expression") {
+    const spec = globalReadOptimizerExpressionSpec(read.read.expression);
+    globalRead = spec.numericExpression;
+    optimizerReaderPrelude = spec.readerPrelude;
+    if ("readerBinding" in spec) {
+      if (usedBindings.has(spec.readerBinding)) {
+        const freshReaderBinding = freshBinding(usedBindings, spec.readerBinding);
+        globalRead = globalRead.replaceAll(spec.readerBinding, freshReaderBinding);
+        optimizerReaderPrelude = spec.readerPrelude.replaceAll(
+          spec.readerBinding,
+          freshReaderBinding,
+        );
+      } else {
+        usedBindings.add(spec.readerBinding);
+      }
+    }
+  } else {
+    globalRead = projectGlobalReadBuiltinCall(globalReadBuiltinSpec(read.read.kind));
+  }
+  const observed =
+    read.read.kind === "fixture-function-call" || read.read.kind === "global-property"
+      ? `(${globalRead} ?? ${read.fallbackValue})`
+      : globalRead;
+  const exportValue = (expression: string): string[] => {
+    const valueName =
+      authoredBindingName(module, read.exportedName) ??
+      freshBinding(usedBindings, "__orderGlobalReadValue");
+    if (!usedBindings.has(valueName)) {
+      usedBindings.add(valueName);
+    }
+    return [
+      `const ${valueName} = ${expression};`,
+      valueName === read.exportedName
+        ? `export { ${valueName} };`
+        : `export { ${valueName} as ${read.exportedName} };`,
+    ];
+  };
+
+  const exportBinding = (bindingName: string): string =>
+    bindingName === read.exportedName
+      ? `export { ${bindingName} };`
+      : `export { ${bindingName} as ${read.exportedName} };`;
+
+  const globalReadValueBinding = (): string => {
+    const bindingName =
+      authoredBindingName(module, read.exportedName) ??
+      freshBinding(usedBindings, "__orderGlobalReadValue");
+    usedBindings.add(bindingName);
+    return bindingName;
+  };
+
+  if (isManualPureSideEffectForm(read.form)) {
+    if (
+      read.read.kind !== "global-property" ||
+      read.read.name !== MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL
+    ) {
+      throw new Error(`${read.form} requires its fixture-owned effect counter read`);
+    }
+    if (usedBindings.has("make")) {
+      throw new Error(`${read.form} requires the module-local helper binding make`);
+    }
+    usedBindings.add("make");
+    const effectName = freshBinding(usedBindings, "__orderManualPureEffect");
+    const counter = `globalThis[${serializeJavaScriptValue(MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL)}]`;
+    const common = [`${counter} = 0;`, `function ${effectName}() { ${counter} += 1; return 0; }`];
+    if (read.form === "manual-pure-computed-key-effect") {
+      return [
+        ...common,
+        "function make() { return { 0: 1 }; }",
+        `make()[${effectName}()];`,
+        ...exportValue(observed),
+      ];
+    }
+    if (read.form === "manual-pure-call-argument-effect") {
+      return [
+        ...common,
+        "function make(_) { return { value: 1 }; }",
+        `make(${effectName}()).value;`,
+        ...exportValue(observed),
+      ];
+    }
+    return [
+      ...common,
+      "function make() { return { 0: { Box: class {} } }; }",
+      `new (make()[${effectName}()].Box)();`,
+      ...exportValue(observed),
+    ];
+  }
+
+  if (read.form === "direct") {
+    return [
+      ...(optimizerReaderPrelude === undefined ? [] : [optimizerReaderPrelude]),
+      ...exportValue(observed),
+    ];
+  }
+  if (read.form === "direct-arrow-iife") {
+    return exportValue(`(() => ${observed})()`);
+  }
+  if (read.form === "direct-arrow-block-iife") {
+    return exportValue(`(() => { return ${observed}; })()`);
+  }
+  if (read.form === "arrow-argument-iife") {
+    return exportValue(`((unused) => ${observed})(${read.fallbackValue})`);
+  }
+  if (read.form === "direct-function-iife") {
+    return exportValue(`(function () { return ${observed}; })()`);
+  }
+  if (read.form === "sequence-callee-iife") {
+    return exportValue(`(0, () => ${observed})()`);
+  }
+  if (read.form === "optional-call-iife") {
+    return exportValue(`(() => ${observed})?.()`);
+  }
+  if (read.form === "rest-parameter-iife") {
+    return exportValue(`((...args) => ${observed})()`);
+  }
+  if (read.form === "named-function-iife") {
+    return exportValue(`(function named() { return ${observed}; })()`);
+  }
+  if (read.form === "local-const-iife") {
+    return exportValue(`(() => { const result = ${observed}; return result; })()`);
+  }
+  if (read.form === "if-body-iife") {
+    return exportValue(`(() => { if (true) return ${observed}; return ${read.fallbackValue}; })()`);
+  }
+  if (read.form === "try-finally-iife") {
+    return exportValue(`(() => { try { return ${observed}; } finally {} })()`);
+  }
+  if (read.form === "switch-body-iife") {
+    return exportValue(`(() => { switch (0) { case 0: return ${observed}; } })()`);
+  }
+  if (read.form === "conditional-callee-iife") {
+    return exportValue(`(true ? (() => ${observed}) : (() => ${read.fallbackValue}))()`);
+  }
+  if (read.form === "logical-callee-iife") {
+    return exportValue(`(true && (() => ${observed}))()`);
+  }
+  if (read.form === "array-member") {
+    return exportValue(`[${observed}][0]`);
+  }
+  if (read.form === "array-member-bigint-index") {
+    return exportValue(`[${observed}][0n]`);
+  }
+  if (read.form === "optional-array-member") {
+    return exportValue(`[${observed}]?.[0]`);
+  }
+  if (read.form === "sequence-array-member") {
+    return exportValue(`([${read.fallbackValue}], [${observed}])[0]`);
+  }
+  if (read.form === "conditional-array-member") {
+    return exportValue(`[true ? ${observed} : ${read.fallbackValue}][0]`);
+  }
+  if (read.form === "spread-array-member") {
+    return exportValue(`[...[${observed}]][0]`);
+  }
+  if (read.form === "array-length-call-effect") {
+    return exportValue(`[${observed}].length`);
+  }
+  if (read.form === "object-member") {
+    return exportValue(`({ value: ${observed} }).value`);
+  }
+  if (read.form === "nested-object-member") {
+    return exportValue(`({ inner: { value: ${observed} } }).inner.value`);
+  }
+  if (read.form === "computed-string-object-member") {
+    return exportValue(`({ value: ${observed} })["value"]`);
+  }
+  if (read.form === "computed-number-object-member") {
+    return exportValue(
+      `({ [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} })[${observed}]`,
+    );
+  }
+  if (read.form === "local-computed-object-member") {
+    const tableName = freshBinding(usedBindings, "__orderGlobalReadTable");
+    return [
+      `const ${tableName} = { [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} };`,
+      ...exportValue(`${tableName}[${observed}]`),
+    ];
+  }
+  if (read.form === "optional-object-member") {
+    return exportValue(`({ value: ${observed} })?.value`);
+  }
+  if (read.form === "optional-computed-object-member") {
+    return exportValue(
+      `({ [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} })?.[${observed}]`,
+    );
+  }
+  if (read.form === "nested-optional-object-member") {
+    return exportValue(`({ inner: { value: ${observed} } })?.inner?.value`);
+  }
+  if (read.form === "object-binding-default") {
+    const valueName = globalReadValueBinding();
+    return [`const { value: ${valueName} = ${observed} } = {};`, exportBinding(valueName)];
+  }
+  if (read.form === "object-binding-computed-key") {
+    const valueName = globalReadValueBinding();
+    return [
+      `const { [${observed}]: ${valueName} } = { [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} };`,
+      exportBinding(valueName),
+    ];
+  }
+  if (read.form === "nested-object-binding-default") {
+    const valueName = globalReadValueBinding();
+    return [
+      `const { inner: { value: ${valueName} = ${observed} } = {} } = {};`,
+      exportBinding(valueName),
+    ];
+  }
+  if (read.form === "nested-object-binding-computed-key") {
+    const valueName = globalReadValueBinding();
+    return [
+      `const { inner: { [${observed}]: ${valueName} } } = { inner: { [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} } };`,
+      exportBinding(valueName),
+    ];
+  }
+  if (read.form === "member-assignment-value") {
+    const boxName = freshBinding(usedBindings, "__orderGlobalReadBox");
+    return [`const ${boxName} = {};`, ...exportValue(`${boxName}.value = ${observed}`)];
+  }
+  if (read.form === "annotated-pure-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("annotated-pure-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [
+      `function make() { return { value: ${observed} }; }`,
+      ...exportValue("(/* @__PURE__ */ make()).value"),
+    ];
+  }
+  if (read.form === "manual-pure-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [`function make() { return { value: ${observed} }; }`, ...exportValue("make().value")];
+  }
+  if (read.form === "manual-pure-computed-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-computed-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [
+      `function make() { return { [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} }; }`,
+      ...exportValue(`make()[${observed}]`),
+    ];
+  }
+  if (read.form === "manual-pure-string-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-string-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [
+      `function make() { return { value: ${observed} }; }`,
+      ...exportValue(`make()["value"]`),
+    ];
+  }
+  if (read.form === "manual-pure-numeric-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-numeric-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [`function make() { return { 0: ${observed} }; }`, ...exportValue("make()[0]")];
+  }
+  if (read.form === "manual-pure-nested-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-nested-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [
+      `function make() { return { inner: { value: ${observed} } }; }`,
+      ...exportValue("make().inner.value"),
+    ];
+  }
+  if (read.form === "manual-pure-optional-member") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-optional-member requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [`function make() { return { value: ${observed} }; }`, ...exportValue("make()?.value")];
+  }
+  if (read.form === "manual-pure-optional-computed-member") {
+    if (usedBindings.has("make")) {
+      throw new Error(
+        "manual-pure-optional-computed-member requires the module-local helper binding make",
+      );
+    }
+    usedBindings.add("make");
+    return [
+      `function make() { return { [${read.fallbackValue}]: ${read.fallbackValue}, [${read.expectedValue}]: ${read.expectedValue} }; }`,
+      ...exportValue(`make()?.[${observed}]`),
+    ];
+  }
+  if (read.form === "manual-pure-member-call") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-member-call requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    return [
+      `function make() { return { read() { return ${observed}; } }; }`,
+      ...exportValue("make().read()"),
+    ];
+  }
+  if (read.form === "manual-pure-new") {
+    if (usedBindings.has("Box")) {
+      throw new Error("manual-pure-new requires the module-local helper binding Box");
+    }
+    usedBindings.add("Box");
+    const boxName =
+      authoredBindingName(module, read.exportedName) ??
+      freshBinding(usedBindings, "__orderGlobalReadBox");
+    usedBindings.add(boxName);
+    return [
+      `function Box() { this.value = ${observed}; }`,
+      `const ${boxName} = new Box();`,
+      exportBinding(boxName),
+    ];
+  }
+  if (read.form === "manual-pure-class-instance-field") {
+    if (usedBindings.has("Box")) {
+      throw new Error(
+        "manual-pure-class-instance-field requires the module-local helper binding Box",
+      );
+    }
+    usedBindings.add("Box");
+    const boxName =
+      authoredBindingName(module, read.exportedName) ??
+      freshBinding(usedBindings, "__orderGlobalReadBox");
+    usedBindings.add(boxName);
+    return [
+      `class Box { value = ${observed}; }`,
+      `const ${boxName} = new Box();`,
+      exportBinding(boxName),
+    ];
+  }
+  if (read.form === "manual-pure-class-default-parameter") {
+    if (usedBindings.has("Box")) {
+      throw new Error(
+        "manual-pure-class-default-parameter requires the module-local helper binding Box",
+      );
+    }
+    usedBindings.add("Box");
+    const boxName =
+      authoredBindingName(module, read.exportedName) ??
+      freshBinding(usedBindings, "__orderGlobalReadBox");
+    usedBindings.add(boxName);
+    return [
+      `class Box { constructor(value = ${observed}) { this.value = value; } }`,
+      `const ${boxName} = new Box();`,
+      exportBinding(boxName),
+    ];
+  }
+  if (read.form === "manual-pure-returned-class") {
+    if (usedBindings.has("make")) {
+      throw new Error("manual-pure-returned-class requires the module-local helper binding make");
+    }
+    usedBindings.add("make");
+    const boxName =
+      authoredBindingName(module, read.exportedName) ??
+      freshBinding(usedBindings, "__orderGlobalReadBox");
+    usedBindings.add(boxName);
+    return [
+      `function make() { return class { value = ${observed}; }; }`,
+      `const ${boxName} = new (make())();`,
+      exportBinding(boxName),
+    ];
+  }
+
+  const className =
+    authoredBindingName(module, read.exportedName) ??
+    freshBinding(usedBindings, "__OrderGlobalReadClass");
+  if (!usedBindings.has(className)) {
+    usedBindings.add(className);
+  }
+  const exportClass = (): string[] => [exportBinding(className)];
+  switch (read.form) {
+    case "class-static-field-declaration":
+      return [`class ${className} { static value = ${observed}; }`, ...exportClass()];
+    case "class-static-field-expression":
+      return [`const ${className} = class { static value = ${observed}; };`, ...exportClass()];
+    case "class-static-field-default-export":
+      return [`export default class ${className} { static value = ${observed}; }`];
+    case "class-static-field-iife":
+      return [`class ${className} { static value = (() => ${observed})(); }`, ...exportClass()];
+    case "class-heritage":
+      return [
+        `class ${className} extends (${observed} === ${read.expectedValue} ? class { static value = ${read.expectedValue}; } : class { static value = ${read.fallbackValue}; }) {}`,
+        ...exportClass(),
+      ];
+    case "class-computed-key":
+      return [
+        `class ${className} { static [${observed} === ${read.expectedValue} ? "value" : "other"] = ${read.expectedValue}; }`,
+        ...exportClass(),
+      ];
+    case "class-computed-accessor-key":
+      return [
+        `class ${className} { static get value() { return ${read.fallbackValue}; } static get [${observed} === ${read.expectedValue} ? "value" : "other"]() { return ${read.expectedValue}; } }`,
+        ...exportClass(),
+      ];
+    case "class-nested-static-field":
+      return [
+        `class ${className} { static Inner = class { static value = ${observed}; }; }`,
+        ...exportClass(),
+      ];
+    case "class-static-block":
+      return [
+        `class ${className} { static value = ${read.fallbackValue}; static { this.value = ${observed}; } }`,
+        ...exportClass(),
+      ];
+    case "returned-class-iife":
+      return [
+        `const ${className} = (() => class { static value = ${observed}; })();`,
+        ...exportClass(),
+      ];
+    default:
+      throw new Error(`Unsupported global-read form: ${String(read.form)}`);
+  }
 }
 
 /// The sentinel a guarded cycle read folds to when it observes a not-yet-assigned (partial) CJS
@@ -322,7 +836,7 @@ function aliasVarName(binding: string): string {
   return `${binding}_alias`;
 }
 
-function renderRead(read: ValueRead): string {
+function renderRead(read: ValueRead, aliasBindings?: ReadonlyMap<string, string>): string {
   // Walk the canonical member path (W14c): `binding.p0.p1.…`. Intermediate hops (a re-exported
   // namespace navigated to reach the export) stay static UNLESS `computedHopIndex` names one to render
   // computed (`binding[<key>].tail` — the `a[imp].y` exotic form, FW-B deliverable 3); the DEEPEST access
@@ -332,7 +846,11 @@ function renderRead(read: ValueRead): string {
   // the binding path differs, stressing the rebuilt #10180 top-level-import-read detector. Empty path is
   // a plain binding read.
   const path = read.memberPath ?? [];
-  let access = read.alias === true ? aliasVarName(read.binding) : read.binding;
+  const aliasBinding = read.alias === true ? aliasBindings?.get(read.binding) : undefined;
+  if (read.alias === true && aliasBinding === undefined) {
+    throw new Error(`Missing allocated alias binding for ${JSON.stringify(read.binding)}`);
+  }
+  let access = aliasBinding ?? read.binding;
   for (let index = 0; index < path.length; index += 1) {
     const member = path[index] ?? "";
     const isDeepestComputed = index === path.length - 1 && read.computed === true;
@@ -351,19 +869,33 @@ function renderRead(read: ValueRead): string {
     : expression;
 }
 
-/// The `const <binding>_alias = <binding>;` declarations for a module — one per DISTINCT binding any of
-/// the module's event reads aliases (`ValueRead.alias`). Rendered after the imports so the alias binds
-/// the imported namespace before the events read through it. Empty when no read aliases.
-function renderAliasDeclarations(module: ModuleModel): string[] {
-  const aliased = new Set<string>();
+/// Allocate one renderer-local alias per DISTINCT binding used by `ValueRead.alias`. The historical
+/// `<binding>_alias` spelling is preserved when free; otherwise it is freshened around imports, authored
+/// export locals, and earlier renderer bindings so an exact author-selected name stays source-valid.
+function allocateAliasBindings(
+  module: ModuleModel,
+  usedBindings: Set<string>,
+): ReadonlyMap<string, string> {
+  const aliases = new Map<string, string>();
   for (const event of module.events) {
     for (const read of event.reads ?? []) {
-      if (read.alias === true) {
-        aliased.add(read.binding);
+      if (read.alias === true && !aliases.has(read.binding)) {
+        const preferred = aliasVarName(read.binding);
+        if (!usedBindings.has(preferred)) {
+          usedBindings.add(preferred);
+          aliases.set(read.binding, preferred);
+        } else {
+          aliases.set(read.binding, freshBinding(usedBindings, preferred));
+        }
       }
     }
   }
-  return [...aliased].map((binding) => `const ${aliasVarName(binding)} = ${binding};`);
+  return aliases;
+}
+
+/// Render allocated alias declarations after imports and before the events that read through them.
+function renderAliasDeclarations(aliasBindings: ReadonlyMap<string, string>): string[] {
+  return [...aliasBindings].map(([binding, alias]) => `const ${alias} = ${binding};`);
 }
 
 /// A runtime-built key for a computed member read `binding[key]`. Splitting the member name into two
@@ -381,8 +913,12 @@ function computedMemberKey(member: string): string {
 /// A numeric fold: a constant base plus every read, as a JavaScript expression. Used for both
 /// value-carrying events and state-derived export initializers. Callers guarantee `base` is a
 /// finite number whenever `reads` is non-empty, so the expression stays numeric.
-function renderFold(base: number, reads: readonly ValueRead[]): string {
-  return [String(base), ...reads.map(renderRead)].join(" + ");
+function renderFold(
+  base: number,
+  reads: readonly ValueRead[],
+  aliasBindings?: ReadonlyMap<string, string>,
+): string {
+  return [String(base), ...reads.map((read) => renderRead(read, aliasBindings))].join(" + ");
 }
 
 /// The module's own contribution to its export values: its first finite numeric event value, or 0.
@@ -395,9 +931,12 @@ function moduleStateBase(module: ModuleModel): number {
     : 0;
 }
 
-function renderEvents(module: ModuleModel): string[] {
+function renderEvents(
+  module: ModuleModel,
+  usedBindings: Set<string>,
+  aliasBindings: ReadonlyMap<string, string>,
+): string[] {
   const lines: string[] = [];
-  let hiddenReadCounter = 0;
   for (const event of module.events) {
     if (event.identityCheck !== undefined) {
       // Fold an object-identity comparison: `value + ((left === right) ? 0 : sentinel)`. The two
@@ -435,15 +974,14 @@ function renderEvents(module: ModuleModel): string[] {
       // Hide the reads inside a local function called at top level: the observed value is identical
       // to a direct read (`base + hidden()`), but the read is lexically inside a function body, so a
       // bundler that determines init order from top-level uses alone can miss it (family B).
-      const functionName = `__hiddenRead${hiddenReadCounter}`;
-      hiddenReadCounter += 1;
+      const functionName = freshBinding(usedBindings, "__hiddenRead");
       lines.push(
-        `function ${functionName}() { return ${event.reads.map(renderRead).join(" + ")}; }`,
+        `function ${functionName}() { return ${event.reads.map((read) => renderRead(read, aliasBindings)).join(" + ")}; }`,
         `${eventHead}${base} + ${functionName}() });`,
       );
       continue;
     }
-    lines.push(`${eventHead}${renderFold(base, event.reads)} });`);
+    lines.push(`${eventHead}${renderFold(base, event.reads, aliasBindings)} });`);
   }
   return lines;
 }
@@ -520,18 +1058,28 @@ function renderInferredPureExports(
   for (const exportName of requestedExports) {
     let buildName: string;
     let valueName: string;
+    const authoredValueName = authoredBindingName(module, exportName);
     do {
       buildName = `__pureBuild${index}`;
-      valueName = `__pureValue${index}`;
+      valueName = authoredValueName ?? `__pureValue${index}`;
       index += 1;
-    } while (usedBindings.has(buildName) || usedBindings.has(valueName));
+    } while (
+      usedBindings.has(buildName) ||
+      buildName === valueName ||
+      (authoredValueName === undefined && usedBindings.has(valueName))
+    );
     usedBindings.add(buildName);
     usedBindings.add(valueName);
-    const folded = [`/* @__PURE__ */ ${buildName}()`, ...readable.map(renderRead)].join(" + ");
+    const folded = [
+      `/* @__PURE__ */ ${buildName}()`,
+      ...readable.map((read) => renderRead(read)),
+    ].join(" + ");
     lines.push(
       `function ${buildName}() { return ${base}; }`,
       `const ${valueName} = ${folded};`,
-      `export { ${valueName} as ${exportName} };`,
+      valueName === exportName
+        ? `export { ${valueName} };`
+        : `export { ${valueName} as ${exportName} };`,
     );
   }
   return lines;
@@ -567,6 +1115,7 @@ function renderCallableOwnStateExports(
         usedBindings,
         "__ownStateExport",
         (binding) => `function ${binding}() { return ${stateName} + ${index + 1}; }`,
+        authoredBindingName(module, exportName),
       ),
     );
   }
@@ -591,6 +1140,7 @@ function renderObjectExports(
       usedBindings,
       "__objectExport",
       (binding) => `const ${binding} = { v: ${base} };`,
+      authoredBindingName(module, exportName),
     ),
   );
 }
@@ -619,13 +1169,28 @@ function renderSynthesizedExport(
   usedBindings: Set<string>,
   localPrefix: string,
   define: (binding: string) => string,
+  authoredLocal?: string,
 ): string[] {
+  if (authoredLocal !== undefined) {
+    usedBindings.add(authoredLocal);
+    return authoredLocal === exportName
+      ? [`export ${define(authoredLocal)}`]
+      : [define(authoredLocal), `export { ${authoredLocal} as ${exportName} };`];
+  }
   if (isDeclarableName(exportName) && !usedBindings.has(exportName)) {
     usedBindings.add(exportName);
     return [`export ${define(exportName)}`];
   }
   const local = freshBinding(usedBindings, localPrefix);
   return [define(local), `export { ${local} as ${exportName} };`];
+}
+
+function authoredBindingName(module: ModuleModel, exportName: string): string | undefined {
+  if (module.format !== "esm") {
+    return undefined;
+  }
+  return module.authoredExportBindings?.find((binding) => binding.exportedName === exportName)
+    ?.localName;
 }
 
 /// A fresh module-local binding with the given prefix that does not collide with any already-used
@@ -659,6 +1224,9 @@ function renderEsmExports(
     return [];
   }
   switch (formOf(firstName)) {
+    case "global-read-value":
+    case "global-read-carrier":
+      throw new Error("global-read export reached the ordinary ESM export renderer");
     case "fresh-object":
       return renderObjectExports(module, requestedExports, usedBindings);
     case "callable-own-state":
@@ -699,22 +1267,34 @@ function renderNumericFoldExports(
           usedBindings,
           "__callableExport",
           (binding) => `function ${binding}() { return ${base}; }`,
+          authoredBindingName(module, exportName),
         ),
       );
       continue;
     }
 
-    let bindingName: string;
-    do {
-      bindingName = `__orderExport${candidateIndex}`;
-      candidateIndex += 1;
-    } while (usedBindings.has(bindingName));
+    const authoredLocal = authoredBindingName(module, exportName);
+    if (authoredLocal !== undefined) {
+      usedBindings.add(authoredLocal);
+      lines.push(
+        `const ${authoredLocal} = ${renderFold(base, readable)};`,
+        authoredLocal === exportName
+          ? `export { ${authoredLocal} };`
+          : `export { ${authoredLocal} as ${exportName} };`,
+      );
+    } else {
+      let bindingName: string;
+      do {
+        bindingName = `__orderExport${candidateIndex}`;
+        candidateIndex += 1;
+      } while (usedBindings.has(bindingName));
 
-    usedBindings.add(bindingName);
-    lines.push(
-      `const ${bindingName} = ${renderFold(base, readable)};`,
-      `export { ${bindingName} as ${exportName} };`,
-    );
+      usedBindings.add(bindingName);
+      lines.push(
+        `const ${bindingName} = ${renderFold(base, readable)};`,
+        `export { ${bindingName} as ${exportName} };`,
+      );
+    }
   }
 
   return lines;

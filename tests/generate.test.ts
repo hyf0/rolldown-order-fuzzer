@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vite-plus/test";
 
 import {
+  ANALYZER_GLOBAL_READ_FORMS,
   deriveCoverageTags,
   deriveRegistrationSequence,
   generateCase,
@@ -17,11 +18,22 @@ import {
 } from "../src/generate.ts";
 import { analyzeProgram } from "../src/analyzed-program.ts";
 import type { ModuleModel, ProgramModel } from "../src/model.ts";
-import { buildConfigOf, metadataPureModuleIds, packagesOf, programChunking } from "../src/model.ts";
+import {
+  buildConfigOf,
+  DEFAULT_TREESHAKE_CONFIG,
+  metadataPureModuleIds,
+  packagesOf,
+  programChunking,
+} from "../src/model.ts";
 import { ProgramFacts } from "../src/program-facts.ts";
 import { renderProgram } from "../src/render.ts";
 import { SeededRng } from "../src/rng.ts";
 import { validateProgramModel } from "../src/validate-model.ts";
+
+function isOrdinaryDirectedReleaseGapLane(seed: number): boolean {
+  const lane = Math.abs(seed) % 32;
+  return lane === 0 || lane === 1 || lane === 6;
+}
 
 describe("generateCase", () => {
   test("replays the same seed and size byte-for-byte", () => {
@@ -37,6 +49,41 @@ describe("generateCase", () => {
     const serialized = new Set(cases.map((generated) => JSON.stringify(generated)));
 
     expect(serialized.size).toBeGreaterThanOrEqual(10);
+  });
+
+  test("reserves only analyzer and authored-name lanes in the ordinary campaign", () => {
+    const analyzerForms = new Set<string>();
+    for (let cycle = 0; cycle < ANALYZER_GLOBAL_READ_FORMS.length; cycle += 1) {
+      const generated = generateCase(cycle * 32, 4);
+      const reader = generated.program.modules.find((module) => module.id === "gr-reader");
+      const patch = generated.program.modules.find((module) => module.id === "gr-patch");
+      expect(reader?.format === "esm" ? reader.globalReadExport?.read.kind : undefined).toBe(
+        "fixture-function-call",
+      );
+      expect(patch?.format === "esm" ? patch.fixtureFunctionAssignment : undefined).toBeDefined();
+      expect(patch?.format === "esm" ? patch.builtinAssignments : undefined).toBeUndefined();
+      if (reader?.format === "esm" && reader.globalReadExport !== undefined) {
+        analyzerForms.add(reader.globalReadExport.form);
+      }
+    }
+    expect([...analyzerForms].sort()).toEqual([...ANALYZER_GLOBAL_READ_FORMS].sort());
+    expect(analyzerForms.has("array-length-call-effect")).toBe(false);
+
+    for (let lane = 0; lane < 32; lane += 1) {
+      const generated = generateCase(lane, 4);
+      const hasDirectedOperation = generated.program.modules.some(
+        (module) =>
+          module.format === "esm" &&
+          (module.fixtureFunctionAssignment !== undefined ||
+            (module.authoredExportBindings?.length ?? 0) > 0 ||
+            (module.builtinAssignments?.length ?? 0) > 0 ||
+            (module.instanceofAssignments?.length ?? 0) > 0 ||
+            (module.optimizerExpressionAssignments?.length ?? 0) > 0),
+      );
+      expect(hasDirectedOperation, `lane ${String(lane)}`).toBe(
+        isOrdinaryDirectedReleaseGapLane(lane),
+      );
+    }
   });
 
   test("makes every mixed-module template reachable from ordinary seeds", () => {
@@ -144,6 +191,9 @@ describe("generateCase", () => {
     let namespaceRead = 0;
     let barrelReexport = 0;
     for (let seed = 0; seed < 3_000; seed += 1) {
+      if (isOrdinaryDirectedReleaseGapLane(seed)) {
+        continue;
+      }
       const generated = generateCase(seed, 8);
       if (generated.template !== "random-mixed") {
         continue;
@@ -292,6 +342,9 @@ describe("generateCase", () => {
     let multiEdge = 0;
     let sawStaticPlusDynamic = false;
     for (let seed = 0; seed < 3_000; seed += 1) {
+      if (isOrdinaryDirectedReleaseGapLane(seed)) {
+        continue;
+      }
       const generated = generateCase(seed, 8);
       if (generated.template !== "random-mixed") {
         continue;
@@ -407,8 +460,8 @@ describe("generateCase", () => {
   });
 
   test("bounds size-driven variation and rejects invalid generation inputs", () => {
-    const small = generateCase(42, 1);
-    const large = generateCase(42, 8);
+    const small = generateCase(42, 1, "mixed");
+    const large = generateCase(42, 8, "mixed");
 
     expect(small.size).toBe(1);
     expect(large.size).toBe(8);
@@ -651,6 +704,8 @@ describe("organic chunking axis (wave 6)", () => {
         expect(chunkingTags).toEqual(["chunking:organic"]);
       } else if (chunking.kind === "manual") {
         expect(chunkingTags).toEqual(["chunking:explicit"]);
+      } else if (chunking.kind === "disabled") {
+        expect(chunkingTags).toEqual(["chunking:disabled"]);
       } else {
         expect(chunkingTags).toEqual(["chunking:default"]);
       }
@@ -689,6 +744,11 @@ describe("organic chunking axis (wave 6)", () => {
     let randomMixed = 0;
     let organic = 0;
     for (let seed = 0; seed < 600; seed += 1) {
+      // The three deterministic release-gap lanes are intentionally fixed, directed programs rather
+      // than outputs of the random-mixed generator whose organic-chunking density this test measures.
+      if (isOrdinaryDirectedReleaseGapLane(seed)) {
+        continue;
+      }
       const generated = generateCase(seed, 24);
       if (generated.template !== "random-mixed") {
         continue;
@@ -712,7 +772,7 @@ describe("organic chunking axis (wave 6)", () => {
     let randomMixed = 0;
     let entriesAware = 0;
     let stableCycleRecipes = 0;
-    for (let seed = 0; seed < 6_000; seed += 1) {
+    for (let seed = 0; seed < 24_000; seed += 1) {
       const generated = generateCase(seed, 12);
       if (generated.template !== "random-mixed") {
         continue;
@@ -1267,6 +1327,8 @@ describe("cross-chunk init-cycle shape (W14-10, rolldown #9887)", () => {
         strictExecutionOrder: true,
         outputFormat: "esm",
         minify: false,
+        profilerNames: false,
+        treeshake: DEFAULT_TREESHAKE_CONFIG,
       },
     } satisfies ProgramModel;
     const analyzed = analyzeProgram(acyclicProbe);

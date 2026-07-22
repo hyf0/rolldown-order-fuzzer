@@ -3,6 +3,12 @@ import type { EventRecord, EventValue, ModuleFormat, ScheduleOperation } from ".
 export const EXECUTION_PROTOCOL_VERSION = 1 as const;
 export const MAX_EXECUTION_EVENTS = 512 as const;
 
+// Fixture modules deliberately monkey-patch constant-evaluated globals. Capture every mutable
+// validator used after fixture execution so constructor and numeric witnesses cannot poison event
+// collection.
+const intrinsicArrayIsArray = Array.isArray;
+const intrinsicNumberIsFinite = Number.isFinite;
+
 /// The kind category a schedule marker records. Both entry-evaluation operations (`import-entry` and
 /// `require-entry`) collapse to `entry`, and a dynamic trigger is `dynamic`. The collapse is what
 /// keeps markers symmetric across source and bundle: a CJS source entry runs with `require` while its
@@ -236,7 +242,7 @@ function requireEventValue(value: unknown): EventValue {
     value === null ||
     typeof value === "string" ||
     typeof value === "boolean" ||
-    (typeof value === "number" && Number.isFinite(value))
+    (typeof value === "number" && intrinsicNumberIsFinite(value))
   ) {
     return value;
   }
@@ -252,14 +258,14 @@ function requireVersion(value: unknown, description: string): void {
 }
 
 function requireRecord(value: unknown, description: string): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (typeof value !== "object" || value === null || intrinsicArrayIsArray(value)) {
     throw new Error(`Expected ${description} to be an object`);
   }
   return value as Record<string, unknown>;
 }
 
 function requireArray(value: unknown, description: string): readonly unknown[] {
-  if (!Array.isArray(value)) {
+  if (!intrinsicArrayIsArray(value)) {
     throw new Error(`Expected ${description} to be an array`);
   }
   return value;

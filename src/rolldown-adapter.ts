@@ -725,7 +725,13 @@ async function buildWithChild(
     preserveEntrySignatures: build.preserveEntrySignatures,
     includeDependenciesRecursively: build.includeDependenciesRecursively,
     lazyBarrel: build.lazyBarrel,
+    treeshake: {
+      propertyReadSideEffects: build.treeshake.propertyReadSideEffects,
+      propertyWriteSideEffects: build.treeshake.propertyWriteSideEffects,
+      manualPureFunctions: build.treeshake.manualPureFunctions,
+    },
     onDemandWrapping,
+    disableCodeSplitting: chunking.kind === "disabled",
     bundleDirectory,
     manualChunkGroups: (chunking.kind === "manual" ? chunking.groups : []).map((group) => ({
       name: group.name,
@@ -763,6 +769,7 @@ async function buildWithChild(
       // W12: the minify axis comes from the persisted BuildConfig (default false); the SOURCE run is
       // unaffected, so only the bundle build changes.
       minify: build.minify,
+      profilerNames: build.profilerNames,
     },
   };
   await writeFile(requestPath, `${JSON.stringify(request)}\n`);

@@ -9,6 +9,21 @@ import {
   type RenderedExportForm,
 } from "./analyzed-program.ts";
 import { canonicalReadFlags, readKey } from "./capture-analysis.ts";
+import {
+  GLOBAL_READ_BUILTIN_KINDS,
+  globalReadBuiltinSpec,
+  type GlobalReadBuiltinKind,
+} from "./global-read-builtins.ts";
+import {
+  GLOBAL_READ_INSTANCEOF_KINDS,
+  globalReadInstanceofSpec,
+  type GlobalReadInstanceofKind,
+} from "./global-read-instanceof.ts";
+import {
+  GLOBAL_READ_OPTIMIZER_EXPRESSION_KINDS,
+  globalReadOptimizerExpressionSpec,
+  type GlobalReadOptimizerExpressionKind,
+} from "./global-read-optimizer-expressions.ts";
 import type {
   CjsRequireOperation,
   DependencyOperation,
@@ -17,7 +32,17 @@ import type {
   ProgramModel,
   ValueRead,
 } from "./model.ts";
-import { metadataPureModuleIds, packagesOf, programChunking } from "./model.ts";
+import {
+  buildConfigOf,
+  GLOBAL_READ_FORMS as GLOBAL_READ_FORM_VALUES,
+  globalReadCarrierMemberPath,
+  globalReadFixedHelperName,
+  isManualPureSideEffectForm,
+  MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL,
+  metadataPureModuleIds,
+  packagesOf,
+  programChunking,
+} from "./model.ts";
 import type { ProgramFacts } from "./program-facts.ts";
 import { builtinModules } from "node:module";
 
@@ -112,11 +137,12 @@ export const INVALID_MODULE_BINDING_IDENTIFIERS = new Set([
 
 const RENDERER_RESERVED_BINDING_IDENTIFIERS = new Set(["globalThis"]);
 
-/// How a local binding may be read by an event's `reads`: an ESM value import is read directly (no
-/// member), a CJS readable require reads exactly one member (a length-1 `memberPath`), an ESM namespace
+/// How a local binding may be read by an event's `reads`: an ESM value import is read directly or
+/// through its declared value-member path, a CJS readable require reads exactly one member (a
+/// length-1 `memberPath`), and an ESM namespace
 /// import reads any of a declared set of member PATHS (`localName.p0.p1…`, keyed by `memberPathKey`).
 type ReadableBinding =
-  | { readonly kind: "direct" }
+  | { readonly kind: "direct"; readonly memberPath?: readonly string[] }
   | { readonly kind: "require"; readonly member: string }
   | { readonly kind: "namespace"; readonly memberPaths: ReadonlySet<string> }
   // An `objectRef` value import: an object reference, never a folded number. It may only be referenced
@@ -152,6 +178,10 @@ export function validateProgramModel(analyzed: AnalyzedProgram): readonly string
     dynamicRegistrationOwners,
     errors,
   );
+  validateFixtureFunctionObservations(program, errors);
+  validateArrayLengthCallEffectObservations(program, errors);
+  validateManualPureSideEffectObservations(program, errors);
+  validateOptimizerEffectObservations(program, errors);
 
   validateCycleValueFlow(program.modules, facts, errors);
   validateSynchronousCycleFormats(facts, errors);
@@ -496,6 +526,9 @@ function consumptionMismatchMessage(
   if (consumption.shape === "reference") {
     return `${at}: captured by identity (objectRef) ${by} but the definer renders a ${noun}; an objectRef must reach a fresh-object export`;
   }
+  if (consumption.shape === "numeric-member") {
+    return `${at}: property-read and folded numerically ${by} but the definer renders a ${noun}; a value-member read must reach a typed class carrier`;
+  }
   return `${at}: folded numerically ${by} but the definer renders a ${noun}; folding a ${noun} (a function's source text or an object) is unsound`;
 }
 
@@ -643,6 +676,7 @@ function validateModules(
     validateInferredPureModule(module, moduleIndex, errors);
     validateCallableOwnStateModule(module, moduleIndex, errors);
     validateObjectExportModule(module, moduleIndex, errors);
+    validateGlobalReadSyntax(module, moduleIndex, plan, errors);
 
     const localBindings = new Set<string>();
     // Each readable binding maps its local name to how it may be read: an ESM value-import (read
@@ -730,6 +764,14 @@ function validateModules(
       }
     }
 
+    validateAuthoredExportBindings(
+      module,
+      moduleIndex,
+      localBindings,
+      explicitReexportNames,
+      plan.requestedNames.get(module.id) ?? [],
+      errors,
+    );
     validateLocalExports(module, moduleIndex, explicitReexportNames, errors);
 
     const readFlags = canonicalReadFlags(module.dependencies);
@@ -747,6 +789,632 @@ function validateModules(
 
       validateEventReads(event, eventPath, readableBindings, readFlags, objectOrigins, errors);
     }
+  }
+}
+
+const GLOBAL_READ_FORM_SET: ReadonlySet<string> = new Set(GLOBAL_READ_FORM_VALUES);
+
+const GLOBAL_READ_BUILTIN_KIND_SET: ReadonlySet<string> = new Set(GLOBAL_READ_BUILTIN_KINDS);
+const GLOBAL_READ_INSTANCEOF_KIND_SET: ReadonlySet<string> = new Set(GLOBAL_READ_INSTANCEOF_KINDS);
+const GLOBAL_READ_OPTIMIZER_EXPRESSION_KIND_SET: ReadonlySet<string> = new Set(
+  GLOBAL_READ_OPTIMIZER_EXPRESSION_KINDS,
+);
+const MAX_BUILTIN_STRING_LENGTH = 1_000_000;
+
+function validateGlobalReadSyntax(
+  module: ModuleModel,
+  moduleIndex: number,
+  plan: ExportDemandPlan,
+  errors: string[],
+): void {
+  if (module.format !== "esm") {
+    return;
+  }
+  const fixtureFunctionAssignment = module.fixtureFunctionAssignment;
+  if (fixtureFunctionAssignment !== undefined) {
+    const path = `modules[${moduleIndex}].fixtureFunctionAssignment`;
+    if (!Number.isFinite(fixtureFunctionAssignment.value)) {
+      errors.push(`${path}.value: expected a finite number`);
+    }
+  }
+  const builtinAssignments = module.builtinAssignments ?? [];
+  for (const [assignmentIndex, assignment] of builtinAssignments.entries()) {
+    const path = `modules[${moduleIndex}].builtinAssignments[${assignmentIndex}]`;
+    if (!GLOBAL_READ_BUILTIN_KIND_SET.has(assignment.kind)) {
+      errors.push(`${path}.kind: unknown builtin assignment ${quote(String(assignment.kind))}`);
+    }
+    if (!Number.isFinite(assignment.value)) {
+      errors.push(`${path}.value: expected a finite number`);
+    } else if (GLOBAL_READ_BUILTIN_KIND_SET.has(assignment.kind)) {
+      const spec = globalReadBuiltinSpec(assignment.kind);
+      if (
+        spec.projection === "boolean-to-number" &&
+        assignment.value !== 0 &&
+        assignment.value !== 1
+      ) {
+        errors.push(`${path}.value: a boolean projection must be 0 or 1`);
+      }
+      if (
+        spec.projection === "length" &&
+        (!Number.isInteger(assignment.value) ||
+          assignment.value < 0 ||
+          assignment.value > MAX_BUILTIN_STRING_LENGTH)
+      ) {
+        errors.push(
+          `${path}.value: a string-length projection must be an integer from 0 through ${String(MAX_BUILTIN_STRING_LENGTH)}`,
+        );
+      }
+    }
+    const counterGlobal: unknown = (assignment as { readonly counterGlobal?: unknown })
+      .counterGlobal;
+    if (
+      counterGlobal !== undefined &&
+      (typeof counterGlobal !== "string" ||
+        counterGlobal.length === 0 ||
+        counterGlobal.includes("\0"))
+    ) {
+      errors.push(`${path}.counterGlobal: expected a non-empty global property name without NUL`);
+    }
+  }
+  const instanceofAssignments = module.instanceofAssignments ?? [];
+  for (const [assignmentIndex, assignment] of instanceofAssignments.entries()) {
+    const path = `modules[${moduleIndex}].instanceofAssignments[${assignmentIndex}]`;
+    if (!GLOBAL_READ_INSTANCEOF_KIND_SET.has(assignment.kind)) {
+      errors.push(`${path}.kind: unknown instanceof assignment ${quote(String(assignment.kind))}`);
+    }
+  }
+  const optimizerExpressionAssignments = module.optimizerExpressionAssignments ?? [];
+  for (const [assignmentIndex, assignment] of optimizerExpressionAssignments.entries()) {
+    const path = `modules[${moduleIndex}].optimizerExpressionAssignments[${assignmentIndex}]`;
+    if (!GLOBAL_READ_OPTIMIZER_EXPRESSION_KIND_SET.has(assignment.kind)) {
+      errors.push(
+        `${path}.kind: unknown optimizer expression assignment ${quote(String(assignment.kind))}`,
+      );
+    }
+  }
+  const globalAssignmentCount =
+    (fixtureFunctionAssignment === undefined ? 0 : 1) +
+    builtinAssignments.length +
+    instanceofAssignments.length +
+    optimizerExpressionAssignments.length;
+  if (globalAssignmentCount > 1) {
+    errors.push(
+      `modules[${moduleIndex}]: a global patch module may carry at most one fixture-function, builtin, instanceof, or optimizer-expression assignment, received ${String(globalAssignmentCount)}`,
+    );
+  }
+
+  const read = module.globalReadExport;
+  if (read === undefined) {
+    return;
+  }
+  const path = `modules[${moduleIndex}].globalReadExport`;
+  let allowsEqualValues = read.form === "array-length-call-effect";
+  const requestedNames = plan.requestedNames.get(module.id) ?? [];
+  if (!GLOBAL_READ_FORM_SET.has(read.form)) {
+    errors.push(`${path}.form: unknown global-read form ${quote(String(read.form))}`);
+  }
+  if (read.form === "array-length-call-effect" && read.read.kind !== "math-hypot") {
+    errors.push(`${path}.read.kind: array-length-call-effect requires math-hypot`);
+  }
+  if (
+    read.form === "array-length-call-effect" &&
+    (read.expectedValue !== 1 || read.fallbackValue !== 1)
+  ) {
+    errors.push(`${path}: array-length-call-effect expectedValue/fallbackValue must be 1/1`);
+  }
+  if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(read.exportedName)) {
+    errors.push(`${path}.exportedName: invalid JavaScript identifier ${quote(read.exportedName)}`);
+  }
+  const readKind: unknown = (read.read as { readonly kind?: unknown }).kind;
+  if (isManualPureSideEffectForm(read.form)) {
+    const name = (read.read as { readonly name?: unknown }).name;
+    if (readKind !== "global-property" || name !== MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL) {
+      errors.push(
+        `${path}.read: ${read.form} requires the fixture-owned ${quote(MANUAL_PURE_SIDE_EFFECT_COUNTER_GLOBAL)} global-property counter`,
+      );
+    }
+    if (read.expectedValue !== 1 || read.fallbackValue !== 0) {
+      errors.push(`${path}: ${read.form} expectedValue/fallbackValue must be 1/0`);
+    }
+  }
+  if (readKind === "fixture-function-call") {
+    // Its assignment value is checked against the reader at the program level, where the patch module
+    // is available. There is no author-supplied executable text on this closed read kind.
+  } else if (readKind === "global-property") {
+    const name = (read.read as { readonly name?: unknown }).name;
+    if (typeof name !== "string" || name.length === 0 || name.includes("\0")) {
+      errors.push(`${path}.read.name: expected a non-empty global property name without NUL`);
+    }
+  } else if (readKind === "instanceof") {
+    const expression = (read.read as { readonly expression?: unknown }).expression;
+    if (typeof expression !== "string" || !GLOBAL_READ_INSTANCEOF_KIND_SET.has(expression)) {
+      errors.push(
+        `${path}.read.expression: unknown instanceof expression ${quote(String(expression))}`,
+      );
+    } else {
+      const spec = globalReadInstanceofSpec(expression as GlobalReadInstanceofKind);
+      if (read.expectedValue !== spec.patchedValue || read.fallbackValue !== spec.fallbackValue) {
+        errors.push(
+          `${path}: instanceof expectedValue/fallbackValue must be ${String(spec.patchedValue)}/${String(spec.fallbackValue)}`,
+        );
+      }
+    }
+  } else if (readKind === "optimizer-expression") {
+    const expression = (read.read as { readonly expression?: unknown }).expression;
+    if (
+      typeof expression !== "string" ||
+      !GLOBAL_READ_OPTIMIZER_EXPRESSION_KIND_SET.has(expression)
+    ) {
+      errors.push(
+        `${path}.read.expression: unknown optimizer expression ${quote(String(expression))}`,
+      );
+    } else {
+      const spec = globalReadOptimizerExpressionSpec(
+        expression as GlobalReadOptimizerExpressionKind,
+      );
+      allowsEqualValues = spec.family === "effect-preservation";
+      if (read.expectedValue !== spec.patchedValue || read.fallbackValue !== spec.fallbackValue) {
+        errors.push(
+          `${path}: optimizer-expression expectedValue/fallbackValue must be ${String(spec.patchedValue)}/${String(spec.fallbackValue)}`,
+        );
+      }
+    }
+    if (read.form !== "direct") {
+      errors.push(`${path}.form: optimizer-expression reads require the direct form`);
+    }
+  } else if (typeof readKind !== "string" || !GLOBAL_READ_BUILTIN_KIND_SET.has(readKind)) {
+    errors.push(`${path}.read.kind: unknown global read ${quote(String(readKind))}`);
+  } else {
+    const spec = globalReadBuiltinSpec(readKind as GlobalReadBuiltinKind);
+    const expectedFallback = read.form === "array-length-call-effect" ? 1 : spec.fallbackValue;
+    if (read.fallbackValue !== expectedFallback) {
+      errors.push(
+        `${path}.fallbackValue: expected ${String(expectedFallback)} for ${quote(readKind)}, received ${String(read.fallbackValue)}`,
+      );
+    }
+  }
+  if (!Number.isFinite(read.expectedValue) || !Number.isFinite(read.fallbackValue)) {
+    errors.push(`${path}: expectedValue and fallbackValue must be finite numbers`);
+  } else if (read.expectedValue === read.fallbackValue && !allowsEqualValues) {
+    errors.push(`${path}: expectedValue and fallbackValue must differ so reordering is observable`);
+  }
+  if (module.events.length !== 0) {
+    errors.push(`${path}: the global-reading module must be event-free; observe it downstream`);
+  }
+  if (module.dependencies.length !== 0) {
+    errors.push(`${path}: the global-reading module must have no dependencies`);
+  }
+  if (
+    fixtureFunctionAssignment !== undefined ||
+    builtinAssignments.length !== 0 ||
+    instanceofAssignments.length !== 0 ||
+    optimizerExpressionAssignments.length !== 0
+  ) {
+    errors.push(`${path}: the reader cannot also assign the global it observes`);
+  }
+  if (
+    module.inferredPure === true ||
+    module.callableOwnState === true ||
+    module.objectExport === true ||
+    module.hasTopLevelAwait === true
+  ) {
+    errors.push(`${path}: global-read syntax cannot combine with another export/init template`);
+  }
+  if (!requestedNames.includes(read.exportedName)) {
+    errors.push(
+      `${path}.exportedName: the global-read export ${quote(read.exportedName)} must be requested`,
+    );
+  }
+  if (read.form === "class-static-field-default-export" && read.exportedName !== "default") {
+    errors.push(
+      `${path}.exportedName: class-static-field-default-export must supply the default export`,
+    );
+  }
+  const fixedHelperName = globalReadFixedHelperName(read.form);
+  if (
+    fixedHelperName !== undefined &&
+    module.authoredExportBindings?.some((binding) => binding.localName === fixedHelperName)
+  ) {
+    errors.push(
+      `${path}.form: ${read.form} reserves the module-local helper binding ${quote(fixedHelperName)}`,
+    );
+  }
+  const carrierMemberPath = globalReadCarrierMemberPath(read.form);
+  const classCarrier = carrierMemberPath !== undefined;
+  for (const consumption of plan.consumptions) {
+    if (
+      consumption.purpose !== "live" ||
+      consumption.supply.status !== "supplied" ||
+      consumption.supply.origin.moduleId !== module.id ||
+      consumption.supply.origin.exportName !== read.exportedName
+    ) {
+      continue;
+    }
+    const expectedShape = classCarrier ? "numeric-member" : "numeric";
+    if (consumption.shape !== expectedShape) {
+      errors.push(
+        `${path}: this global-read form requires ${expectedShape} observation, received ${consumption.shape}`,
+      );
+      continue;
+    }
+    if (classCarrier) {
+      const dependency = consumption.dependency;
+      if (
+        dependency.kind !== "esm-value-import" ||
+        memberPathKey(dependency.readMemberPath) !== memberPathKey(carrierMemberPath)
+      ) {
+        errors.push(
+          `${path}: a class global-read export must be observed through an ESM value import with readMemberPath ${JSON.stringify(carrierMemberPath)}`,
+        );
+      }
+    } else if (
+      consumption.dependency.kind === "esm-value-import" &&
+      consumption.dependency.readMemberPath !== undefined
+    ) {
+      errors.push(`${path}: a numeric global-read export cannot be observed through a member path`);
+    }
+  }
+}
+
+/// A fixture-function read must have one typed producer. Keeping the assignment and read correlated at
+/// the model layer prevents a hand-written or shrunk case from silently falling back on both source and
+/// bundle and ceasing to test order.
+function validateFixtureFunctionObservations(program: ProgramModel, errors: string[]): void {
+  const patchModules = program.modules.filter(
+    (module) => module.format === "esm" && module.fixtureFunctionAssignment !== undefined,
+  );
+  for (const [readerIndex, readerModule] of program.modules.entries()) {
+    if (
+      readerModule.format !== "esm" ||
+      readerModule.globalReadExport?.read.kind !== "fixture-function-call"
+    ) {
+      continue;
+    }
+    const path = `modules[${readerIndex}].globalReadExport`;
+    if (patchModules.length !== 1) {
+      errors.push(
+        `${path}: fixture-function-call requires exactly one fixtureFunctionAssignment, received ${String(patchModules.length)}`,
+      );
+      continue;
+    }
+    const patch = patchModules[0];
+    if (patch?.format !== "esm" || patch.fixtureFunctionAssignment === undefined) {
+      continue;
+    }
+    if (patch.fixtureFunctionAssignment.value !== readerModule.globalReadExport.expectedValue) {
+      errors.push(
+        `${path}.expectedValue: expected ${String(patch.fixtureFunctionAssignment.value)} from fixtureFunctionAssignment, received ${String(readerModule.globalReadExport.expectedValue)}`,
+      );
+    }
+  }
+}
+
+/// Declaring `make` pure permits deleting that call but never its eagerly evaluated arguments or the
+/// computed keys used on its result. These fixtures observe only such child effects, so their model is
+/// sound exactly when one reader is paired with the matching manual-pure option.
+function validateManualPureSideEffectObservations(program: ProgramModel, errors: string[]): void {
+  const readers = program.modules.filter(
+    (module) =>
+      module.format === "esm" &&
+      module.globalReadExport !== undefined &&
+      isManualPureSideEffectForm(module.globalReadExport.form),
+  );
+  if (readers.length === 0) {
+    return;
+  }
+  if (readers.length !== 1) {
+    errors.push(
+      `manual-pure side-effect witness requires exactly one reader, received ${String(readers.length)}`,
+    );
+  }
+  if (!buildConfigOf(program).treeshake.manualPureFunctions.includes("make")) {
+    errors.push(
+      'manual-pure side-effect witness requires build.treeshake.manualPureFunctions to include "make"',
+    );
+  }
+}
+
+/// `[call()].length` always exports one, so it is only a semantic witness when the function invocation
+/// has a paired counter reader. Accept equal expected/fallback values only with the complete typed
+/// patch -> expression -> counter observation topology.
+function validateArrayLengthCallEffectObservations(program: ProgramModel, errors: string[]): void {
+  for (const [readerIndex, readerModule] of program.modules.entries()) {
+    if (
+      readerModule.format !== "esm" ||
+      readerModule.globalReadExport?.form !== "array-length-call-effect"
+    ) {
+      continue;
+    }
+    const path = `modules[${readerIndex}].globalReadExport`;
+    const patchModules = program.modules.filter((module) => {
+      if (module.format !== "esm") {
+        return false;
+      }
+      return (
+        module.builtinAssignments?.some((assignment) => assignment.kind === "math-hypot") === true
+      );
+    });
+    if (patchModules.length !== 1) {
+      errors.push(
+        `${path}: array-length-call-effect requires exactly one matching math-hypot patch, received ${String(patchModules.length)}`,
+      );
+      continue;
+    }
+    const patchModule = patchModules[0];
+    if (patchModule?.format !== "esm") {
+      continue;
+    }
+    const counterGlobal = patchModule.builtinAssignments?.find(
+      (assignment) => assignment.kind === "math-hypot",
+    )?.counterGlobal;
+    if (counterGlobal === undefined) {
+      errors.push(
+        `${path}: array-length-call-effect requires its matching patch to carry a counter`,
+      );
+      continue;
+    }
+    const counterReaders = program.modules.filter((module) => {
+      if (module.format !== "esm") {
+        return false;
+      }
+      const counterRead = module.globalReadExport;
+      return (
+        counterRead?.form === "direct" &&
+        counterRead.read.kind === "global-property" &&
+        counterRead.read.name === counterGlobal &&
+        counterRead.expectedValue === 1 &&
+        counterRead.fallbackValue === 0
+      );
+    });
+    if (counterReaders.length !== 1) {
+      errors.push(
+        `${path}: array-length-call-effect requires exactly one direct ${quote(counterGlobal)} counter reader expecting 1, received ${String(counterReaders.length)}`,
+      );
+      continue;
+    }
+    const counterReader = counterReaders[0];
+    if (counterReader?.format !== "esm" || counterReader.globalReadExport === undefined) {
+      continue;
+    }
+    const counterExportedName = counterReader.globalReadExport.exportedName;
+    const hasJointObserver = program.modules.some((observer) => {
+      if (observer.format !== "esm") {
+        return false;
+      }
+      const patchDependencyIndex = observer.dependencies.findIndex(
+        (dependency) =>
+          dependency.kind === "esm-side-effect-import" && dependency.target === patchModule.id,
+      );
+      const readerDependencyIndex = observer.dependencies.findIndex(
+        (dependency) =>
+          dependency.kind === "esm-value-import" &&
+          dependency.target === readerModule.id &&
+          dependency.importedName === readerModule.globalReadExport?.exportedName,
+      );
+      const counterDependencyIndex = observer.dependencies.findIndex(
+        (dependency) =>
+          dependency.kind === "esm-value-import" &&
+          dependency.target === counterReader.id &&
+          dependency.importedName === counterExportedName,
+      );
+      if (
+        patchDependencyIndex < 0 ||
+        readerDependencyIndex < 0 ||
+        counterDependencyIndex < 0 ||
+        patchDependencyIndex >= readerDependencyIndex ||
+        readerDependencyIndex >= counterDependencyIndex
+      ) {
+        return false;
+      }
+      const readerDependency = observer.dependencies[readerDependencyIndex];
+      const counterDependency = observer.dependencies[counterDependencyIndex];
+      if (
+        readerDependency?.kind !== "esm-value-import" ||
+        counterDependency?.kind !== "esm-value-import"
+      ) {
+        return false;
+      }
+      return observer.events.some((event) => {
+        const reads = event.reads ?? [];
+        return (
+          reads.some(
+            (read) => read.binding === readerDependency.localName && read.memberPath === undefined,
+          ) &&
+          reads.some(
+            (read) => read.binding === counterDependency.localName && read.memberPath === undefined,
+          )
+        );
+      });
+    });
+    if (!hasJointObserver) {
+      errors.push(
+        `${path}: array-length-call-effect requires a downstream event that imports its patch, expression, and ${quote(counterGlobal)} counter in that order and reads both values`,
+      );
+    }
+  }
+}
+
+/// Equal-value optimizer expressions are only observable through their paired counter. Require the
+/// complete typed topology before accepting one: exactly one matching patch, exactly one direct reader
+/// of the spec's fixed counter, and one downstream event that imports patch, expression, then counter
+/// in that order and reads both values. This prevents a hand-written or over-shrunk model from using the
+/// effect-preservation family to bypass the ordinary distinct-value invariant without a live witness.
+function validateOptimizerEffectObservations(program: ProgramModel, errors: string[]): void {
+  for (const [readerIndex, readerModule] of program.modules.entries()) {
+    if (
+      readerModule.format !== "esm" ||
+      readerModule.globalReadExport?.read.kind !== "optimizer-expression"
+    ) {
+      continue;
+    }
+    const expression: unknown = readerModule.globalReadExport.read.expression;
+    if (
+      typeof expression !== "string" ||
+      !GLOBAL_READ_OPTIMIZER_EXPRESSION_KIND_SET.has(expression)
+    ) {
+      continue;
+    }
+    const expressionKind = expression as GlobalReadOptimizerExpressionKind;
+    const spec = globalReadOptimizerExpressionSpec(expressionKind);
+    if (spec.family !== "effect-preservation") {
+      continue;
+    }
+
+    const path = `modules[${readerIndex}].globalReadExport`;
+    const patchModules = program.modules.filter(
+      (module) =>
+        module.format === "esm" &&
+        module.optimizerExpressionAssignments?.some(
+          (assignment) => assignment.kind === expressionKind,
+        ),
+    );
+    if (patchModules.length !== 1) {
+      errors.push(
+        `${path}: effect-preservation expression ${quote(expressionKind)} requires exactly one matching optimizer-expression patch, received ${String(patchModules.length)}`,
+      );
+    }
+
+    const counterReaders = program.modules.filter((module) => {
+      if (module.format !== "esm") {
+        return false;
+      }
+      const counterRead = module.globalReadExport;
+      return (
+        counterRead?.form === "direct" &&
+        counterRead.read.kind === "global-property" &&
+        counterRead.read.name === spec.counterGlobal &&
+        counterRead.expectedValue === spec.expectedCount &&
+        counterRead.fallbackValue === 0
+      );
+    });
+    if (counterReaders.length !== 1) {
+      errors.push(
+        `${path}: effect-preservation expression ${quote(expressionKind)} requires exactly one direct ${quote(spec.counterGlobal)} counter reader expecting ${String(spec.expectedCount)}, received ${String(counterReaders.length)}`,
+      );
+      continue;
+    }
+
+    const patchModule = patchModules[0];
+    const counterReader = counterReaders[0];
+    if (
+      patchModule === undefined ||
+      counterReader?.format !== "esm" ||
+      counterReader.globalReadExport === undefined
+    ) {
+      continue;
+    }
+    const counterExportedName = counterReader.globalReadExport.exportedName;
+    const hasJointObserver = program.modules.some((observer) => {
+      if (observer.format !== "esm") {
+        return false;
+      }
+      const patchDependencyIndex = observer.dependencies.findIndex(
+        (dependency) =>
+          dependency.kind === "esm-side-effect-import" && dependency.target === patchModule.id,
+      );
+      const readerDependencyIndex = observer.dependencies.findIndex(
+        (dependency) =>
+          dependency.kind === "esm-value-import" &&
+          dependency.target === readerModule.id &&
+          dependency.importedName === readerModule.globalReadExport?.exportedName,
+      );
+      const counterDependencyIndex = observer.dependencies.findIndex(
+        (dependency) =>
+          dependency.kind === "esm-value-import" &&
+          dependency.target === counterReader.id &&
+          dependency.importedName === counterExportedName,
+      );
+      if (
+        patchDependencyIndex < 0 ||
+        readerDependencyIndex < 0 ||
+        counterDependencyIndex < 0 ||
+        patchDependencyIndex >= readerDependencyIndex ||
+        readerDependencyIndex >= counterDependencyIndex
+      ) {
+        return false;
+      }
+      const readerDependency = observer.dependencies[readerDependencyIndex];
+      const counterDependency = observer.dependencies[counterDependencyIndex];
+      if (
+        readerDependency?.kind !== "esm-value-import" ||
+        counterDependency?.kind !== "esm-value-import"
+      ) {
+        return false;
+      }
+      return observer.events.some((event) => {
+        const reads = event.reads ?? [];
+        return (
+          reads.some(
+            (read) => read.binding === readerDependency.localName && read.memberPath === undefined,
+          ) &&
+          reads.some(
+            (read) => read.binding === counterDependency.localName && read.memberPath === undefined,
+          )
+        );
+      });
+    });
+    if (!hasJointObserver) {
+      errors.push(
+        `${path}: effect-preservation expression ${quote(expressionKind)} requires a downstream event that imports its patch, expression, and ${quote(spec.counterGlobal)} counter in that order and reads both values`,
+      );
+    }
+  }
+}
+
+/// Exact author-selected locals for synthesized ESM exports. They share the module's lexical binding
+/// namespace with imports, must name an export the demand plan will actually render, and cannot target a
+/// name supplied by an explicit re-export. Keeping this typed and demand-bound reaches real deconfliction
+/// collisions without admitting arbitrary source snippets into the model.
+function validateAuthoredExportBindings(
+  module: ModuleModel,
+  moduleIndex: number,
+  localBindings: Set<string>,
+  explicitReexportNames: ReadonlySet<string>,
+  requestedNames: readonly string[],
+  errors: string[],
+): void {
+  if (module.format !== "esm") {
+    return;
+  }
+  const bindings = module.authoredExportBindings;
+  if (bindings === undefined) {
+    return;
+  }
+  const path = `modules[${moduleIndex}].authoredExportBindings`;
+  const requested = new Set(requestedNames);
+  const seenExports = new Set<string>();
+  for (const [bindingIndex, binding] of bindings.entries()) {
+    const bindingPath = `${path}[${bindingIndex}]`;
+    if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(binding.exportedName)) {
+      errors.push(
+        `${bindingPath}.exportedName: invalid JavaScript identifier ${quote(binding.exportedName)}`,
+      );
+    }
+    if (seenExports.has(binding.exportedName)) {
+      errors.push(
+        `${bindingPath}.exportedName: duplicate authored export binding for ${quote(binding.exportedName)}`,
+      );
+    }
+    seenExports.add(binding.exportedName);
+    if (!requested.has(binding.exportedName)) {
+      errors.push(
+        `${bindingPath}.exportedName: ${quote(binding.exportedName)} is not requested and would not be rendered`,
+      );
+    }
+    if (explicitReexportNames.has(binding.exportedName)) {
+      errors.push(
+        `${bindingPath}.exportedName: ${quote(binding.exportedName)} is supplied by a re-export, not a synthesized local export`,
+      );
+    }
+    if (
+      module.dependencies.some((dependency) => dependency.kind === "esm-reexport-star") &&
+      !module.localExports?.includes(binding.exportedName)
+    ) {
+      errors.push(
+        `${bindingPath}.exportedName: a synthesized export beside export-star must also be declared in localExports`,
+      );
+    }
+    validateLocalBinding(binding.localName, `${bindingPath}.localName`, localBindings, errors);
   }
 }
 
@@ -840,6 +1508,17 @@ function validateValueOnlyEsmContract(
   }
   if (module.events.length > 0) {
     errors.push(`${path}: ${descriptor} module must not emit events; ${noEventsReason}`);
+  }
+  if (
+    module.format === "esm" &&
+    (module.fixtureFunctionAssignment !== undefined ||
+      (module.builtinAssignments?.length ?? 0) > 0 ||
+      (module.instanceofAssignments?.length ?? 0) > 0 ||
+      (module.optimizerExpressionAssignments?.length ?? 0) > 0 ||
+      (module.globalReadExport !== undefined &&
+        isManualPureSideEffectForm(module.globalReadExport.form)))
+  ) {
+    errors.push(`${path}: ${descriptor} module cannot mutate a global or prototype binding`);
   }
   for (const [dependencyIndex, dependency] of module.dependencies.entries()) {
     if (!SIDE_EFFECT_FREE_DEPENDENCY_KINDS.has(dependency.kind)) {
@@ -1046,7 +1725,7 @@ function validateEventReads(
         `${readPath}.alias: an aliased read is only valid on a namespace import binding, ${quote(read.binding)} is a ${binding.kind} binding`,
       );
     }
-    const expectedPath = binding.kind === "require" ? [binding.member] : [];
+    const expectedPath = binding.kind === "require" ? [binding.member] : (binding.memberPath ?? []);
     if (memberPathKey(read.memberPath) !== memberPathKey(expectedPath)) {
       errors.push(
         `${readPath}.memberPath: expected ${expectedPath.length === 0 ? "no member" : quote(expectedPath.join("."))} for binding ${quote(read.binding)}, received ${(read.memberPath?.length ?? 0) === 0 ? "no member" : quote((read.memberPath ?? []).join("."))}`,
@@ -1128,10 +1807,35 @@ function validateDependencyBinding(
     if (dependency.objectRef === true && dependency.call === true) {
       errors.push(`${path}: an import cannot be both objectRef and a call import`);
     }
+    if (dependency.objectRef === true && dependency.readMemberPath !== undefined) {
+      errors.push(`${path}: an objectRef import cannot also carry a numeric readMemberPath`);
+    }
+    if (dependency.call === true && dependency.readMemberPath !== undefined) {
+      errors.push(`${path}: a call import cannot also carry a numeric readMemberPath`);
+    }
+    if (dependency.readMemberPath !== undefined) {
+      if (dependency.readMemberPath.length === 0) {
+        errors.push(`${path}.readMemberPath: a value-member path must be non-empty`);
+      }
+      for (const [componentIndex, component] of dependency.readMemberPath.entries()) {
+        if (!JAVASCRIPT_IDENTIFIER_PATTERN.test(component)) {
+          errors.push(
+            `${path}.readMemberPath[${componentIndex}]: invalid JavaScript identifier ${quote(component)}`,
+          );
+        }
+      }
+    }
     if (validateLocalBinding(dependency.localName, `${path}.localName`, localBindings, errors)) {
       readableBindings.set(
         dependency.localName,
-        dependency.objectRef === true ? { kind: "object" } : { kind: "direct" },
+        dependency.objectRef === true
+          ? { kind: "object" }
+          : {
+              kind: "direct",
+              ...(dependency.readMemberPath === undefined
+                ? {}
+                : { memberPath: dependency.readMemberPath }),
+            },
       );
     }
     return;
@@ -1465,7 +2169,46 @@ function validateBuildConfig(program: ProgramModel, errors: string[]): void {
   if (minify !== undefined && typeof minify !== "boolean") {
     errors.push("build.minify: must be a boolean");
   }
-  // The chunking discriminant must be one of the three modes. An unknown `kind` (e.g. `{ kind: "bogus" }`)
+  const profilerNames: unknown = (build as { readonly profilerNames?: unknown }).profilerNames;
+  if (profilerNames !== undefined && typeof profilerNames !== "boolean") {
+    errors.push("build.profilerNames: must be a boolean");
+  }
+  const treeshake: unknown = (build as { readonly treeshake?: unknown }).treeshake;
+  if (treeshake !== undefined) {
+    if (typeof treeshake !== "object" || treeshake === null || Array.isArray(treeshake)) {
+      errors.push("build.treeshake: must be an object");
+    } else {
+      const config = treeshake as Record<string, unknown>;
+      if (config.propertyReadSideEffects !== false && config.propertyReadSideEffects !== "always") {
+        errors.push('build.treeshake.propertyReadSideEffects: must be false or "always"');
+      }
+      if (
+        config.propertyWriteSideEffects !== false &&
+        config.propertyWriteSideEffects !== "always"
+      ) {
+        errors.push('build.treeshake.propertyWriteSideEffects: must be false or "always"');
+      }
+      if (!Array.isArray(config.manualPureFunctions)) {
+        errors.push("build.treeshake.manualPureFunctions: must be an array");
+      } else {
+        const seen = new Set<string>();
+        for (const [index, name] of config.manualPureFunctions.entries()) {
+          if (typeof name !== "string" || name.length === 0) {
+            errors.push(
+              `build.treeshake.manualPureFunctions[${index}]: must be a non-empty string`,
+            );
+          } else if (seen.has(name)) {
+            errors.push(
+              `build.treeshake.manualPureFunctions[${index}]: duplicate name ${quote(name)}`,
+            );
+          } else {
+            seen.add(name);
+          }
+        }
+      }
+    }
+  }
+  // The chunking discriminant must be one of the four modes. An unknown `kind` (e.g. `{ kind: "bogus" }`)
   // otherwise falls through `programChunking` / the adapter switch to AUTOMATIC silently — a crafted or
   // shrunk model would build a different chunking than it names. Reject it here so the union stays sound.
   const chunking: unknown = build.chunking;
@@ -1473,9 +2216,20 @@ function validateBuildConfig(program: ProgramModel, errors: string[]): void {
     typeof chunking === "object" && chunking !== null && "kind" in chunking
       ? (chunking as { readonly kind: unknown }).kind
       : undefined;
-  if (chunkingKind !== "automatic" && chunkingKind !== "manual" && chunkingKind !== "organic") {
+  if (
+    chunkingKind !== "disabled" &&
+    chunkingKind !== "automatic" &&
+    chunkingKind !== "manual" &&
+    chunkingKind !== "organic"
+  ) {
     errors.push(
-      `build.chunking: unknown chunking kind ${quote(String(chunkingKind))} (expected automatic, manual, or organic)`,
+      `build.chunking: unknown chunking kind ${quote(String(chunkingKind))} (expected disabled, automatic, manual, or organic)`,
+    );
+  } else if (chunkingKind === "disabled" && program.entries.length !== 1) {
+    // Rolldown's public no-splitting path accepts exactly one input. Keep multi-entry disabled models
+    // out of the corpus: they can only produce an option error, never a differential-order witness.
+    errors.push(
+      `build.chunking: disabled code splitting requires exactly one entry, received ${String(program.entries.length)}`,
     );
   }
   // FW-A output-format axis: only `esm` / `cjs` are rolled (both keep code splitting). A `cjs` output

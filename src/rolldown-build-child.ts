@@ -14,7 +14,8 @@ import type {
 
 import type { NormalizedError } from "./protocol.ts";
 
-export const BUILD_CHILD_PROTOCOL_VERSION = 1 as const;
+// v2 adds disabled code splitting, profiler helper names, and the persisted treeshake subset.
+export const BUILD_CHILD_PROTOCOL_VERSION = 2 as const;
 
 /// Written by the child to its phase-marker file once the Rolldown package has imported cleanly, so
 /// the parent can tell a build-time crash (a genuine Rolldown panic) from a crash during package
@@ -75,7 +76,18 @@ export interface BuildChildRequest {
   readonly includeDependenciesRecursively: boolean;
   /// `experimental.lazyBarrel` — rolldown's barrel-pruning optimization (W14a axis).
   readonly lazyBarrel: boolean;
+  /// The serializable subset of `InputOptions.treeshake` exercised by the order fuzzer. Keep these
+  /// explicit in the child protocol so a replay builds with the exact analysis assumptions recorded
+  /// by its `BuildConfig` rather than silently falling back to the installed Rolldown's defaults.
+  readonly treeshake: {
+    readonly propertyReadSideEffects: false | "always";
+    readonly propertyWriteSideEffects: false | "always";
+    readonly manualPureFunctions: readonly string[];
+  };
   readonly onDemandWrapping: boolean;
+  /// True for the distinct no-splitting build path (`output.codeSplitting: false`). This cannot be
+  /// reconstructed from empty group arrays because those mean automatic splitting (`true`).
+  readonly disableCodeSplitting: boolean;
   readonly bundleDirectory: string;
   readonly manualChunkGroups: readonly BuildChildManualChunkGroup[];
   readonly organicChunkGroups: readonly BuildChildOrganicChunkGroup[];
@@ -93,6 +105,9 @@ export interface BuildChildRequest {
     /// the value/event channel is minify-invariant, and the oracle normalizes error-message identifiers
     /// so a minified crash's identity still compares. Passed straight to rolldown via `createOutputOptions`.
     readonly minify: boolean;
+    /// Select readable internal runtime helper names (`__esm` / `__commonJS`) instead of their compact
+    /// variants. Kept explicit so collision cases can choose the exact helper family they target.
+    readonly profilerNames: boolean;
   };
 }
 
@@ -155,6 +170,27 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     "build includeDependenciesRecursively",
   );
   const lazyBarrel = requireBoolean(request.lazyBarrel, "build lazyBarrel");
+  const treeshakeRecord = requireRecord(request.treeshake, "build treeshake");
+  const treeshake = {
+    propertyReadSideEffects: requirePropertySideEffects(
+      treeshakeRecord.propertyReadSideEffects,
+      "build treeshake.propertyReadSideEffects",
+    ),
+    propertyWriteSideEffects: requirePropertySideEffects(
+      treeshakeRecord.propertyWriteSideEffects,
+      "build treeshake.propertyWriteSideEffects",
+    ),
+    manualPureFunctions: requireArray(
+      treeshakeRecord.manualPureFunctions,
+      "build treeshake.manualPureFunctions",
+    ).map((value, index) =>
+      requireNonEmptyString(value, `build treeshake.manualPureFunctions[${index}]`),
+    ),
+  };
+  const disableCodeSplitting = requireBoolean(
+    request.disableCodeSplitting,
+    "build disableCodeSplitting",
+  );
   const bundleDirectory = requireAbsolutePath(request.bundleDirectory, "build bundleDirectory");
   const manualChunkGroups = requireArray(request.manualChunkGroups, "build manualChunkGroups").map(
     (value, index): BuildChildManualChunkGroup => {
@@ -241,6 +277,7 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     throw new TypeError("build output constants are invalid");
   }
   const minify = requireBoolean(output.minify, "build output.minify");
+  const profilerNames = requireBoolean(output.profilerNames, "build output.profilerNames");
   const strictExecutionOrder = requireBoolean(
     output.strictExecutionOrder,
     "build output.strictExecutionOrder",
@@ -255,7 +292,9 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
     preserveEntrySignatures,
     includeDependenciesRecursively,
     lazyBarrel,
+    treeshake,
     onDemandWrapping: request.onDemandWrapping,
+    disableCodeSplitting,
     bundleDirectory,
     manualChunkGroups,
     organicChunkGroups,
@@ -267,6 +306,7 @@ export function parseBuildChildRequest(value: unknown): BuildChildRequest {
       assetFileNames: requireNonEmptyString(output.assetFileNames, "build output.assetFileNames"),
       cleanDir: false,
       minify,
+      profilerNames,
     },
   };
 }
@@ -353,18 +393,7 @@ export async function runBuildChild(
   let output: RolldownOutput | undefined;
   let buildError: unknown;
   try {
-    const inputOptions: InputOptions = {
-      input: request.input,
-      preserveEntrySignatures: request.preserveEntrySignatures,
-      experimental: {
-        onDemandWrapping: request.onDemandWrapping,
-        lazyBarrel: request.lazyBarrel,
-        // Entries-aware groups pair with chunkOptimization; enable it only when a group asks for it,
-        // so every other case's build is unchanged.
-        ...(usesChunkOptimization(request) ? { chunkOptimization: true } : {}),
-      },
-    };
-    bundle = await (loaded.rolldown as RolldownFunction)(inputOptions);
+    bundle = await (loaded.rolldown as RolldownFunction)(createInputOptions(request));
     output = await bundle.write(createOutputOptions(request));
   } catch (error) {
     buildError = error;
@@ -391,6 +420,27 @@ export async function runBuildChild(
     version: BUILD_CHILD_PROTOCOL_VERSION,
     status: "ok",
     outputFiles: output.output.map((file) => serializeOutputFile(file, request.bundleDirectory)),
+  };
+}
+
+/// Build Rolldown input options from the validated child request. Keeping this mapping as a pure,
+/// exported seam lets protocol tests prove that every persisted input-side axis reaches Rolldown.
+export function createInputOptions(request: BuildChildRequest): InputOptions {
+  return {
+    input: request.input,
+    preserveEntrySignatures: request.preserveEntrySignatures,
+    treeshake: {
+      propertyReadSideEffects: request.treeshake.propertyReadSideEffects,
+      propertyWriteSideEffects: request.treeshake.propertyWriteSideEffects,
+      manualPureFunctions: request.treeshake.manualPureFunctions,
+    },
+    experimental: {
+      onDemandWrapping: request.onDemandWrapping,
+      lazyBarrel: request.lazyBarrel,
+      // Entries-aware groups pair with chunkOptimization; enable it only when a group asks for it,
+      // so every other case's build is unchanged.
+      ...(usesChunkOptimization(request) ? { chunkOptimization: true } : {}),
+    },
   };
 }
 
@@ -427,24 +477,28 @@ function parseOutputFile(
 }
 
 /// Build rolldown output options, mapping the request's chunking config onto `codeSplitting`.
-/// Organic groups (size/share thresholds — rolldown decides composition) take precedence when
+/// Disabled splitting maps directly to `false`. Otherwise organic groups (size/share thresholds —
+/// rolldown decides composition) take precedence when
 /// present; otherwise manual groups (exact module lists) map to an exact-match `test`; otherwise the
-/// automatic default (`codeSplitting: true`). The three are the distinct chunking-config modes and
+/// automatic default (`codeSplitting: true`). The four are the distinct chunking-config modes and
 /// never coexist in one request (validated model-side).
 export function createOutputOptions(request: BuildChildRequest): OutputOptions {
+  const { profilerNames, ...output } = request.output;
   const groups = organicCodeSplitting(request) ?? manualCodeSplitting(request);
   // The GLOBAL `codeSplitting.includeDependenciesRecursively` fallback applies to any group that does
   // not set it per-group; it is meaningless for automatic chunking (`true`), which carries no groups.
   // Manual groups always omit their own value (W14a.1), so this global — resolved from the persisted
   // `BuildConfig` — is the single source of the effective IDR for them (load-bearing for the #9887
   // cross-chunk-cycle shape). Organic groups may still set it per-group, overriding this fallback.
-  const codeSplitting =
-    groups === true
+  const codeSplitting = request.disableCodeSplitting
+    ? false
+    : groups === true
       ? true
       : { ...groups, includeDependenciesRecursively: request.includeDependenciesRecursively };
   return {
     dir: request.bundleDirectory,
-    ...request.output,
+    ...output,
+    generatedCode: { profilerNames },
     codeSplitting,
   };
 }
@@ -631,6 +685,13 @@ function requireString(value: unknown, label: string): string {
 function requireBoolean(value: unknown, label: string): boolean {
   if (typeof value !== "boolean") {
     throw new TypeError(`${label} must be a boolean`);
+  }
+  return value;
+}
+
+function requirePropertySideEffects(value: unknown, label: string): false | "always" {
+  if (value !== false && value !== "always") {
+    throw new TypeError(`${label} must be false or "always"`);
   }
   return value;
 }

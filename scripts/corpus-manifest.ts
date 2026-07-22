@@ -98,6 +98,16 @@ interface CaseManifest {
   readonly template: MixedTemplateName;
   readonly files: readonly { readonly path: string; readonly sha256: string }[];
   readonly codeSplitting: unknown;
+  /// A durable fingerprint for a deterministic release-gap replacement. The first migration from an
+  /// ordinary random case is explainable, but once the fingerprint exists any later model, render, or
+  /// build-manifest drift must fail `explain-delta` instead of being waved through as "directed".
+  readonly directedReleaseGap?: {
+    readonly kind: "global-read" | "authored-name";
+    readonly modelSha256: string;
+    /// One-shot migration marker: old global-read fingerprints used monkey-patched built-ins. Once a
+    /// corpus member carries this marker, later model drift is rejected again.
+    readonly witness?: "fixture-function-v1";
+  };
   /// The persisted BuildConfig scalar axes a case builds with (W14a). Chunking is `codeSplitting`;
   /// these are the rest — the rolled `includeDependenciesRecursively` / `lazyBarrel` plus the fixed
   /// `preserveEntrySignatures` / `strictExecutionOrder` — so the golden now guards the structural axes
@@ -115,6 +125,15 @@ interface CaseManifest {
     /// case's buildAxes is byte-identical to the pre-W12 golden and the delta is self-explaining: a
     /// changed case either gained `minify: true` (the minify axis) or a format / package / new operation.
     readonly minify?: true;
+    /// Readable generated helper names. Omitted for the default false value.
+    readonly profilerNames?: true;
+    /// Non-default treeshake analysis settings. Default (`"always"` / `"always"` / `[]`) is omitted
+    /// so existing ordinary cases remain byte-identical in the golden.
+    readonly treeshake?: {
+      readonly propertyReadSideEffects?: false;
+      readonly propertyWriteSideEffects?: false;
+      readonly manualPureFunctions?: readonly string[];
+    };
   };
   /// The resolved packages (W14b) — present ONLY when the case carries any, so a package-free case's
   /// manifest entry is byte-identical to the pre-package golden AND the golden delta is
@@ -135,6 +154,8 @@ interface CaseManifest {
 function effectiveCodeSplitting(program: ProgramModel): unknown {
   const chunking = programChunking(program);
   switch (chunking.kind) {
+    case "disabled":
+      return false;
     case "organic":
       return { organicGroups: chunking.groups };
     case "manual":
@@ -156,7 +177,7 @@ function caseKey(group: string, seed: number): string {
   return `${group}:${seed}`;
 }
 
-/// Whether a program carries a W14b- or W14c-new operation surface, the labeled golden delta:
+/// Whether a program carries a source-model operation introduced after the current golden baseline:
 /// - W14b: a source-less local re-export (the camunda M4 op) or declared local exports beside a star
 ///   (the vben index shape);
 /// - W14c: an `export * as ns from` namespace re-export (M7), or a NESTED namespace member read
@@ -173,6 +194,17 @@ function carriesNewOperation(program: ProgramModel): boolean {
             dependency.readMembers.some((path) => path.length >= 2)),
       ) ||
       (module.format === "esm" && (module.localExports?.length ?? 0) > 0) ||
+      (module.format === "esm" &&
+        ((module.authoredExportBindings?.length ?? 0) > 0 ||
+          module.fixtureFunctionAssignment !== undefined ||
+          (module.builtinAssignments?.length ?? 0) > 0 ||
+          (module.instanceofAssignments?.length ?? 0) > 0 ||
+          (module.optimizerExpressionAssignments?.length ?? 0) > 0 ||
+          module.globalReadExport !== undefined)) ||
+      module.dependencies.some(
+        (dependency) =>
+          dependency.kind === "esm-value-import" && dependency.readMemberPath !== undefined,
+      ) ||
       // FW-B deliverable 3: an exotic read FORM (a computed intermediate hop `a[imp].y`, or an aliased
       // namespace read `const x = ns; x.foo`) is a new-operation surface too.
       module.events.some((event) =>
@@ -181,6 +213,101 @@ function carriesNewOperation(program: ProgramModel): boolean {
         ),
       ),
   );
+}
+
+/// The deterministic release-gap lanes replace old random cases wholesale, so their source,
+/// schedule, and chunking all legitimately change together. Recognize only the exact typed three- or
+/// four-module builders; this keeps `explain-delta` strict for every ordinary case while allowing the
+/// deliberate replacement to be attributed to the #10322/#10336 coverage surface. The fourth
+/// module is the independent counter reader used by effect-preservation cases. A model fingerprint
+/// makes that wholesale exemption one-shot: later drift of an established directed case fails.
+function directedReleaseGapIdentity(
+  program: ProgramModel,
+): CaseManifest["directedReleaseGap"] | undefined {
+  const ids = program.modules.map((module) => module.id).sort();
+  const oneEntrySchedule = program.entries.length === 1 && program.schedule.length === 1;
+  if (!oneEntrySchedule) {
+    return undefined;
+  }
+  if (
+    canonicalJson(ids) === canonicalJson(["gr-observer", "gr-patch", "gr-reader"]) ||
+    canonicalJson(ids) === canonicalJson(["gr-call-count", "gr-observer", "gr-patch", "gr-reader"])
+  ) {
+    const reader = program.modules.find((module) => module.id === "gr-reader");
+    const patch = program.modules.find((module) => module.id === "gr-patch");
+    const isGlobalReadProgram =
+      reader?.format === "esm" &&
+      reader.globalReadExport !== undefined &&
+      patch?.format === "esm" &&
+      (patch.fixtureFunctionAssignment === undefined ? 0 : 1) +
+        (patch.builtinAssignments?.length ?? 0) +
+        (patch.instanceofAssignments?.length ?? 0) +
+        (patch.optimizerExpressionAssignments?.length ?? 0) ===
+        1;
+    return isGlobalReadProgram
+      ? {
+          kind: "global-read",
+          modelSha256: sha256(canonicalJson(program)),
+          ...(patch.fixtureFunctionAssignment === undefined
+            ? {}
+            : { witness: "fixture-function-v1" as const }),
+        }
+      : undefined;
+  }
+  if (
+    ids.length === 3 &&
+    ids.includes("nc-entry") &&
+    ids.includes("nc-user-binding") &&
+    (ids.includes("nc-late-esm") || ids.includes("nc-late-cjs"))
+  ) {
+    const bindingModule = program.modules.find((module) => module.id === "nc-user-binding");
+    const isAuthoredNameProgram =
+      bindingModule?.format === "esm" &&
+      bindingModule.globalReadExport?.form === "direct" &&
+      bindingModule.authoredExportBindings?.length === 1 &&
+      programChunking(program).kind === "disabled";
+    return isAuthoredNameProgram
+      ? { kind: "authored-name", modelSha256: sha256(canonicalJson(program)) }
+      : undefined;
+  }
+  return undefined;
+}
+
+function isDirectedReleaseGapProgram(program: ProgramModel): boolean {
+  return directedReleaseGapIdentity(program) !== undefined;
+}
+
+function isReservedReleaseGapLane(seed: number): boolean {
+  const lane = Math.abs(seed) % 32;
+  return lane === 0 || lane === 1 || lane === 6;
+}
+
+function isExplainedTemplateMembershipShift(
+  group: string,
+  removed: readonly CaseManifest[],
+  added: readonly CaseManifest[],
+): boolean {
+  if (!group.startsWith("template:") || removed.length === 0 || removed.length !== added.length) {
+    return false;
+  }
+  if (group === "template:random-mixed") {
+    const addsDirectedCases = added.every((entry) => {
+      const program = programsByKey.get(caseKey(entry.group, entry.seed));
+      const identity = program === undefined ? undefined : directedReleaseGapIdentity(program);
+      return (
+        identity !== undefined &&
+        canonicalJson(entry.directedReleaseGap) === canonicalJson(identity)
+      );
+    });
+    return addsDirectedCases;
+  }
+  const addsDirectedCases =
+    removed.every((entry) => isReservedReleaseGapLane(entry.seed)) &&
+    added.every((entry) => {
+      const program = programsByKey.get(caseKey(entry.group, entry.seed));
+      return program !== undefined && !isDirectedReleaseGapProgram(program);
+    });
+  return addsDirectedCases;
 }
 
 interface CodeSplittingGroup {
@@ -269,14 +396,19 @@ function unexplainedCodeSplitting(
 /// change is a package chunk group, and every in-place root-file change is a package specifier update
 /// or a new-operation file — so a codeSplitting/schedule/render drift the old feature-presence check
 /// would have waved through fails here.
-/// A case's buildAxes with the two LAST-DRAWN rolled axes (`outputFormat` FW-A, `minify` W12) stripped,
+/// A case's buildAxes with the LAST-DRAWN rolled axes (`outputFormat`, `minify`, `profilerNames`) stripped,
 /// so the drift check compares only the four pre-axis fields. An `outputFormat` / `minify` difference is
 /// an allowed roll drawn after the enrichment, not a pre-enrichment drift.
 function buildAxesWithoutRolledAxes(caseManifest: CaseManifest): unknown {
   if (caseManifest.buildAxes === undefined) {
     return undefined;
   }
-  const { outputFormat: _outputFormat, minify: _minify, ...rest } = caseManifest.buildAxes;
+  const {
+    outputFormat: _outputFormat,
+    minify: _minify,
+    profilerNames: _profilerNames,
+    ...rest
+  } = caseManifest.buildAxes;
   return rest;
 }
 
@@ -286,6 +418,34 @@ function unexplainedChangeReasons(
   program: ProgramModel | undefined,
 ): string[] {
   const reasons: string[] = [];
+  const directedIdentity = program === undefined ? undefined : directedReleaseGapIdentity(program);
+  if (directedIdentity !== undefined) {
+    if (canonicalJson(after.directedReleaseGap) !== canonicalJson(directedIdentity)) {
+      return ["directed release-gap fingerprint does not match the generated model"];
+    }
+    if (before.directedReleaseGap === undefined) {
+      // This is the one allowed wholesale replacement: an old ordinary corpus member becomes the exact
+      // typed directed case whose full model is fingerprinted above.
+      return reasons;
+    }
+    if (
+      before.directedReleaseGap.kind === "global-read" &&
+      before.directedReleaseGap.witness === undefined &&
+      directedIdentity.kind === "global-read" &&
+      directedIdentity.witness === "fixture-function-v1"
+    ) {
+      // One intentional semantic migration: analyzer cases stop monkey-patching standard built-ins.
+      return reasons;
+    }
+    return [
+      canonicalJson(before.directedReleaseGap) === canonicalJson(after.directedReleaseGap)
+        ? "directed release-gap case drifted after its model fingerprint was established"
+        : "directed release-gap model fingerprint changed",
+    ];
+  }
+  if (before.directedReleaseGap !== undefined || after.directedReleaseGap !== undefined) {
+    reasons.push("directed release-gap marker exists on an unrecognized program shape");
+  }
   const entriesAwareFactorChanged =
     isEntriesAwareChunkCycleConfig(after.codeSplitting) &&
     !isEntriesAwareChunkCycleConfig(before.codeSplitting);
@@ -324,7 +484,8 @@ function unexplainedChangeReasons(
   }
   const outputFormatChanged = before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat;
   const minifyChanged = before.buildAxes?.minify !== after.buildAxes?.minify;
-  const rolledAxisChanged = outputFormatChanged || minifyChanged;
+  const profilerNamesChanged = before.buildAxes?.profilerNames !== after.buildAxes?.profilerNames;
+  const rolledAxisChanged = outputFormatChanged || minifyChanged || profilerNamesChanged;
   const membership = program === undefined ? undefined : packageMembershipOf(program);
   const memberIds = new Set(membership?.keys() ?? []);
   // (2) A codeSplitting change must be only appended package chunk groups, unless the recognized final
@@ -397,6 +558,17 @@ function unexplainedChangeReasons(
           dependency.readMembers.some((path) => path.length >= 2)),
     ) ||
     (module.format === "esm" && (module.localExports?.length ?? 0) > 0) ||
+    (module.format === "esm" &&
+      ((module.authoredExportBindings?.length ?? 0) > 0 ||
+        module.fixtureFunctionAssignment !== undefined ||
+        (module.builtinAssignments?.length ?? 0) > 0 ||
+        (module.instanceofAssignments?.length ?? 0) > 0 ||
+        (module.optimizerExpressionAssignments?.length ?? 0) > 0 ||
+        module.globalReadExport !== undefined)) ||
+    module.dependencies.some(
+      (dependency) =>
+        dependency.kind === "esm-value-import" && dependency.readMemberPath !== undefined,
+    ) ||
     // FW-B deliverable 3: a module whose event reads carry an exotic FORM (computed intermediate hop /
     // aliased namespace) carries a new-operation surface.
     module.events.some((event) =>
@@ -472,6 +644,7 @@ function renderCase(
       .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     const build = buildConfigOf(program);
     const packages = packagesOf(program);
+    const directedReleaseGap = directedReleaseGapIdentity(program);
     return {
       group,
       seed,
@@ -479,6 +652,7 @@ function renderCase(
       template,
       files,
       codeSplitting: effectiveCodeSplitting(program),
+      ...(directedReleaseGap === undefined ? {} : { directedReleaseGap }),
       buildAxes: {
         includeDependenciesRecursively: build.includeDependenciesRecursively,
         lazyBarrel: build.lazyBarrel,
@@ -488,6 +662,24 @@ function renderCase(
         ...(build.outputFormat === "cjs" ? { outputFormat: "cjs" as const } : {}),
         // W12: only a minified case records minify, so un-minified cases stay byte-identical.
         ...(build.minify ? { minify: true as const } : {}),
+        ...(build.profilerNames ? { profilerNames: true as const } : {}),
+        ...(build.treeshake.propertyReadSideEffects === false ||
+        build.treeshake.propertyWriteSideEffects === false ||
+        build.treeshake.manualPureFunctions.length > 0
+          ? {
+              treeshake: {
+                ...(build.treeshake.propertyReadSideEffects === false
+                  ? { propertyReadSideEffects: false as const }
+                  : {}),
+                ...(build.treeshake.propertyWriteSideEffects === false
+                  ? { propertyWriteSideEffects: false as const }
+                  : {}),
+                ...(build.treeshake.manualPureFunctions.length > 0
+                  ? { manualPureFunctions: build.treeshake.manualPureFunctions }
+                  : {}),
+              },
+            }
+          : {}),
       },
       ...(packages.length > 0
         ? {
@@ -712,11 +904,14 @@ function main(argv: readonly string[]): number {
     let changedNewOpOnly = 0;
     let changedAxisOnly = 0;
     let changedEntriesAwareOnly = 0;
+    let changedTemplateMembership = 0;
     const unexplained: string[] = [];
+    const removedEntries: CaseManifest[] = [];
+    const addedEntries: CaseManifest[] = [];
     for (const [key, before] of baselineByKey) {
       const after = currentByKey.get(key);
       if (after === undefined) {
-        unexplained.push(`${key}: REMOVED`);
+        removedEntries.push(before);
         continue;
       }
       if (canonicalJson(before) === canonicalJson(after)) {
@@ -734,7 +929,8 @@ function main(argv: readonly string[]): number {
       // category.
       const rolledAxisChanged =
         before.buildAxes?.outputFormat !== after.buildAxes?.outputFormat ||
-        before.buildAxes?.minify !== after.buildAxes?.minify;
+        before.buildAxes?.minify !== after.buildAxes?.minify ||
+        before.buildAxes?.profilerNames !== after.buildAxes?.profilerNames;
       const entriesAwareFactorChanged =
         isEntriesAwareChunkCycleConfig(after.codeSplitting) &&
         !isEntriesAwareChunkCycleConfig(before.codeSplitting);
@@ -748,9 +944,27 @@ function main(argv: readonly string[]): number {
         changedNewOpOnly += 1;
       }
     }
-    for (const key of currentByKey.keys()) {
+    for (const [key, after] of currentByKey) {
       if (!baselineByKey.has(key)) {
-        unexplained.push(`${key}: ADDED`);
+        addedEntries.push(after);
+      }
+    }
+    const membershipGroups = new Set([
+      ...removedEntries.map((entry) => entry.group),
+      ...addedEntries.map((entry) => entry.group),
+    ]);
+    for (const group of membershipGroups) {
+      const removed = removedEntries.filter((entry) => entry.group === group);
+      const added = addedEntries.filter((entry) => entry.group === group);
+      if (isExplainedTemplateMembershipShift(group, removed, added)) {
+        changedTemplateMembership += removed.length;
+        continue;
+      }
+      for (const entry of removed) {
+        unexplained.push(`${caseKey(entry.group, entry.seed)}: REMOVED`);
+      }
+      for (const entry of added) {
+        unexplained.push(`${caseKey(entry.group, entry.seed)}: ADDED`);
       }
     }
     // "package-free" = the cases carrying NO packages: the byte-identical ones plus the new-op-only
@@ -760,8 +974,9 @@ function main(argv: readonly string[]): number {
     process.stdout.write(
       `explain-delta: ${baselineByKey.size} baseline cases — ${unchanged} byte-identical, ` +
         `${changedWithPackages} changed with packages, ${changedNewOpOnly} changed by a new operation only, ` +
-        `${changedAxisOnly} changed by an output-format/minify axis roll only, ` +
+        `${changedAxisOnly} changed by an output-format/minify/profilerNames axis roll only, ` +
         `${changedEntriesAwareOnly} changed by the entriesAware chunking factor only, ` +
+        `${changedTemplateMembership} template members changed by the release-gap lane policy, ` +
         `${unexplained.length} unexplained ` +
         `(${packageFree} package-free cases)\n`,
     );
