@@ -107,6 +107,10 @@ interface CaseManifest {
     /// One-shot migration marker: old global-read fingerprints used monkey-patched built-ins. Once a
     /// corpus member carries this marker, later model drift is rejected again.
     readonly witness?: "fixture-function-v1";
+    /// One-shot registry migration marker: adding the computed object-key form changed the closed
+    /// global-read form count, so deterministic form selection moved for two fixed corpus seeds. Once
+    /// recorded, any later model drift is rejected again.
+    readonly surface?: "object-computed-key-v1";
   };
   /// The persisted BuildConfig scalar axes a case builds with (W14a). Chunking is `codeSplitting`;
   /// these are the rest — the rolled `includeDependenciesRecursively` / `lazyBarrel` plus the fixed
@@ -248,6 +252,7 @@ function directedReleaseGapIdentity(
       ? {
           kind: "global-read",
           modelSha256: sha256(canonicalJson(program)),
+          surface: "object-computed-key-v1",
           ...(patch.fixtureFunctionAssignment === undefined
             ? {}
             : { witness: "fixture-function-v1" as const }),
@@ -435,6 +440,18 @@ function unexplainedChangeReasons(
       directedIdentity.witness === "fixture-function-v1"
     ) {
       // One intentional semantic migration: analyzer cases stop monkey-patching standard built-ins.
+      return reasons;
+    }
+    if (
+      before.directedReleaseGap.kind === "global-read" &&
+      before.directedReleaseGap.surface === undefined &&
+      directedIdentity.kind === "global-read" &&
+      directedIdentity.surface === "object-computed-key-v1" &&
+      before.directedReleaseGap.witness === directedIdentity.witness
+    ) {
+      // One intentional closed-registry migration: adding one global-read form changes the seeded
+      // selection range. The marker makes this exemption one-shot; the regenerated fingerprint locks
+      // the selected model again.
       return reasons;
     }
     return [

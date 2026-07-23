@@ -25,7 +25,7 @@ targets (harness `scratchpad/9998-prepin`):
 | final-snapshot-42628c18b       | **RED** (`a` leaked)     | GREEN              |
 | automatic chunking @ seo:false | GREEN (isolation intact) | —                  |
 
-The bug is **OPEN everywhere at seo:false** (`#9997` fixed only the strict path), so there is no green
+For this ESM-output shape, the bug is **OPEN everywhere at seo:false** (`#9997` fixed its strict path), so there is no green
 target — a BRACKET-PENDING regression entry (below). The leak is **bidirectional** (loading `a` also
 runs `b`) and — a stronger finding than the issue documents — the MINIMAL trigger is just a PLAIN
 organic group `test:".*"` co-locating disjoint entries at seo:false: no `entriesAware` or
@@ -120,7 +120,7 @@ guard (the historical bug is fixed); tag `mechanism:dead-reexport-hop` at ~4.4% 
   maps `entriesAware`/`entriesAwareMergeThreshold` onto rolldown's `CodeSplittingGroup`.
 - **Acceptance — the fuzzer catches #9998.** `scripts/cross-entry-leak-catch.ts`, 20 seeds: isolation
   RED 20/20 on npm rolldown@1.1.5 AND 20/20 on the final snapshot (signature `reachability-isolation:[le-a]`),
-  seo:true control GREEN — the leak is seo:false-only. Evidence
+  seo:true control GREEN — this ESM-output shape is seo:false-only. Evidence
   `.agents/evidence/9998-cross-entry-leak.json`. Shrink preserves the violated-module signature. No
   green target (bug open everywhere) → BRACKET-PENDING entry `RED-9998` in `regression/index.json` (a
   new `bracketPending` form: the bracket HOLDs when the red reproduces on both targets, and graduates to

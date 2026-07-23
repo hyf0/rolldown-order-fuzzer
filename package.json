@@ -14,6 +14,7 @@
     "entries-aware-cycle-catch": "vp exec node scripts/entries-aware-cycle-catch.ts",
     "seo-false-sanity": "vp exec node scripts/seo-false-sanity.ts",
     "release:order-regressions": "vp exec node scripts/release-order-regressions.ts",
+    "audit:current-target": "vp exec node scripts/current-target-open-reds.ts",
     "regression:redset": "vp exec node scripts/regression-redset.ts",
     "transplant:cell": "vp exec node scripts/transplant-cell.ts",
     "prepare": "vp config"

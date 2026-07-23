@@ -123,7 +123,7 @@ W14c recorded a residual "broader automatic-chunking cross-entry leak". FW-B's a
   deliverable's same-root instruction, it FOLDS into the RED-9998 bracket-pending entry's notes rather
   than a new bracket.
 - **Campaign** (`scripts/broad-cross-entry-leak-catch.ts`, 20 seeds): isolation RED 20/20 on BOTH npm
-  1.1.5 AND the snapshot, seo:true control GREEN. Evidence `.agents/evidence/broad-cross-entry-leak.json`.
+  1.1.5 AND the snapshot, ESM-output seo:true control GREEN. A later current-target audit added one minimal CJS-output seo:true arm of the same root; see [current-target-open-reds](./current-target-open-reds.md). Evidence `.agents/evidence/broad-cross-entry-leak.json`.
 
 ## Deliverable 5 — bracket backlog (RED-4…RED-7)
 

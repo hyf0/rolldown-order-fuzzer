@@ -5,6 +5,7 @@ import {
   deriveCoverageTags,
   deriveRegistrationSequence,
   generateCase,
+  generateCjsOutputEntryFacadeCycleCase,
   generateCrossChunkInitCycleCase,
   generateDynamicWrapKindMergeCase,
   generateEntriesAwareChunkCycleCase,
@@ -1552,6 +1553,49 @@ describe("broader static cross-entry-leak (FW-B deliverable 4, W14c follow-up)",
     const facts = ProgramFacts.from(generated.program.modules);
     expect(facts.reachableAllFrom("le2-a").has("le2-b")).toBe(false);
     expect(facts.reachableAllFrom("le2-b").has("le2-a")).toBe(false);
+  });
+
+  test("keeps one minimal CJS-output strict arm for the same cross-entry leak", () => {
+    const generated = generateStaticCrossEntryLeakCase(0, "cjs-strict");
+    expect(validateProgramModel(generated.analyzed)).toEqual([]);
+    expect(generated.program.modules).toHaveLength(2);
+    expect(generated.program.modules.map((module) => module.format)).toEqual(["cjs", "cjs"]);
+    expect(generated.program.entries).toHaveLength(2);
+    expect(generated.program.schedule).toEqual([
+      { kind: "require-entry", entry: "entry-le3-silent" },
+      { kind: "require-entry", entry: "entry-le3-effect" },
+    ]);
+    expect(buildConfigOf(generated.program)).toMatchObject({
+      strictExecutionOrder: true,
+      outputFormat: "cjs",
+      chunking: { kind: "organic", groups: [{ name: "le3-common" }] },
+    });
+    const facts = ProgramFacts.from(generated.program.modules);
+    expect(facts.reachableAllFrom("le3-effect").has("le3-silent")).toBe(false);
+    expect(facts.reachableAllFrom("le3-silent").has("le3-effect")).toBe(false);
+  });
+});
+
+describe("CJS-output entry-facade cycle", () => {
+  test("keeps one paired two-module fixture for each wrapper lowering arm", () => {
+    for (const variant of ["cjs-target", "esm-target"] as const) {
+      const generated = generateCjsOutputEntryFacadeCycleCase(0, variant);
+      expect(validateProgramModel(generated.analyzed), variant).toEqual([]);
+      expect(generated.program.modules).toHaveLength(2);
+      expect(generated.program.modules[0]?.dependencies).toEqual([
+        { kind: "cjs-require", target: "fc-leaf" },
+      ]);
+      expect(generated.program.modules[1]?.format).toBe(variant === "cjs-target" ? "cjs" : "esm");
+      expect(buildConfigOf(generated.program)).toMatchObject({
+        includeDependenciesRecursively: false,
+        strictExecutionOrder: true,
+        outputFormat: "cjs",
+        chunking: {
+          kind: "manual",
+          groups: [{ name: "fc-entry-group", moduleIds: ["fc-entry"] }],
+        },
+      });
+    }
   });
 });
 

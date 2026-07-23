@@ -1790,17 +1790,59 @@ export function generateCrossEntryLeakCase(seed: number): GeneratedCase {
 ///   co-located by a plain organic group. Loading ONE entry runs the OTHER entry's private module (its
 ///   top-level) — signature `reachability-isolation:[le2-b,le2-pb]`. No dynamic import is required.
 ///
-/// This is the SAME ROOT MECHANISM as #9998 (a co-locating organic group at seo:false runs a
-/// disjoint-reachability entry's top-level, caught by the reachability-isolation oracle) — only the
-/// TRIGGER is broader (static instead of dynamic; a plain group suffices). So it folds into the RED-9998
-/// bracket-pending entry's notes rather than a new bracket (per the deliverable's same-root instruction).
-/// Bug OPEN on both npm rolldown@1.1.5 and the snapshot (#9997 fixed only the strict path). The seed
-/// varies only the cosmetic fold values.
-export function buildStaticCrossEntryLeak(rng: SeededRng): {
+/// This is the SAME ROOT MECHANISM as #9998: a co-locating organic group runs a disjoint-reachability
+/// entry's top-level. The original `esm-relaxed` variant is the five-module static seo:false witness.
+/// The `cjs-strict` variant is the two-entry reduction found by the current-target audit: CJS output
+/// leaks even at seo:true. It reaches a separate output arm without retaining either larger random seed.
+/// Both variants fold into RED-9998 rather than creating another root.
+export type StaticCrossEntryLeakVariant = "esm-relaxed" | "cjs-strict";
+
+export function buildStaticCrossEntryLeak(
+  rng: SeededRng,
+  variant: StaticCrossEntryLeakVariant = "esm-relaxed",
+): {
   readonly program: ProgramModel;
   readonly analyzed: AnalyzedProgram;
 } {
   const aBase = 1 + rng.integer(900_000);
+  if (variant === "cjs-strict") {
+    const program: ProgramModel = {
+      modules: [
+        {
+          id: "le3-effect",
+          format: "cjs",
+          dependencies: [],
+          events: [{ module: "le3-effect", phase: "evaluate", value: aBase }],
+        },
+        { id: "le3-silent", format: "cjs", dependencies: [], events: [] },
+      ],
+      entries: [
+        { name: "entry-le3-effect", moduleId: "le3-effect" },
+        { name: "entry-le3-silent", moduleId: "le3-silent" },
+      ],
+      // Requiring the silent entry first must not execute the mutually unreachable effect entry. The
+      // CJS output currently evaluates the co-located group before the entry facade records the first
+      // schedule marker, exposing the same cross-entry leak even with strict execution order enabled.
+      schedule: [
+        { kind: "require-entry", entry: "entry-le3-silent" },
+        { kind: "require-entry", entry: "entry-le3-effect" },
+      ],
+      build: {
+        chunking: { kind: "organic", groups: [{ name: "le3-common" }] },
+        includeDependenciesRecursively: true,
+        preserveEntrySignatures: "allow-extension",
+        lazyBarrel: false,
+        strictExecutionOrder: true,
+        outputFormat: "cjs",
+        minify: false,
+        profilerNames: false,
+        treeshake: DEFAULT_TREESHAKE_CONFIG,
+      },
+    };
+    deepFreeze(program);
+    return { program, analyzed: analyzeProgram(program) };
+  }
+
   const bBase = 1 + rng.integer(900_000);
   const sharedBase = 1 + rng.integer(900_000);
   const paBase = 1 + rng.integer(900_000);
@@ -1869,9 +1911,14 @@ export function buildStaticCrossEntryLeak(rng: SeededRng): {
 }
 
 /// A generated case for the directed broader-static cross-entry-leak campaign (FW-B deliverable 4).
-/// Tagged `mechanism:cross-entry-leak` (the same root as #9998). The seed varies only cosmetic values.
-export function generateStaticCrossEntryLeakCase(seed: number): GeneratedCase {
-  const { program, analyzed } = buildStaticCrossEntryLeak(new SeededRng(seed));
+/// The relaxed ESM variant carries the existing `mechanism:cross-entry-leak` tag. The strict CJS arm is
+/// identified by its directed case id because the historical structural tag is tied to the seo:false
+/// isolation oracle. The seed varies only cosmetic values.
+export function generateStaticCrossEntryLeakCase(
+  seed: number,
+  variant: StaticCrossEntryLeakVariant = "esm-relaxed",
+): GeneratedCase {
+  const { program, analyzed } = buildStaticCrossEntryLeak(new SeededRng(seed), variant);
   const coverageTags = [...deriveCoverageTags(analyzed)];
   return {
     seed,
@@ -2217,6 +2264,68 @@ export function generateCjsOutputWitnessCase(
     size: program.modules.length,
     template: "random-mixed",
     coverageTags,
+    program,
+    analyzed,
+  };
+}
+
+/// A two-module CJS-output entry-facade cycle. An exact manual group contains the CJS entry but leaves
+/// its required leaf outside at `includeDependenciesRecursively:false`. Rolldown emits an entry facade
+/// and a grouped chunk that import each other, then the group calls the facade-exported wrapper before
+/// the facade installs it. The target format selects the two independent lowering arms:
+/// `require_module_*` for a CJS leaf and `init_module_*` for an ESM leaf.
+export type CjsOutputEntryFacadeCycleVariant = "cjs-target" | "esm-target";
+
+export function buildCjsOutputEntryFacadeCycle(variant: CjsOutputEntryFacadeCycleVariant): {
+  readonly program: ProgramModel;
+  readonly analyzed: AnalyzedProgram;
+} {
+  const program: ProgramModel = {
+    modules: [
+      {
+        id: "fc-entry",
+        format: "cjs",
+        dependencies: [{ kind: "cjs-require", target: "fc-leaf" }],
+        events: [],
+      },
+      {
+        id: "fc-leaf",
+        format: variant === "cjs-target" ? "cjs" : "esm",
+        dependencies: [],
+        events: [],
+      },
+    ],
+    entries: [{ name: "fc-main", moduleId: "fc-entry" }],
+    schedule: [{ kind: "require-entry", entry: "fc-main" }],
+    build: {
+      chunking: {
+        kind: "manual",
+        groups: [{ name: "fc-entry-group", moduleIds: ["fc-entry"] }],
+      },
+      includeDependenciesRecursively: false,
+      preserveEntrySignatures: "allow-extension",
+      lazyBarrel: false,
+      strictExecutionOrder: true,
+      outputFormat: "cjs",
+      minify: false,
+      profilerNames: false,
+      treeshake: DEFAULT_TREESHAKE_CONFIG,
+    },
+  };
+  deepFreeze(program);
+  return { program, analyzed: analyzeProgram(program) };
+}
+
+export function generateCjsOutputEntryFacadeCycleCase(
+  seed: number,
+  variant: CjsOutputEntryFacadeCycleVariant,
+): GeneratedCase {
+  const { program, analyzed } = buildCjsOutputEntryFacadeCycle(variant);
+  return {
+    seed,
+    size: program.modules.length,
+    template: "random-mixed",
+    coverageTags: [...deriveCoverageTags(analyzed)],
     program,
     analyzed,
   };
