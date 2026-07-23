@@ -1,0 +1,23 @@
+.agents/evidence/current-target-open-reds.json
+  s_1524eb9f9fabad::t_8eb6fc958eb54b 1-183
+corpus-manifest.golden.json
+  s_1524eb9f9fabad::t_2b433b73544cf0 36239-36240,36246,36254,37974-37975,37989
+tests/generate.test.ts
+  s_1524eb9f9fabad::t_7312178dac6864 8,1557-1599
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "77f196bd11e6e388c3fab14c612514ee5dce7b31",
+  "prompts": {},
+  "sessions": {
+    "s_1524eb9f9fabad": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f8761-7347-7b70-b3f1-24c54174fc35",
+        "model": "gpt-5.6-sol"
+      },
+      "human_author": "Yunfei He <i.heyunfei@gmail.com>"
+    }
+  }
+}
